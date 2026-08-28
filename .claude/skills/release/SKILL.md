@@ -6,9 +6,9 @@ description: Cut a kglite-visual release — goal-check against the phased plan,
 # Release
 
 > **Nothing has ever been released from this repo, and most of the pipeline
-> this skill describes does not exist yet (2026-08-29).** There is no git
-> history, no remote, no CI, no manifest, no CHANGELOG and no registry
-> presence. **Do not run this skill to "see what happens".** The first release
+> this skill describes does not exist yet (2026-08-29).** Manifests and git
+> history now exist (P1); there is still no remote, no CI, no CHANGELOG and no
+> registry presence. **Do not run this skill to "see what happens".** The first release
 > is preceded by a `phased-plan` that *builds* the pipeline; this file is the
 > procedure that pipeline must satisfy, written down first so the pipeline is
 > built to fit a known-good shape rather than discovered afterwards.
@@ -152,8 +152,11 @@ to the user, up front.)* **(ABSENT — no remote, no PRs.)**
    repeat back is void, and proceeding past it adopts the patch default.
 
    **Then apply it with the bump target — never hand-edit a manifest.**
-   **(ABSENT — no manifests, no bump target, and the version-site count is
-   unknown.)** The count is *established by counting*, not assumed: KGLite
+   **(ABSENT — no bump target.)** Manifests exist as of P1 and the count has
+   been established: **three** sites, enumerated in CLAUDE.md →
+   "Commits & releases". Until the target exists, edit those three and verify
+   with a resolving `cargo metadata`.
+   The count is *established by counting*, not assumed: KGLite
    believed "the version is one line", and the internal dependency
    requirements that `cargo publish` demands turned it into five files and
    broke a release. Whatever target gets built must rewrite every site and
@@ -315,8 +318,9 @@ to the user, up front.)* **(ABSENT — no remote, no PRs.)**
 16. **Prune the dev environment.** Every file accumulation needs a gate
     (`R4`): the cargo target dir (cargo never garbage-collects it — a 503 GB
     one was found in this estate), `node_modules`, the frontend build output,
-    wheel builds, and tool caches. **(ABSENT — no prune target yet; it is an
-    `R4` obligation the moment any of those first writes a file.)** Then leave
+    wheel builds, and tool caches. `make clean-build` deletes the first three;
+    `make gate` reports them against advisory ceilings. **(ABSENT — no wheel
+    build or tool cache exists yet to prune.)** Then leave
     the working tree in the canonical debug/dev state, not with the release
     build installed.
 

@@ -1,0 +1,38 @@
+[package]
+name = "kglite-visual-core"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
+
+[dependencies]
+# The engine. `version` + `path` together: cargo builds from the sibling
+# checkout, and the requirement string is what a publish would carry.
+#
+# `=0.16.13` is EXACT on purpose (D11). kglite is pre-1.0 and ships documented
+# breaking changes in patch releases, so a caret range would let a routine
+# `cargo update` swap the engine under us. Moving this floor means reading
+# kglite's CHANGELOG and re-greping every declaration of the old number
+# (CLAUDE.md → "Commits & releases", R16). This is the primary declaration of
+# the kglite floor; the enumeration of the rest is in CLAUDE.md.
+#
+# crates.io status, checked 2026-08-29 against the registry API (not the
+# README): kglite IS published — 99 versions, newest and default `0.16.13`,
+# crate not yanked. The path dep is therefore a *development* convenience
+# (edit-and-rebuild against the sibling checkout), not a necessity; dropping
+# `path` before a publish is a one-line change.
+#
+# The path is relative to THIS manifest: crates/kglite-visual-core/../../..
+# lands in the estate root (`Rust/`), where `KGLite/` sits beside this repo.
+kglite = { version = "=0.16.13", path = "../../../KGLite/crates/kglite" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27.0"

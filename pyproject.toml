@@ -1,0 +1,44 @@
+[build-system]
+requires = ["maturin>=1.14.1,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "kglite-visual"
+description = "Interactive WebGL visualization for .kgl knowledge graphs"
+# No `readme` key: there is no README.md yet, and a `readme` pointing at a
+# missing file fails the build rather than degrading. Add both together.
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    {name = "Kristian dF Kollsgård", email = "kkollsg@gmail.com"},
+]
+keywords = ["graph", "knowledge-graph", "visualization", "webgl", "kglite"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+# No required runtime dependencies: the server, the engine and the frontend
+# assets are all inside the compiled extension.
+dependencies = []
+# NOT a version site. maturin reads the version from the Rust crate, so this
+# file has nothing to bump — the enumeration in CLAUDE.md counts three sites,
+# and this deliberately is not one of them.
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/kkollsga/kglite-visual"
+Repository = "https://github.com/kkollsga/kglite-visual"
+
+[tool.maturin]
+manifest-path = "crates/kglite-visual-py/Cargo.toml"
+# Overrides maturin's default (which would derive the name from the crate's
+# `[lib] name`). `python/kglite_visual/__init__.py` imports `._native`.
+module-name = "kglite_visual._native"
+# `extension-module` is enabled here rather than as a Cargo default so plain
+# `cargo test` can still link the crate.
+features = ["python-extension"]
+python-source = "python"

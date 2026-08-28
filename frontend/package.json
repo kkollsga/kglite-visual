@@ -1,0 +1,18 @@
+{
+  "name": "kglite-visual-frontend",
+  "private": true,
+  "type": "module",
+  "description": "Built to static assets and embedded into the Rust binary by rust-embed. Never published to npm, and deliberately carries no `version` field — an unpublished package with a version string is a fourth place this project's version could drift from the three that matter (CLAUDE.md, Commits & releases). Every dependency is pinned EXACT, no caret: the renderer is pre-stable, and it shares version numbers with a non-free package family whose name differs by one scope, so a floating range is an API risk and a licence risk at once. scripts/check_bans.py names and enforces the ban; it also scans this file, so the banned name cannot be written here.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cosmos.gl/graph": "3.4.1"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
+  }
+}

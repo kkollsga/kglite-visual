@@ -9,10 +9,10 @@ Make the comments in a measured scope **true and lean**: delete what carries
 no information, compress the rest to what it carries, fix comments the code
 contradicts (`R17`), and never touch what the tooling reads (`R18`).
 
-> **This repo has no code (2026-08-29), so this skill has nothing to run on
-> yet.** It is installed now because the failure it repairs is *accumulated*,
-> and the cheapest time to have the rule is before the first comment is
-> written. The steady state is `R17`'s same-change duty (CLAUDE.md → "Code
+> **The tree is young (P1 landed 2026-08-29: three crates and a frontend
+> skeleton), so a full run here would measure almost nothing.** The skill was
+> installed before the first comment was written because the failure it repairs
+> is *accumulated*. The steady state is `R17`'s same-change duty (CLAUDE.md → "Code
 > health"): a change that falsifies a nearby comment corrects it in the same
 > change, and a change through commented code applies the information test to
 > what it touches. **This skill is for the residue, and a heavy residue is
@@ -85,11 +85,21 @@ function.
 
 **What reads our comments (`R18`) — hands off, or handle deliberately:**
 
-> **Nothing. This enumeration is empty as of 2026-08-29, and empty is a
-> maintained state, not a missing one.** `R18` says a *missing* reader list
-> stops the run; an explicitly-empty one that is dated does not. This repo has
-> no lint-allowance checker, no comment-suppressed lint in force, no generated
-> header, no published type stubs and no docstring rendered as `--help`.
+> **One reader, added 2026-08-29 with P1.** `R18` says a *missing* reader list
+> stops the run; this one is maintained. There is still no lint-allowance
+> checker, no comment-suppressed lint in force and no docstring rendered as
+> `--help`.
+>
+> - **`ts-rs` mirrors `///` doc comments into generated TypeScript.** Every
+>   `///` on a `#[derive(TS)]` type or field in
+>   `crates/kglite-visual-core/src/messages.rs` is copied verbatim into a
+>   TSDoc block in `frontend/src/generated/*.ts`. Editing or deleting one
+>   changes a generated file, and `make check-generated-ts` fails until the
+>   regeneration is staged — so a comment cleanup there is a code change, not
+>   a comment change. Regenerate with `cargo test -p kglite-visual-core` in
+>   the same commit; never hand-edit the `.ts` (its header says so).
+>   This is the **published-contract mirror** shape described below, and the
+>   published artifact is the frontend's compile-time contract.
 >
 > **Add a reader here in the same change that adds the reader.** The shapes to
 > expect, each of which cost someone in this estate:

@@ -1,0 +1,44 @@
+[package]
+name = "kglite-visual-py"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "PyO3 wrapper for kglite-visual. Built by maturin into the kglite-visual wheel."
+# The wheel is the artifact Python users want; a crates.io copy of the wrapper
+# would be redundant. Rust embedders depend on kglite-visual-core directly.
+publish = false
+
+[lib]
+# Distinct from the core crate's rlib filename, and from the cdylib the wheel
+# ships (renamed by pyproject.toml's `module-name`).
+name = "kglite_visual_py"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["abi3"]
+# Maturin turns this on so the wheel build gets `extension-module`; a plain
+# `cargo build`/`cargo test` leaves it off so the crate still links against a
+# real libpython instead of failing at link time.
+python-extension = ["pyo3/extension-module"]
+# One cdylib for every Python from 3.10 up.
+abi3 = ["pyo3/abi3-py310"]
+
+[dependencies]
+# 0.29 matches KGLite's wheel. Two extension modules that link different pyo3
+# majors can coexist, but keeping them in step is free and removes a variable
+# from any notebook that imports both.
+pyo3 = { version = "0.29" }
+
+# VERSION SITE 3 of 3. See CLAUDE.md → "Commits & releases".
+kglite-visual-core = { version = "0.1.0", path = "../kglite-visual-core" }
+
+# NO `[global_allocator]`, and no allocator dependency — deliberately (plan
+# D9). KGLite's wheel installs mimalloc; a second extension module doing the
+# same in one interpreter is the two-allocator SIGSEGV shape KGLite already
+# pays a canary for, and importing both wheels in one notebook is the expected
+# case, not the exotic one. `make check-no-global-allocator` enforces the
+# absence, because the failure mode is a crash in someone else's process and
+# a code review is not a gate.

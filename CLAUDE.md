@@ -5,18 +5,18 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29: there is no code.** This repo contains its
-> conventions, its skills, its gitignored working folder, a `Makefile` whose
-> gate honestly reports which steps do not exist yet, and two small checker
-> scripts. No `Cargo.toml`, no crates, no frontend, no tests, no CI, no git
-> history, nothing published. Every command below that does not exist yet is
-> marked **(planned)**. **A planned command is not a passing gate** — if you
-> run a step and it is absent, say so and fall back; never report green for a
-> check that could not run (`R10` corollary). And when a planned thing becomes
-> real, delete its caveat *in the same change*: an honesty label nobody
-> retires becomes a lie, which is how one estate repo still described itself
-> as "brand-new, no code yet" two weeks after shipping a gate and 17 test
-> files.
+> **Status, 2026-08-29 (P1 landed): a workspace skeleton exists.** Three
+> crates (`core`, `cli`, `py`), a Vite/TypeScript frontend, ts-rs-generated
+> protocol types, and a gate that builds, lints and tests all of it. What does
+> **not** exist yet: the server, the protocol, any rendering, the wheel, CI, a
+> remote, a CHANGELOG, and any published artifact. Every command below that
+> does not exist yet is marked **(planned)**. **A planned command is not a
+> passing gate** — if you run a step and it is absent, say so and fall back;
+> never report green for a check that could not run (`R10` corollary). And
+> when a planned thing becomes real, delete its caveat *in the same change*:
+> an honesty label nobody retires becomes a lie, which is how one estate repo
+> still described itself as "brand-new, no code yet" two weeks after shipping
+> a gate and 17 test files.
 
 The rules cited by ID (`R4`, `R11`, `R16`, …) are the estate's numbered
 invariants in `../doctrine/rules/RULES.md`. Cite them; don't paraphrase them
@@ -127,25 +127,38 @@ the renderer is a defect, not a feature request.
 **Today:**
 
 ```bash
-make gate      # the local pre-push gate. Runs what exists; reports the rest
-               # as ABSENT — never as passing.
-make lint      # doc/config checks only, today
-make sync-agents   # regenerate the .agents/ adapter from the authority
-python3 scripts/check_dev_docs.py --self-test    # prove the bound can fail (R1)
+make gate           # the local pre-push gate. Runs what exists; reports the
+                    # rest as ABSENT — never as passing.
+make lint           # static checks only: bans, fmt, clippy, tsc
+make self-test      # prove every checker in the gate can go red (R1)
+make sync-agents    # regenerate the .agents/ adapter from the authority
+make clean-build    # delete target/, node_modules/, frontend/dist/
+cargo test --workspace
+cd frontend && npm ci && npm run typecheck && npm run build
 ```
 
-`make gate` currently runs exactly two real checks — the `dev-docs/` size
-bound (`R4`) and the instruction-mirror check (`R7`) — and prints an
-**ABSENT** line for each planned step. That is deliberate: "green" and "not
-attempted" must not render identically (`R10` corollary), so the gate makes
-its own emptiness legible rather than exiting 0 in silence.
+`make gate` runs eleven real checks: the `dev-docs/` size bound (`R4`), the
+instruction-mirror check (`R7`), the two structural bans (`@cosmograph/*` and
+`#[global_allocator]`), the build-directory report, `cargo fmt --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace`, the generated-TypeScript freshness check, the
+frontend typecheck, the frontend **production** build, and an advisory
+`npm audit --omit=dev`. It prints an **ABSENT** line for each step that still
+does not exist. That is deliberate: "green" and "not attempted" must not
+render identically (`R10` corollary), so the gate makes its own emptiness
+legible rather than exiting 0 in silence.
+
+**`frontend-audit` is WARN-only, on purpose.** `npm audit` queries the
+registry, so it goes red on a plane and whenever the advisory database is
+briefly unreachable — neither of which is a fact about the diff. A gate that
+fails for reasons unrelated to the change is a gate people learn to bypass. CI
+owns the failing version of that check; here it reports and moves on.
 
 **Planned, and each one deletes an ABSENT line when it lands:**
 
-- `cargo build` / `cargo test` / `cargo clippy --workspace --all-targets --
-  -D warnings` / `cargo fmt --check` — once the workspace exists.
-- The frontend's typecheck, lint, unit tests and **production** build.
 - `pytest` for the wheel, plus a stub/type check if type stubs are published.
+- A browser e2e smoke run (Playwright, SwiftShader flags) — nothing renders
+  yet.
 - A packaged-consumer check: exercise the *built* artifact as a real external
   consumer, not just the source tree. For this project that means the embedded
   frontend actually being in the binary — a source-tree test cannot see a
@@ -197,10 +210,10 @@ radius), use the **code-review MCP**: `set_root_dir` to this repo, then
 text search, never to rediscover structure the graph already encodes.
 Investigator agents in `phased-plan` run on this MCP.
 
-**Until there is code**, that MCP has nothing to map, and Phase 0
-investigation looks outward instead: the `kglite` crate's actual API, the
-cosmos.gl API, and the two of them read against this repo's plan. Say which
-you did — "the graph was empty" is a finding about the repo, not a failed
+**The tree is small (P1: three crates and a frontend skeleton)**, so a
+structural question often has an outward half too — the `kglite` crate's
+actual API, the cosmos.gl API — read against this repo's plan. Say which you
+did; "the graph had nothing to say" is a finding about the repo, not a failed
 investigation.
 
 ## Code review — report what is broken, not what you would have written
@@ -380,12 +393,20 @@ Today: `dev-docs/` → `make check-dev-docs` (wired into `make gate`, provably
 able to fail via `--self-test`); `inbox/` → the `read-inbox` skill's 7-day
 archive purge; `../kglite-visual-worktrees/` → the release flow.
 
-**Planned, and each is a `R4` obligation the moment it first writes a file:**
 `target/` (cargo never garbage-collects it — a 2026-07 audit in this estate
-found 503 GB), `node_modules/`, the frontend's build output, wheel builds, and
-tool caches. **Never add a new file-writing step** — a bench capture, a
-fixture dump, a generated graph — without pointing it at a purged tier or
-extending the gate **in the same change**.
+found 503 GB), `frontend/node_modules/` and `frontend/dist/` began writing
+files in P1, so they carry bounds now. Owner: `make clean-build`, run by a
+human; bound: `make check-build-dirs` in the gate, which reports each against
+an advisory ceiling (`TARGET_WARN_MB`, `NODE_MODULES_WARN_MB` in the
+Makefile). **That step warns and never fails** — a legitimately large
+`target/` mid-refactor is not a reason to block a commit, and a gate that
+blocks on it is a gate people bypass. An automatic purge is P6 work; until
+then the enforcement is a human reading the warning.
+
+**Planned, and each is a `R4` obligation the moment it first writes a file:**
+wheel builds and tool caches. **Never add a new file-writing step** — a bench
+capture, a fixture dump, a generated graph — without pointing it at a purged
+tier or extending the gate **in the same change**.
 
 **Tier misassignment, not a missed purge, is the usual failure.** A 3.5 GB
 `dev-docs/` turned out to be build artifacts and a corpus sitting in a
@@ -479,7 +500,8 @@ attempted-and-failed reproduction, not source reading.
 Commit format: `type: short description` (`feat`, `fix`, `docs`, `refactor`,
 `test`, `chore`). Update `CHANGELOG.md` `[Unreleased]` for user-visible
 changes; skip for internal refactors, CI, test-only, formatting. *(Planned —
-there is no CHANGELOG and no git history yet; the first commit creates both.)*
+there is no CHANGELOG yet; nothing user-visible has shipped. The first
+release-shaped change creates it.)*
 
 **Commit messages are public — keep sensitive intent out of them.** Describe
 the *mechanical* change in neutral terms, not the strategy behind it.
@@ -519,20 +541,46 @@ into that same `[x.y.z]` block rather than minting a new one on top.
 agent never suggests or announces a minor/major bump anywhere, including
 readiness reports.
 
-**The version will live in more than one file, and the count is unknown until
-the workspace exists.** *(Planned.)* KGLite believed "the version is one line"
-and it broke a release: `[workspace.package] version` covers each crate's own
-`package.version`, but **not** the internal dependency requirements that
-`cargo publish` demands, and this project will have at least three crates plus
-a `pyproject.toml` plus possibly a frontend `package.json`. **Establish the
-count by counting**, write it here, and never hand-edit a manifest afterwards
-— the bump goes through one target that rewrites every site and verifies with
-a **resolving** `cargo metadata` (`--no-deps` skips resolution entirely and
-passes on exactly the broken tree, `R2`).
+**This project's own version lives in exactly THREE files, counted by
+grepping on 2026-08-29 (P1), not assumed:**
+
+1. `Cargo.toml` — `[workspace.package] version`. Every crate inherits it with
+   `version.workspace = true`, so those three inheritance lines are
+   *references*, not sites; they never carry a number.
+2. `crates/kglite-visual-cli/Cargo.toml` — the `kglite-visual-core = { version
+   = "…", path = … }` requirement.
+3. `crates/kglite-visual-py/Cargo.toml` — the same requirement.
+
+Sites 2 and 3 are exactly what KGLite missed when it believed "the version is
+one line" and broke a release: `[workspace.package]` reaches each crate's own
+`package.version` and **not** the internal dependency requirements that
+`cargo publish` demands. Two places that look like version sites and
+deliberately are not: `pyproject.toml` declares `dynamic = ["version"]` so
+maturin reads the number from the crate, and `frontend/package.json` carries no
+`version` field at all (it is `private`, never published, and a version string
+there would be a fourth thing to keep in step for no benefit). Adding a number
+to either of those adds a site — update this list in the same change.
+
+Re-count with:
+`grep -rn '<old-version>' . --exclude-dir=target --exclude-dir=node_modules --exclude=Cargo.lock`
+
+**Never hand-edit a manifest to bump** — the bump goes through one target that
+rewrites every site and verifies with a **resolving** `cargo metadata`
+(`--no-deps` skips resolution entirely and passes on exactly the broken tree,
+`R2`). *(The bump target is planned; until it exists, edit the three sites
+above and run the resolving `cargo metadata` by hand.)*
 
 **The `kglite` floor is a second version surface, enumerated separately**
-(`R16`). A *declaration* states a requirement that holds now — a manifest pin,
-a documented floor, a CI install pin, a copy-pasteable install snippet, the
+(`R16`). It has **one declaration**: the `kglite = { version = "=X.Y.Z", path =
+… }` line in `crates/kglite-visual-core/Cargo.toml`, exact-pinned because
+kglite is pre-1.0 and ships documented breaking changes in patch releases
+(plan D11). The path component is a development convenience, not a necessity —
+*kglite was verified present on crates.io on 2026-08-29: 99 versions, newest
+and default `0.16.13`, crate not yanked* — so a publish drops `path` and keeps
+the requirement string.
+
+A *declaration* states a requirement that holds now — a manifest pin, a
+documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves
 when the requirement moves**. A *citation* states a historical fact ("verified
 against 0.16.13 on 2026-08-29") and stays at its original number **forever**;

@@ -1,0 +1,32 @@
+[workspace]
+members = [
+    "crates/kglite-visual-core",
+    "crates/kglite-visual-cli",
+    "crates/kglite-visual-py",
+]
+resolver = "2"
+
+# VERSION SITE 1 of 3. The other two are the `kglite-visual-core` requirement
+# strings in the cli and py manifests, which `[workspace.package]` does NOT
+# reach and `cargo publish` does demand. The full enumeration, and why counting
+# beats assuming, is in CLAUDE.md → "Commits & releases".
+[workspace.package]
+version = "0.1.0"
+# kglite's own MSRV. This project embeds that engine, so its floor is ours;
+# a lower number here would be a claim no build ever tests.
+rust-version = "1.88"
+edition = "2021"
+license = "MIT"
+authors = ["Kristian dF Kollsgård <kkollsg@gmail.com>"]
+repository = "https://github.com/kkollsga/kglite-visual"
+
+[workspace.dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+ts-rs = "12.0.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
