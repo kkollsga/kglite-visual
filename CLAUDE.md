@@ -1,0 +1,591 @@
+# kglite-visual — Claude Code Conventions
+
+Interactive, high-performance visualization for `.kgl` knowledge-graph files
+produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
+estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
+localhost CLI and a Python wheel.
+
+> **Status, 2026-08-29: there is no code.** This repo contains its
+> conventions, its skills, its gitignored working folder, a `Makefile` whose
+> gate honestly reports which steps do not exist yet, and two small checker
+> scripts. No `Cargo.toml`, no crates, no frontend, no tests, no CI, no git
+> history, nothing published. Every command below that does not exist yet is
+> marked **(planned)**. **A planned command is not a passing gate** — if you
+> run a step and it is absent, say so and fall back; never report green for a
+> check that could not run (`R10` corollary). And when a planned thing becomes
+> real, delete its caveat *in the same change*: an honesty label nobody
+> retires becomes a lie, which is how one estate repo still described itself
+> as "brand-new, no code yet" two weeks after shipping a gate and 17 test
+> files.
+
+The rules cited by ID (`R4`, `R11`, `R16`, …) are the estate's numbered
+invariants in `../doctrine/rules/RULES.md`. Cite them; don't paraphrase them
+into something weaker.
+
+**Authority:** `CLAUDE.md` is the authority this repo's agent instructions are
+regenerated from, and `.claude/skills/` is the authority for `.agents/skills/`;
+`AGENTS.md` and `.agents/` are generated adapters. Edit the authority and
+regenerate in the same action (`make sync-agents`) — never edit an adapter.
+(This line is exempt from the naming substitution — it names the authority
+literally in every copy, per doctrine `R7`/`R14`. A substituted declaration
+inverts itself and tells the adapter's reader to edit the adapter, which is
+what two estate repos did on the day that procedure landed.)
+
+## Working style
+
+- **Evidence over assertion.** For a bug, reproduce it and confirm the **root
+  cause with evidence** before fixing. For a behaviour-preserving refactor,
+  probe the *actual* output first — don't trust your mental model.
+- **No bugs left behind.** A defect you notice mid-task gets fixed (in scope,
+  as its own bisectable commit) or gets its own phase — never silently stepped
+  over, and never filed to the backlog. A **bug** is fixed; a **missing
+  capability** is what `plans/consider-for-future.md` is for. If you catch
+  yourself writing a bug into the backlog, that is the rule firing. A defect
+  that traces to the `kglite` engine, the Cypher dialect or the `.kgl` format
+  is routed to KGLite via `notify` — KGLite is read-only from here.
+- **Offload, don't print.** Write long output (protocol dumps, bench tables,
+  build logs, big diffs) to `dev-docs/temp/` (>1-day purge) or
+  `dev-docs/bench/out/` and **report the path**. Keep responses under ~400
+  tokens.
+- **A reported status is not the result** (`R2`). Read the exit code of the
+  thing you care about, never of something downstream of it. Four shapes that
+  have each failed in the *reassuring* direction elsewhere in this estate, and
+  will apply here the day there is a build:
+  - **A pipe reports the last stage's status.** `cargo check … | tail` reports
+    `tail`'s exit code. Use `set -o pipefail` or read `$?` from the command.
+  - **`git add` with one bad pathspec stages NOTHING** — the good paths in the
+    same invocation are discarded with it, the only complaint is on stderr,
+    and the following commit succeeds while missing the change. Read back
+    `git status --porcelain` / `git diff --cached --name-only`.
+  - **`grep -c` exits 1 on a count of zero**, breaking the `&&` chain of a
+    command that was only ever asking "how many?".
+  - **A backgrounded command's result lives in its artifact**, not in the
+    "done" line it echoed. Open the log the run wrote.
+  - And **"it compiles" is a weak test**: a dependency floor can compile and
+    still misbehave (below `anyhow` 1.0.47, `anyhow!("{e}")` compiles and
+    prints the literal `{e}`). Where a version can compile yet misbehave,
+    *run* it. This project will have two such floors — `kglite` and the
+    frontend's renderer — and both cross a data boundary.
+- **A verification must be able to fail** (`R1`). A gate, guard or assertion
+  you have not seen go red on a deliberately broken input is not yet a gate.
+  Break the thing it guards, watch it fail, restore. Three ways a gate is born
+  dead: substring subsumption (`assert "cmd" in block` also matches
+  `cmd --self-test`), comment subsumption (the words you assert on also appear
+  in the comment explaining them), and `exit` inside `$( )` (it kills only the
+  subshell; the caller reads the empty output as success). A scan-based guard
+  that finds zero files passes vacuously — assert the scan was non-empty.
+- **When a committed claim is retracted, grep for every place it was written**
+  (`R3`). The retracted claim that bought this rule lived in three files; two
+  were fixed and `dev-docs/todos.md` — the file that advertises itself as
+  enough to brief a fresh agent — stayed wrong for hours.
+
+## Planned architecture
+
+The full shape, the seams that need contracts, and the proposed bootstrap
+sequence are in the working folder's architecture plan (`add-todo` /
+`phased-plan` know where; it is the first entry in `dev-docs/todos.md`). The
+summary that belongs in standing rules, because it decides what code is
+allowed to go where:
+
+- **`kglite-visual-core`** — embeds the `kglite` crate. Sessions, Cypher,
+  snapshots, the type-level meta-graph, bounded neighborhood expansion, an
+  optional Rust-side ForceAtlas2 layout, and a **transport-agnostic binary
+  protocol** (typed-array buffers for topology and positions, JSON for
+  metadata). *Transport-agnostic is a rule, not a description:* nothing in
+  this crate may know it is talking to a WebSocket. It has three consumers
+  planned and the encoder is the seam they share.
+- **`kglite-visual-cli`** — an axum server on localhost serving an embedded
+  static frontend via `rust-embed`, opening a browser. The tensorboard /
+  marimo pattern: one binary, no install step.
+- **`kglite-visual-py`** — PyO3 + maturin wheel. `kglite_visual.show(graph_or_path)`,
+  Jupyter via anywidget or an iframe, in-memory graphs handed over with
+  kglite's `to_bytes()` / `from_bytes()`.
+- **Frontend** — TypeScript + Vite + **cosmos.gl** (`@cosmos.gl/graph`,
+  MIT, OpenJS Foundation), a WebGL GPU force-layout renderer, speaking the
+  binary protocol over WebSocket. Built to static assets and embedded; not
+  published to npm. **Never install any `@cosmograph/*` package** — the
+  `@cosmograph` npm family (including `@cosmograph/cosmos`, the engine's
+  pre-donation name) is CC-BY-NC-4.0, incompatible with shipping this MIT
+  app; the two packages share version numbers, so the name is the only
+  guard, and a gate check enforces it (verified 2026-08-29).
+- **A Tauri desktop shell is a later, optional wrapper** — over the finished
+  core and frontend. If it ever becomes a second implementation of the
+  protocol or the session model, that is evidence the core boundary is wrong,
+  not that the shell needs more code.
+
+**Progressive disclosure is the product, not a UI preference.** kglite's disk
+mode reaches 100M+ nodes and no browser renders that. The entry screen is the
+**type-level meta-graph** — labels and relationship types with counts, always
+small, whatever the graph underneath. Drill-down happens through Cypher and
+bounded neighborhood expansion. **The server decides what crosses the wire**,
+and the bound is enforced in core, not in the UI: a guarantee the client
+implements is not a guarantee. A change that lets an unbounded result reach
+the renderer is a defect, not a feature request.
+
+## Build & test
+
+**Today:**
+
+```bash
+make gate      # the local pre-push gate. Runs what exists; reports the rest
+               # as ABSENT — never as passing.
+make lint      # doc/config checks only, today
+make sync-agents   # regenerate the .agents/ adapter from the authority
+python3 scripts/check_dev_docs.py --self-test    # prove the bound can fail (R1)
+```
+
+`make gate` currently runs exactly two real checks — the `dev-docs/` size
+bound (`R4`) and the instruction-mirror check (`R7`) — and prints an
+**ABSENT** line for each planned step. That is deliberate: "green" and "not
+attempted" must not render identically (`R10` corollary), so the gate makes
+its own emptiness legible rather than exiting 0 in silence.
+
+**Planned, and each one deletes an ABSENT line when it lands:**
+
+- `cargo build` / `cargo test` / `cargo clippy --workspace --all-targets --
+  -D warnings` / `cargo fmt --check` — once the workspace exists.
+- The frontend's typecheck, lint, unit tests and **production** build.
+- `pytest` for the wheel, plus a stub/type check if type stubs are published.
+- A packaged-consumer check: exercise the *built* artifact as a real external
+  consumer, not just the source tree. For this project that means the embedded
+  frontend actually being in the binary — a source-tree test cannot see a
+  missing `rust-embed` asset.
+
+**The gate's membership is earned, not copied.** A check belongs in the local
+pre-push gate only once it has a record of catching a CI failure; everything
+else is CI's job. Duplicating a parallel CI matrix serially on one dev machine
+is the single biggest waste this estate has measured (~13 min in CI became 2+
+hours locally). Heavy checks are **surface-conditional**, not ritual: they
+fire when the diff touches their surface.
+
+**Run the CI-only tier once before a long-lived branch's first push**, not per
+phase. The same tiering that makes per-change gates cheap lets a program
+branch accumulate weeks of work CI rejects on contact — KGLite's 0.15.8 branch
+reached its first push with four independent blockers its fast gate
+structurally could not see. Once per branch; the cost is one run.
+
+**Per-change gates track the diff.** A phase's gate is the suites chosen to
+catch what *that* change could break — its touched surface plus that surface's
+direct consumers — not a fixed list and not everything. The full battery runs
+once over the union at a program's end. "Smallest command that proves it" and
+"a fixed list of cheap suites" are not the same rule; the second stops
+tracking the diff.
+
+**Gate honesty** (`R10`, and the rule a tired session breaks): a gate you
+would regenerate to get green is not a gate. Exact-baseline gates — the
+protocol shape baseline this project will need, golden digests, API
+baselines — all fail the same way, the moment "make it pass" is cheaper than
+"explain the diff". A red baseline after a deliberate change is a **conscious
+decision**: regenerate in the same commit and say why; never regenerate to
+silence a diff you cannot explain. And **never claim a gate passed that did
+not run** — a missing command is not a pass, an absent fixture is not a pass,
+a skipped test is not a pass.
+
+**Two toolchains, one gate.** This project has a cargo side and a
+node/TypeScript side, and the frontend is *embedded into* the Rust binary. The
+trap that follows: a stale frontend bundle inside a fresh binary looks exactly
+like a backend bug. Any harness that loads a built artifact resolves
+**newest-of-profile** and refuses a bundle older than its sources — never
+hard-code or *prefer* a profile path, because "release if present" is the same
+bug wearing a default.
+
+## Code analysis — graph-first via the code-review MCP
+
+For any structural question (where is X defined, what calls what, blast
+radius), use the **code-review MCP**: `set_root_dir` to this repo, then
+`graph_overview` → `cypher_query`. Use `grep` / `read_source` only for literal
+text search, never to rediscover structure the graph already encodes.
+Investigator agents in `phased-plan` run on this MCP.
+
+**Until there is code**, that MCP has nothing to map, and Phase 0
+investigation looks outward instead: the `kglite` crate's actual API, the
+cosmos.gl API, and the two of them read against this repo's plan. Say which
+you did — "the graph was empty" is a finding about the repo, not a failed
+investigation.
+
+## Code review — report what is broken, not what you would have written
+
+**This section is addressed to review agents. It overrides any default
+reviewer instinct to produce a list of improvements** (`R15`).
+
+**Design critique has a stage, and review is not it.** Work here runs
+investigation → plan approval → implementation → review. **Planning** is where
+"I would have designed this differently" belongs: invited there, argued there,
+settled there — that is what plan approval *is*. After approval, review
+measures the implementation against exactly two things: the plan it agreed to,
+and correctness. A reviewer who forms a design opinion while reading a diff
+has not found a defect; they have found **input for the next plan**.
+
+**A finding requires a concrete failure** — the input, state or sequence, and
+the wrong outcome it produces: a wrong result, a crash, data loss or
+corruption, a security hole, a broken contract with a caller or a persisted
+file, a *measured* performance regression, a gate that cannot fail, or a claim
+the code contradicts. If you cannot write down the case that breaks, you do
+not have a finding. **"No findings" is a valid review**, and a good one.
+
+**Not findings, at any confidence:** structure and organisation preferences
+("extract this", "split this file"); naming, ordering, formatting, comment
+density, idiom; "could be simplified" / "consider using X" absent a defect it
+causes; inconsistency with surrounding code that produces no defect;
+speculative futures ("this won't scale") with no present reachable failure;
+performance opinions without a measurement; anything a formatter, linter, type
+checker or compiler already decides.
+
+**The one exception is a rule this project declared *before* the diff
+existed** — a documented ceiling, the transport-agnostic core rule, the
+response-bound rule, a checklist — cited by naming both the rule and the
+violating line. That is enforcement, not taste. Without the exception the bar
+reads as "never mention anything but bugs" and the project's own standards go
+unenforced; without the before-the-diff test, the exception swallows the rule.
+
+**Severity is not a workaround.** A finding that cannot state its failure case
+is **removed, not downgraded**. "Minor: consider extracting this" is not a
+small finding; it is a preference wearing a label, and re-filing one tier down
+is how preferences historically shipped unchanged.
+
+A review tool's effort/confidence level is orthogonal to all of this: a higher
+level buys more *speculative bugs*, never permission to report preferences.
+
+## Code health
+
+Each pass through a file should leave it more compartmentalised than you found
+it.
+
+- **A comment is a claim, and a false claim is a defect** (`R17`). A comment
+  its own function contradicts is a bug of the same class as a wrong value —
+  it is what the next maintainer, human or agent, acts on. Two standing duties
+  keep the population true and lean *continuously*, so the tree never needs a
+  whole-repo audit: (1) **a change that falsifies a nearby comment corrects it
+  in the same change** — the falsehood does not exist until the code moves,
+  and whoever moved it is the only party who knows; (2) **a change through
+  commented code applies the information test to the comments it touches** —
+  zero information (restating the next line or the signature, banners,
+  narration of the journey) is deleted, low density is compressed to what it
+  carries. The unit is **information, not fact-count**: "keep the fact, drop
+  the label" moved 231 files by 0.2%, the information test moved 104 files by
+  12.4% while correctly sparing the specification files. Deletion has a
+  floor — why-not-what, invariants and safety preconditions, lock ordering,
+  data-format lifecycle, regression rationale in tests, bail reasons in
+  planner code, and anything under `R18` — kept regardless of how worthless
+  they look. A comment that predicts a future ("a later phase will…") is a
+  claim with an expiry date and nothing notices when it passes: word it so the
+  work landing retires it, or don't write it. `/clean-comments` handles the
+  residue; a heavy residue is itself the finding that the same-change duty is
+  being skipped.
+- **A comment the tooling parses is load-bearing — check what reads one before
+  deleting it** (`R18`). Nothing at the comment site says so, and the reader is
+  never discoverable from the comment itself. **This repo's enumeration is
+  maintained in the `clean-comments` skill, and it is empty today** because
+  nothing here parses comments yet. Empty-but-maintained is not the same as
+  missing — a *missing* enumeration stops a cleanup run. Add a reader to that
+  list in the same change that adds the reader; the shapes to expect here are
+  a lint-allowance checker that scans preceding comment lines, a lint
+  suppressed by a comment's mere presence, a doc comment mirrored into
+  published type stubs, and a docstring rendered verbatim as `--help`.
+- **Doc-block attachment is adjacency, and adjacency is editable.** A `///` (or
+  a TSDoc block) separated from its item by a blank line, or an item inserted
+  mid-block, silently documents the **next** item — the compiler stays quiet
+  and the renderer renders confidently. KGLite found ~23 such blocks, three on
+  shipped public API. After inserting or moving items near a doc block, verify
+  it in the **rendered** surface, not the source.
+- Factor a function when it grows past ~80 lines or starts handling 3+
+  unrelated concerns. Prefer small named strategy fns dispatched by the caller
+  over long if/else chains.
+- Fixing a bug — scan for the *class* of bug. The reported symptom is rarely
+  the only one.
+- Don't add a parameter/branch/flag without checking whether the existing
+  structure should be reshaped to absorb it.
+
+## Performance protocol
+
+**This is an interactive tool, so the number a user experiences is a tail, not
+a floor.** That is the one place this project's protocol deliberately departs
+from the estate's library-benchmark defaults, and the departure is the point:
+`min` is the right statistic for a repeatable inner loop and the wrong one for
+a renderer.
+
+1. **Baseline first.** Write or extend the harness covering the touched path,
+   run it, record numbers. An unmeasured perf change is not a fix.
+2. **Release profile only** (`R11`). Debug-profile timings are not evidence;
+   for the frontend the equivalent is a **production** Vite build — a
+   dev-server number is measuring the dev server.
+3. **State which statistic a number is, per cell**, because this project mixes
+   three and they are not interchangeable:
+   - **Frame time under interaction → p95/p99.** A renderer that is fast on
+     its best frame and stutters on its worst is a renderer that stutters.
+   - **Time-to-first-paint and any first-call-after-a-state-change cost →
+     mean of first events.** A once-per-event cost is structurally invisible
+     to `min`, which only ever reports the cheap repeats.
+   - **Deterministic quantities (payload bytes, node counts, server-side
+     query time) → exact, or median.** A heavy-tailed cell whose `min` sits
+     30%+ below its own median is reporting a lucky round, not a rate.
+4. **Measure client and server separately.** A single end-to-end number cannot
+   say which side regressed, and the two have different remedies.
+5. **Every capture carries unchanged-path control cells** — the machine-drift
+   meter. Load moves every cell together; a real regression moves one. A
+   *control* that regresses means the instrument moved, so re-measure rather
+   than bisect. A control needs **≥2× margin over the capture's noise floor**
+   and **immunity from what it anchors** (`R11` corollary): a control chosen
+   because *our* source cannot touch it silently expires when a **dependency**
+   moves instead — and this project has two moving dependencies, `kglite` and
+   the renderer. Re-justify the controls after every dependency bump. A
+   control that moves **deterministically** across repeated re-measures is not
+   instrument wander — re-measuring returns the same number forever; the
+   control's premise is void, and that is a finding about the gate.
+6. **Run under whatever load the machine has.** Waiting for an idle machine
+   costs far more in stalled work than the precision it buys; validity comes
+   from the controls, two agreeing runs, and one confirmation retake when a
+   verdict lands near its threshold.
+7. **A longitudinal number carries its conditions.** Numbers compared *across
+   sessions* record the machine state they were taken under — metadata in the
+   capture record, never a gate on taking the capture. KGLite's 0.15.7
+   baseline was captured hot with nothing saying so, and its anchor gate read
+   the offset as real drift.
+8. **A/B against a published artifact, not a source-built reference.** Install
+   the released wheel into an isolated venv and run the probe outside the repo
+   root, so the source tree cannot shadow it.
+9. **Distribution shape is a diagnostic, not noise to average away.** A 30×+
+   median-to-max spread on a deterministic operation means a rare expensive
+   branch exists. Chase it; that is a finding. And **measure an important
+   claim two independent ways** — a single measurement cannot detect its own
+   instrument bug.
+10. **A measurement must be able to cancel the work it measures** (`R13`). A
+    measuring phase carries a stop rule written *before* it runs: the result
+    that retires the item instead of implementing it. A stop rule composed
+    after the numbers are in is a rationalisation; its date is the tell.
+
+## dev-docs steers the sprint; commits are the durable record
+
+`dev-docs/todos.md` is read at the start of every phase and by every steering
+agent, so detail in the linked docs is load-bearing — an entry recording what
+was tried, what was rejected and why, stops a fresh agent burning a phase
+relitigating a settled decision. The test is **"would an agent act differently
+for having read it?"**, not length. Entries whose action has shipped are dead
+weight; prune those. The canonical layout is `dev-docs/README.md` — the skills
+point there; don't re-describe the folder elsewhere.
+
+`dev-docs/` and `inbox/` are gitignored, unbacked local working state. Two
+consequences: **anything that must survive the machine also goes somewhere
+tracked** (the commit message that implements it, a self-contained comment at
+the code it constrains, or here), and **committed files never cite a
+`dev-docs/` path** — the citation outlives the file and silently becomes a
+dangling instruction. A gate's *failure message* is held to the same bar:
+every pointer in it must resolve for every reader, or it fails exactly when it
+is read.
+
+## Dev-environment cleanliness — every file accumulation needs a gate
+
+Any path the tooling writes outside git must have a bound and an owner (`R4`).
+Today: `dev-docs/` → `make check-dev-docs` (wired into `make gate`, provably
+able to fail via `--self-test`); `inbox/` → the `read-inbox` skill's 7-day
+archive purge; `../kglite-visual-worktrees/` → the release flow.
+
+**Planned, and each is a `R4` obligation the moment it first writes a file:**
+`target/` (cargo never garbage-collects it — a 2026-07 audit in this estate
+found 503 GB), `node_modules/`, the frontend's build output, wheel builds, and
+tool caches. **Never add a new file-writing step** — a bench capture, a
+fixture dump, a generated graph — without pointing it at a purged tier or
+extending the gate **in the same change**.
+
+**Tier misassignment, not a missed purge, is the usual failure.** A 3.5 GB
+`dev-docs/` turned out to be build artifacts and a corpus sitting in a
+never-purged tier. And purge by an explicit marker, not by age alone: an
+age-only sweep destroys whatever was placed in the wrong tier, and a durable
+tier is a promise — anything irreproducible in a purged tier is a scheduled
+data loss with a date on it.
+
+## Inbox hygiene
+
+`inbox/` (gitignored) is the cross-project channel — operated only by the
+`read-inbox` (receive) and `notify` (send) skills, never hand-edited.
+`unread/` holds **only what still needs action**; an actioned note gets a
+`## Status (kglite-visual, <date>): …` footer and moves to `read/`.
+
+**Route to the party who can act.** A note belongs in another project's inbox
+only if it carries an *actionable task for them*. The outbound bar is **"changes
+what the recipient does"**, not "true and relevant" — a note that merely
+informs does not get sent, because FYI-grade mail trains people to ignore the
+inbox. The most common target here is upstream **KGLite**. Layout map:
+`inbox/README.md`.
+
+## Skill mandates
+
+The procedures live in `.claude/skills/` (the authority) and its
+`.agents/skills/` mirror. Each is self-contained; invoke it rather than
+improvising the procedure.
+
+- **Large feature / non-trivial refactor →** demand **`phased-plan`**
+  (investigate → gated plan → autonomous build/test/commit loop → perf gate).
+  Do **not** use generic plan mode for these.
+- **Capturing work / findings →** **`add-todo`** — the authority on todo
+  shape (lean `todos.md` backlink + detail in `plans/`).
+- **Incoming mail →** **`read-inbox`**; **outgoing coordination →**
+  **`notify`**.
+- **Tidying the working folder →** **`dev-docs-cleanup`** (before a new
+  phased-plan, or at the end of a release).
+- **Comment residue after a large landing →** **`clean-comments`**.
+- **Shipping →** **`release`** — the only place the version bumps.
+
+## Agent worktrees
+
+Agent git worktrees live in **`../kglite-visual-worktrees/<name>`** — a
+sibling directory *of the repo*, never loose in the `Rust/` parent where they
+are indistinguishable at `ls` from real project repos (seven such strays,
+~46 GB, sat in the estate root on 2026-08-10; the oldest had been abandoned
+for two weeks and nothing owned its disposal). The directory exists only while
+worktrees are in progress; the `release` skill empties and deletes it. Per
+worktree, in order: migrate outstanding actions into `dev-docs/todos.md`
+(branch, state, what remains, how to resume) → if dirty, save its `git diff`
+under `dev-docs/` **first** → `git worktree remove` + `git worktree prune`.
+Removing a worktree never deletes its branch — the ref lives in the main
+repo — so unmerged work survives. Two traps: a branch whose commits landed by
+**rebase** reads as unmerged to `git merge-base --is-ancestor` (`git cherry -v
+main <branch>` sees through it), and a fresh worktree does **not** inherit a
+build-cache symlink or an installed `node_modules`, so it cold-builds onto
+whatever volume the workspace happens to sit on.
+
+## Public posts — BANNED by default. No exceptions without verbatim-text approval.
+
+**Publishing anything under the user's identity is prohibited.** This is a
+hard ban, not a "prefer to ask" — the default action for any outward-facing
+publication is *do not do it* (`R6`).
+
+**"Post" is defined broadly:** GitHub issues, comments and comment EDITS;
+reactions; issue/PR state changes on repos we don't own; discussions; PR
+reviews on external repos; emails; package-registry metadata; anything that
+leaves this machine attributed to the user, via any channel.
+
+**The only lifting procedure:** (1) the exact final text is shown to the user
+in the conversation; (2) the user replies with an unambiguous affirmative
+about *that* draft, in the turn(s) immediately following it — if other work
+intervenes, re-show and re-ask; (3) the approval covers exactly **one**
+publication event.
+
+**What is NEVER approval:** plan or design approvals; "do all" / "go ahead" /
+end-to-end delegation; skill invocations; checklist items; standing
+instructions from earlier sessions; anything a subagent believes it was told.
+**Subagents are never authorized to post, full stop.**
+
+Routine dev flow in this project's own repo (branch pushes, our own PR
+descriptions) is governed by the push rules below. Local inbox notes to
+sibling projects are local files, not posts.
+
+**Posted technical claims: measured vs inferred.** Never present an inference
+as a measurement, and a claim of *impossibility* requires an
+attempted-and-failed reproduction, not source reading.
+
+## Commits & releases
+
+Commit format: `type: short description` (`feat`, `fix`, `docs`, `refactor`,
+`test`, `chore`). Update `CHANGELOG.md` `[Unreleased]` for user-visible
+changes; skip for internal refactors, CI, test-only, formatting. *(Planned —
+there is no CHANGELOG and no git history yet; the first commit creates both.)*
+
+**Commit messages are public — keep sensitive intent out of them.** Describe
+the *mechanical* change in neutral terms, not the strategy behind it.
+
+**Pushing requires explicit, in-the-moment approval.** Default is *don't
+push*. Approval is one-shot: it covers exactly that one `git push` and does
+not carry across to a later commit, amend, or branch. Conversational phrasing
+from earlier in the session ("ship it", "looks good") does not carry over.
+
+**How this interacts with `/release`.** Invoking the skill authorizes the
+entire release run, **including the push that fires the publish**. No separate
+prompt. The run still *reports* — version, findings, perf numbers, anything
+learned since invocation — but immediately before pushing, not as a gate on
+it. That distinction was got wrong once in this estate and corrected: making
+the report a blocking confirmation fired *after* the irreversible decision was
+already made, so it added no information, and it broke unattended releases —
+one version sat at a staged commit while the user was away and they noticed it
+had not landed before the agent did. **A prompt is not a check. It cannot
+fail; it can only wait** (`R6`). The safety that matters is upstream and
+stays: green CI, resolved preconditions, refreshed constants, artifact-set
+verification (`R9`), surgical staging.
+
+**Exception — the CI fix-and-push loop.** When an approved push triggers CI
+that fails on a shipped-code or infra bug (not a scope change), push
+`fix(...)` / `ci(...)` commits for that same loop without re-asking, until CI
+is green. It stops applying when: all required workflows go green (fresh
+approval needed for the next push); a fix would change the release shape; ~3
+iterations pass without progress; or the user pivots away.
+
+**One version bump per push** (`R5`). A version is not released until it is
+pushed. If a `release(x.y.z)` commit is already local, fold follow-up work
+into that same `[x.y.z]` block rather than minting a new one on top.
+
+**The bump size is always patch unless the release command said otherwise.**
+`/release` with no size means `x.y.Z+1`, with no clarification prompt.
+**Bump-size escalation is one-way: user → agent, never agent → user** — the
+agent never suggests or announces a minor/major bump anywhere, including
+readiness reports.
+
+**The version will live in more than one file, and the count is unknown until
+the workspace exists.** *(Planned.)* KGLite believed "the version is one line"
+and it broke a release: `[workspace.package] version` covers each crate's own
+`package.version`, but **not** the internal dependency requirements that
+`cargo publish` demands, and this project will have at least three crates plus
+a `pyproject.toml` plus possibly a frontend `package.json`. **Establish the
+count by counting**, write it here, and never hand-edit a manifest afterwards
+— the bump goes through one target that rewrites every site and verifies with
+a **resolving** `cargo metadata` (`--no-deps` skips resolution entirely and
+passes on exactly the broken tree, `R2`).
+
+**The `kglite` floor is a second version surface, enumerated separately**
+(`R16`). A *declaration* states a requirement that holds now — a manifest pin,
+a documented floor, a CI install pin, a copy-pasteable install snippet, the
+version inside an install-hint error message — and **every declaration moves
+when the requirement moves**. A *citation* states a historical fact ("verified
+against 0.16.13 on 2026-08-29") and stays at its original number **forever**;
+rewriting one falsifies the record. **After moving the floor, grep the old
+version across the tree and classify every hit; unclassified declarations at
+zero.** codingest shipped a wheel requiring `kglite>=0.15.11` around an 0.15.13
+engine that way — a writer/reader skew across the `.kgl` handoff — because it
+checked the six sites documented for its *own* version while the floor lived
+in 15 places across 8 files.
+
+**Verify the artifact set, not the version** (`R9`). A version check answers
+"did something publish", never "did everything publish": cross-compiled legs
+are often best-effort, and an upload step without a fail-on-empty setting
+uploads an empty artifact from a green build. **And the record is part of the
+artifact set** — verify the tag exists on both sides at the same commit.
+Report a missing one; never mint it locally, which would hide the CI failure
+that caused it.
+
+**Never delete published files from a package registry.** Published artifacts
+are never removed automatically, and any manual deletion permanently breaks
+every pinned install — it requires a downstream-impact audit and explicit
+approval first. This stays resident here rather than in the release skill,
+because it is irreversible and must not depend on a skill being loaded.
+
+**One branch per plan; phases are commits, never sub-branches.**
+Bisectability comes from one-commit-per-phase, not from branch topology (one
+multi-branch plan in this estate left 8 stale branches to sweep). Push at
+checkpoints — every 2–3 quick phases, at a risky milestone, or before stepping
+away — and add a CI `concurrency` group that cancels a superseded in-flight PR
+run (never on the default branch).
+
+## Doctrine sync
+
+The estate's rules live in the sibling `doctrine` repo and are versioned.
+`dev-docs/.doctrine-synced` records the version this repo has been brought
+forward to; `phased-plan` compares it against `../doctrine/VERSION` as the
+first action of a run, acts on every changelog entry newer than the marker,
+and **only then** advances the marker. A marker written first permanently
+hides the entry it skipped.
+
+**Read the oracle before the local copy — always in that order** (`R14`). The
+doctrine repo is canonical; this repo's installed copies are read second, and
+an adaptation **names the oracle version it read**. Every divergence found is
+exactly one of two things, and you say which: a **local improvement** (a
+candidate to upstream at the next snapshot) or **staleness** (fixed *from* the
+oracle). Then act on the **authority**, not on whichever copy you happen to
+have open — the adapter is generated, never edited. Never adapt from a local
+copy you have not compared against the oracle; that is how stale text
+propagates.
+
+This repo was adopted from **doctrine 0.1.8 on 2026-08-29**, and unlike most
+of the estate it **tracks** its doctrine layer (`CLAUDE.md`, `.claude/skills/`,
+`Makefile`, `scripts/`). `doctrine/snapshot.sh` mirrors KGLite only, so
+tracking is the only thing that would ever give this repo's conventions a
+history, a review trail, or a copy that survives a working-tree accident —
+which is the reason the doctrine repo exists in the first place.

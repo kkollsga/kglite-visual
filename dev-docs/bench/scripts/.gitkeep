@@ -1,0 +1,9 @@
+Placeholder so this directory exists in git before the first harness does.
+
+`dev-docs/bench/scripts/` is the one tracked exception inside the gitignored
+`dev-docs/` tree (see `.gitignore` and `dev-docs/bench/README.md`): harnesses
+here are hand-authored source that would otherwise exist in exactly one copy,
+in a tier nothing ever purges. Un-ignoring it before any harness exists means
+the first one is tracked by default rather than silently unbacked.
+
+Delete this file once a real harness lives here.
