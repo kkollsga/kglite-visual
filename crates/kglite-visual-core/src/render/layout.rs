@@ -1664,6 +1664,54 @@ mod tests {
         );
     }
 
+    /// The radial kernel at the D5 response bound, measured rather than
+    /// reasoned about.
+    ///
+    /// **Why this exists.** The radial path is the one an ego or expansion
+    /// render takes, `expand::effective_bound` lets 5 000 nodes through, and
+    /// round 1 argued from the algorithm's shape that this was cheap. An
+    /// inference is not a measurement (CLAUDE.md → "Posted technical claims"),
+    /// and the shape argument is not obviously safe: the sub-ring search is
+    /// `O(MAX_SUBRINGS)` per hop, but each ring sorts its members and hop 2's
+    /// comparator reads a parent's angle, so the constant is not the one a
+    /// glance at the loop suggests.
+    ///
+    /// **A measurement, not a gate.** `#[ignore]`d, so `make gate`'s debug
+    /// `cargo test` never runs it: a debug-profile timing is not evidence
+    /// (`R11`), and a wall-clock assertion inside a gate is a check that goes
+    /// red on a busy machine. Run it deliberately:
+    ///
+    /// ```text
+    /// cargo test --release -p kglite-visual-core --lib \
+    ///     the_radial_kernel_at_the_response_bound -- --ignored --nocapture
+    /// ```
+    ///
+    /// The scene is a synthetic star of [`MAX_LAYOUT_NODES`] nodes over eight
+    /// type groups — the worst case for this kernel, because every node lands
+    /// on one hop and that hop's sort, slot arithmetic and sub-ring search all
+    /// run over the whole set at once. A two-hop shape spreads the same work
+    /// across two smaller sorts and is strictly cheaper.
+    #[test]
+    #[ignore = "a measurement, not a gate: cargo test --release … -- --ignored --nocapture"]
+    fn the_radial_kernel_at_the_response_bound() {
+        let count = MAX_LAYOUT_NODES;
+        let nodes = vec![LayoutNode { radius: 6.0 }; count];
+        let links: Vec<(usize, usize)> = (1..count).map(|i| (0, i)).collect();
+        let group: Vec<u32> = (0..count).map(|i| (i % 8) as u32).collect();
+        let canvas = Canvas {
+            width: 1600.0,
+            height: 1000.0,
+            reserved_top: 98.0,
+        };
+        for run in 1..=3 {
+            let started = std::time::Instant::now();
+            let placed = radial(&nodes, &links, 0, &group, canvas).expect("at the bound");
+            let elapsed = started.elapsed().as_secs_f64() * 1_000.0;
+            assert_eq!(placed.xy.len(), count);
+            println!("radial {count} nodes, run {run}: {elapsed:.2} ms");
+        }
+    }
+
     #[test]
     fn the_layout_refuses_more_than_the_response_bound_permits() {
         // R1: the structural half of D5. A layout that quietly accepted an
