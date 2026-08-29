@@ -11,6 +11,35 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Added
+
+- **A load ceiling, so a graph too big for the machine is refused instead of
+  swapped.** `kglite-visual --max-load-mb N`, `kglite-visual render
+  --max-load-mb N` and `show(path, max_load_mb=N)` ask the engine what the
+  `.kgl` will cost — read from the file's metadata head, with nothing
+  decompressed — and refuse above the ceiling. The refusal is immediate
+  (0.00–0.01 s against a 0.8 s load on a 546 000-node graph) and names the
+  estimate, the ceiling, the terms it is made of and the two ways out. The
+  wheel raises `MemoryError` for it, not `ValueError`: nothing is wrong with
+  the file. Unset, kglite's own `KGLITE_MAX_LOAD_MB` still applies. The
+  estimate is deliberately conservative and can refuse a graph that would have
+  fitted, so it is a guard rather than a budget.
+
+### Changed
+
+- **The engine is `kglite` 0.16.15**, exactly pinned (was 0.16.14).
+- **A truncated query result is now bounded inside the engine rather than
+  after it.** The 5 000-row ceiling reaches kglite's executor, so the rows
+  above it are never built: `MATCH (n) RETURN id(n)` over a 546 850-node graph
+  costs about 100 MB less at its peak. Nothing about the answer changes — the
+  query still runs to completion, so an `ORDER BY` result is still the genuine
+  top 5 000 and an aggregate still folds every row — and the count beside it is
+  still exact: the panel says *showing 5 000 of 546 850*, not an estimate.
+- **A `SIGTERM`ed server still removes the engine's temporary spill**, now
+  verified against a graph that actually produces one. 0.16.15 stopped
+  creating the spill directory for small files, which had quietly made the
+  existing check vacuous.
+
 ## [0.1.0] - 2026-08-29
 
 Everything the project does, listed once: this is the first release, and it
