@@ -199,30 +199,76 @@ fn emit_islands(out: &mut String, scene: &Scene, positions: &Positions, palette:
     }
 }
 
+/// Links, in two groups: the ones inside a community and the ones between two.
+///
+/// **Ink is a budget and the count is known before the first line is drawn.**
+/// At the meta-graph's 124 links the full 0.45 stroke opacity is right; at the
+/// discovery expansion's 3,374 the same value composites to a white wash with
+/// the nodes floating on it, which is the whole of what was left wrong with
+/// that image. `encoding::link_ink` spends the budget as `1/sqrt(n)`, so the
+/// *total* perceived ink stays near constant instead of the per-line ink.
+///
+/// The split into two groups is the second half: a bridge between communities
+/// is what made round 1's meta-graph read as a web, and it is drawn as
+/// background so the lines that make a group read as a group are the ones a
+/// reader sees first. Both are drawn — an edge the picture hides is an edge the
+/// reader concludes is not there — and cross-island lines go down first so a
+/// within-island line is never buried under one.
 fn emit_links(out: &mut String, scene: &Scene, positions: &Positions, palette: &Palette) {
     if scene.links.is_empty() {
         return;
     }
-    out.push_str(&format!(
-        "<g stroke=\"{}\" stroke-opacity=\"{}\" stroke-linecap=\"round\">\n",
-        palette.link,
-        num(palette.link_opacity)
-    ));
-    for link in &scene.links {
-        let (Some(a), Some(b)) = (positions.xy.get(link.source), positions.xy.get(link.target))
-        else {
-            continue;
-        };
-        out.push_str(&format!(
-            "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke-width=\"{}\"/>\n",
-            num(a.0),
-            num(a.1),
-            num(b.0),
-            num(b.1),
-            num(link.width)
-        ));
+    let ink = encoding::link_ink(scene.links.len());
+    let width_ink = encoding::link_width_ink(scene.links.len());
+
+    let mut island_of = vec![usize::MAX; scene.nodes.len()];
+    for (index, island) in positions.islands.iter().enumerate() {
+        for member in &island.members {
+            if let Some(slot) = island_of.get_mut(*member) {
+                *slot = index;
+            }
+        }
     }
-    out.push_str("</g>\n");
+    let crosses = |link: &super::SceneLink| -> bool {
+        let (Some(a), Some(b)) = (island_of.get(link.source), island_of.get(link.target)) else {
+            return false;
+        };
+        *a != usize::MAX && *b != usize::MAX && a != b
+    };
+
+    for (cross, opacity) in [
+        (
+            true,
+            palette.link_opacity * ink * encoding::CROSS_ISLAND_INK,
+        ),
+        (false, palette.link_opacity * ink),
+    ] {
+        let mut group = String::new();
+        for link in scene.links.iter().filter(|link| crosses(link) == cross) {
+            let (Some(a), Some(b)) = (positions.xy.get(link.source), positions.xy.get(link.target))
+            else {
+                continue;
+            };
+            group.push_str(&format!(
+                "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke-width=\"{}\"/>\n",
+                num(a.0),
+                num(a.1),
+                num(b.0),
+                num(b.1),
+                num(link.width * width_ink)
+            ));
+        }
+        if group.is_empty() {
+            continue;
+        }
+        out.push_str(&format!(
+            "<g stroke=\"{}\" stroke-opacity=\"{}\" stroke-linecap=\"round\">\n",
+            palette.link,
+            num(opacity)
+        ));
+        out.push_str(&group);
+        out.push_str("</g>\n");
+    }
 }
 
 /// Circles, largest first.

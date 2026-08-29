@@ -86,6 +86,61 @@ pub fn link_width(count: u32, max: u32) -> f64 {
     LINK_MIN_PX + (LINK_MAX_PX - LINK_MIN_PX) * ramp.min(1.0)
 }
 
+/// Link count at and below which the picture spends its full ink budget.
+///
+/// Around this many lines a reader can still follow one; past it the lines stop
+/// being lines and become a wash.
+const LINK_INK_FULL_BELOW: f64 = 250.0;
+
+/// Floor on the ink ramp. Below this a link is not quiet, it is missing, and a
+/// picture that silently drops its edges is worse than a hazy one.
+const LINK_INK_FLOOR: f64 = 0.30;
+
+/// Extra quietening for a link whose two ends are in different communities.
+///
+/// Within-island lines are the ones that make a group read as a group;
+/// cross-island lines are the ones that made the round-1 meta-graph read as a
+/// web. Both are drawn — a bridge a picture hides is a bridge a reader
+/// concludes is not there — but the second is drawn as background.
+pub const CROSS_ISLAND_INK: f64 = 0.45;
+
+/// How much of the link ink budget a picture with `links` lines may spend.
+///
+/// **The failure this answers, measured:** the discovery-licensee expansion
+/// draws 3,374 links at the same 0.45 stroke opacity the 124-link meta-graph
+/// uses, and 3,374 overlapping strokes at 0.45 composite to a solid white haze
+/// with the nodes floating on it. The count is known before a single line is
+/// emitted, so the ink can be a function of it.
+///
+/// **Inverse-square-root, not inverse.** Ink on the page grows with the number
+/// of lines, and what a reader perceives grows with roughly the square root of
+/// that; `1/n` overcorrects into invisibility at a few hundred links, while
+/// `1/sqrt(n)` holds the *total* perceived ink near constant, which is the
+/// property wanted. Floored, because a link nobody can see is a link the
+/// picture is claiming does not exist.
+///
+/// **No frontend counterpart, and it is not a parity gap.** The app can be
+/// zoomed: a haze at one zoom resolves into lines at the next, and the user
+/// decides. An image is what the reader gets, at the size it was rendered.
+pub fn link_ink(links: usize) -> f64 {
+    if links == 0 {
+        return 1.0;
+    }
+    (LINK_INK_FULL_BELOW / links as f64)
+        .sqrt()
+        .clamp(LINK_INK_FLOOR, 1.0)
+}
+
+/// The same ramp applied to stroke *width*, at half strength.
+///
+/// Width and opacity are not interchangeable: below about half a pixel a
+/// rasteriser antialiases a stroke into a grey nothing, and the width channel
+/// is also carrying the meta-graph's edge counts. So the width gives up half of
+/// what the opacity does, and the encoding survives.
+pub fn link_width_ink(links: usize) -> f64 {
+    0.5 + 0.5 * link_ink(links)
+}
+
 /// A type node with no capability flags.
 ///
 /// Mirrors the `plain` branch of `baseColor` in `frontend/src/main.ts`.
@@ -436,6 +491,28 @@ mod tests {
         assert_eq!(link_width(0, 5_000), LINK_MIN_PX);
         assert_eq!(link_width(5_000, 5_000), LINK_MAX_PX);
         assert!(link_width(1, 5_000) > LINK_MIN_PX);
+    }
+
+    #[test]
+    fn the_link_ink_budget_falls_with_the_link_count_and_stops_at_a_floor() {
+        // The case that bought it: 124 links keep the full budget, 3,374
+        // composite to a white wash at the same per-line opacity.
+        assert_eq!(link_ink(0), 1.0);
+        assert_eq!(link_ink(124), 1.0, "a sparse picture spends everything");
+        assert!(link_ink(1_000) < link_ink(500));
+        assert!(link_ink(500) < link_ink(250));
+        assert_eq!(
+            link_ink(1_000_000),
+            LINK_INK_FLOOR,
+            "a link nobody can see is a link the picture denies"
+        );
+        // Inverse-square-root, not inverse: four times the links is half the
+        // per-line ink, so the total perceived ink is what stays constant.
+        assert!((link_ink(2_000) / link_ink(500) - 0.5).abs() < 1e-9);
+        // And width gives up half of what opacity does, because below about
+        // half a pixel a rasteriser antialiases a stroke into nothing.
+        assert!(link_width_ink(4_000) > link_ink(4_000));
+        assert_eq!(link_width_ink(100), 1.0);
     }
 
     #[test]

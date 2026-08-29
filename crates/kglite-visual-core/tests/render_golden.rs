@@ -318,6 +318,57 @@ fn a_packed_community_is_enclosed_quietly() {
     }
 }
 
+/// A dense picture spends less ink per line than a sparse one, and a
+/// cross-community line is quieter than one inside a community.
+///
+/// The failure: 3,374 links drawn at the 0.45 stroke opacity that suits 124
+/// composite into a white wash with the nodes floating on it. Read out of the
+/// emitted groups rather than off `encoding::link_ink`, because the ramp
+/// existing and the emitter using it are two facts — and the cross-island split
+/// is only observable here.
+#[test]
+fn a_dense_render_draws_quieter_lines_than_a_sparse_one() {
+    let opacities = |svg: &str| -> Vec<f64> {
+        let mut out: Vec<f64> = svg
+            .lines()
+            .filter(|line| line.starts_with("<g stroke=\"#"))
+            .filter_map(|line| {
+                line.split("stroke-opacity=\"")
+                    .nth(1)?
+                    .split('"')
+                    .next()?
+                    .parse()
+                    .ok()
+            })
+            .collect();
+        out.sort_by(f64::total_cmp);
+        out
+    };
+
+    let sparse = opacities(&render_to_string(&cypher_request()));
+    let dense = opacities(&render_to_string(&RenderRequest {
+        source: RenderSource::Cypher(CypherRequest {
+            // Every edge a Person has: 511 links over 107 nodes, past the point
+            // where the full budget is legible.
+            query: "MATCH (a:Person)-[r]-(b) RETURN a, r, b".to_string(),
+            params: Default::default(),
+            limit: Some(900),
+            as_graph: true,
+        }),
+        ..meta_request(Theme::Dark)
+    }));
+
+    assert!(!sparse.is_empty() && !dense.is_empty(), "no link groups");
+    assert!(
+        dense.last() < sparse.last(),
+        "the dense picture must draw quieter: {dense:?} vs {sparse:?}"
+    );
+    assert!(
+        dense.len() == 2 && dense[0] < dense[1],
+        "cross-community lines are drawn as background: {dense:?}"
+    );
+}
+
 /// A render request that cannot produce a picture fails with a message naming
 /// what to do about it, rather than emitting an empty canvas.
 #[test]
