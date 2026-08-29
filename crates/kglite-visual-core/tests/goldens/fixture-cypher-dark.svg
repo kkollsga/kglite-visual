@@ -29,8 +29,13 @@
 <line x1="528.52" y1="543.31" x2="584.43" y2="456.38" stroke-width="0.5"/>
 </g>
 <g>
+<circle cx="296.86" cy="219.96" r="39" fill="#f58299" fill-opacity="0.12"/>
+<circle cx="296.86" cy="219.96" r="25.5" fill="none" stroke="#f58299" stroke-opacity="0.55" stroke-width="1.5"/>
+<circle cx="296.86" cy="219.96" r="15" fill="#f58299" fill-opacity="0.9" stroke="#f58299" stroke-opacity="1" stroke-width="1"><title>Company_0</title></circle>
+<circle cx="612.05" cy="219.96" r="39" fill="#f58299" fill-opacity="0.12"/>
+<circle cx="612.05" cy="219.96" r="25.5" fill="none" stroke="#f58299" stroke-opacity="0.55" stroke-width="1.5"/>
+<circle cx="612.05" cy="219.96" r="15" fill="#f58299" fill-opacity="0.9" stroke="#f58299" stroke-opacity="1" stroke-width="1"><title>Company_1</title></circle>
 <circle cx="334.5" cy="129.08" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_54</title></circle>
-<circle cx="296.86" cy="219.96" r="6" fill="#f58299" fill-opacity="0.9" stroke="#f58299" stroke-opacity="1" stroke-width="1"><title>Company_0</title></circle>
 <circle cx="387.74" cy="182.32" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_52</title></circle>
 <circle cx="387.74" cy="257.59" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_51</title></circle>
 <circle cx="334.5" cy="310.83" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_40</title></circle>
@@ -39,7 +44,6 @@
 <circle cx="205.99" cy="182.32" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_9</title></circle>
 <circle cx="259.23" cy="129.08" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_0</title></circle>
 <circle cx="649.68" cy="129.08" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_58</title></circle>
-<circle cx="612.05" cy="219.96" r="6" fill="#f58299" fill-opacity="0.9" stroke="#f58299" stroke-opacity="1" stroke-width="1"><title>Company_1</title></circle>
 <circle cx="702.92" cy="182.32" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_49</title></circle>
 <circle cx="702.92" cy="257.59" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_36</title></circle>
 <circle cx="649.68" cy="310.83" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_30</title></circle>
@@ -59,30 +63,34 @@
 <circle cx="528.52" cy="543.31" r="6" fill="#5cadfa" fill-opacity="0.9" stroke="#5cadfa" stroke-opacity="1" stroke-width="1"><title>Person_35</title></circle>
 </g>
 <g font-size="12">
-<rect x="292.85" y="139.08" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="299.85" y="153.08" fill="#e6edf3" font-weight="600">Person_54</text>
-<rect x="255.21" y="229.96" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="262.21" y="243.96" fill="#e6edf3" font-weight="600">Company_0</text>
-<rect x="346.09" y="192.32" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="353.09" y="206.32" fill="#e6edf3" font-weight="600">Person_52</text>
-<rect x="346.09" y="267.59" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="353.09" y="281.59" fill="#e6edf3" font-weight="600">Person_51</text>
-<rect x="292.85" y="320.83" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="299.85" y="334.83" fill="#e6edf3" font-weight="600">Person_40</text>
-<rect x="164.34" y="267.59" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="171.34" y="281.59" fill="#e6edf3" font-weight="600">Person_12</text>
-<rect x="168.19" y="192.32" width="75.6" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="175.19" y="206.32" fill="#e6edf3" font-weight="600">Person_9</text>
-<rect x="608.03" y="139.08" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="615.03" y="153.08" fill="#e6edf3" font-weight="600">Person_58</text>
-<rect x="570.4" y="229.96" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="577.4" y="243.96" fill="#e6edf3" font-weight="600">Company_1</text>
-<rect x="661.27" y="192.32" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="668.27" y="206.32" fill="#e6edf3" font-weight="600">Person_49</text>
-<rect x="661.27" y="267.59" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="668.27" y="281.59" fill="#e6edf3" font-weight="600">Person_36</text>
-<rect x="608.03" y="320.83" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
-<text x="615.03" y="334.83" fill="#e6edf3" font-weight="600">Person_30</text>
+<rect x="344.5" y="119.08" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="351.5" y="133.08" fill="#e6edf3" font-weight="600">Person_54</text>
+<rect x="255.21" y="238.96" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="262.21" y="252.96" fill="#e6edf3" font-weight="600">Company_0</text>
+<rect x="397.74" y="172.32" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="404.74" y="186.32" fill="#e6edf3" font-weight="600">Person_52</text>
+<rect x="397.74" y="247.59" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="404.74" y="261.59" fill="#e6edf3" font-weight="600">Person_51</text>
+<rect x="344.5" y="300.83" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="351.5" y="314.83" fill="#e6edf3" font-weight="600">Person_40</text>
+<rect x="165.93" y="300.83" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="172.93" y="314.83" fill="#e6edf3" font-weight="600">Person_21</text>
+<rect x="112.69" y="247.59" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="119.69" y="261.59" fill="#e6edf3" font-weight="600">Person_12</text>
+<rect x="120.39" y="172.32" width="75.6" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="127.39" y="186.32" fill="#e6edf3" font-weight="600">Person_9</text>
+<rect x="173.63" y="119.08" width="75.6" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="180.63" y="133.08" fill="#e6edf3" font-weight="600">Person_0</text>
+<rect x="659.68" y="119.08" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="666.68" y="133.08" fill="#e6edf3" font-weight="600">Person_58</text>
+<rect x="570.4" y="238.96" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="577.4" y="252.96" fill="#e6edf3" font-weight="600">Company_1</text>
+<rect x="712.92" y="172.32" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="719.92" y="186.32" fill="#e6edf3" font-weight="600">Person_49</text>
+<rect x="712.92" y="247.59" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="719.92" y="261.59" fill="#e6edf3" font-weight="600">Person_36</text>
+<rect x="659.68" y="300.83" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
+<text x="666.68" y="314.83" fill="#e6edf3" font-weight="600">Person_30</text>
 <rect x="155.43" y="451.26" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>
 <text x="162.43" y="465.26" fill="#e6edf3" font-weight="600">Person_42</text>
 <rect x="336.84" y="452.4" width="83.3" height="20" rx="5" fill="#0d1117" fill-opacity="0.78" stroke="#8b949e" stroke-opacity="0.35"/>

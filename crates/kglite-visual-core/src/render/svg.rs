@@ -17,7 +17,7 @@
 
 use super::encoding::{self, Palette, Theme};
 use super::labels::{self, LabelSpec};
-use super::layout::Positions;
+use super::layout::{LabelSide, Positions};
 use super::Scene;
 
 /// The font stack, mirroring `.kglv-label` in `frontend/src/styles.css`, with
@@ -178,6 +178,9 @@ fn emit_nodes(out: &mut String, scene: &Scene, positions: &Positions) {
             continue;
         }
         let [r, g, b, a] = node.color;
+        if node.emphasis {
+            emit_halo(out, *x, *y, node.radius, rgb(r, g, b).as_str());
+        }
         // A hairline of the node's OWN colour at a stronger opacity than its
         // fill. The supporting-type dim is an alpha (`SUPPORTING_ALPHA`), and an
         // alpha reads very differently against the two grounds: at 0.41 over
@@ -199,6 +202,38 @@ fn emit_nodes(out: &mut String, scene: &Scene, positions: &Positions) {
         ));
     }
     out.push_str("</g>\n");
+}
+
+/// The halo's outer radius and its ring, as multiples of the node's own.
+const HALO_DISC: f64 = 2.6;
+const HALO_RING: f64 = 1.7;
+
+/// A soft disc and a ring behind the node a radial layout is centred on.
+///
+/// **The seed has to be findable in one glance** (P11 round 2). Before this it
+/// was a six-pixel dot identical to every leaf on the ring around it, and the
+/// only thing saying "this is the node you asked about" was that it happened to
+/// be in the middle — which stops being a signal the moment the picture has two
+/// clusters in it. Size alone is not enough either: an instance node's radius
+/// is an encoding that says *nothing* about the graph, so inflating it without
+/// a second mark would read as "this node is big".
+///
+/// Drawn in the node's own colour, so the emphasis says "here" rather than
+/// introducing a colour the palette does not otherwise use.
+fn emit_halo(out: &mut String, x: f64, y: f64, radius: f64, color: &str) {
+    out.push_str(&format!(
+        "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{color}\" fill-opacity=\"0.12\"/>\n",
+        num(x),
+        num(y),
+        num(radius * HALO_DISC)
+    ));
+    out.push_str(&format!(
+        "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"none\" stroke=\"{color}\" \
+         stroke-opacity=\"0.55\" stroke-width=\"1.5\"/>\n",
+        num(x),
+        num(y),
+        num(radius * HALO_RING)
+    ));
 }
 
 /// Half-angle of the aggregate wedge, as a rotation matrix.
@@ -311,7 +346,7 @@ fn emit_labels(
         .enumerate()
         .filter_map(|(i, node)| {
             let (x, y) = positions.xy.get(i)?;
-            Some(LabelSpec {
+            let mut spec = LabelSpec {
                 slot: node.slot,
                 text: node.text.clone(),
                 badges: node.badges.clone(),
@@ -324,7 +359,26 @@ fn emit_labels(
                 pinned: node.pinned || node.aggregate.is_some(),
                 x: *x,
                 y: y + node.radius + LABEL_GAP_PX,
-            })
+            };
+            // Outward from a ring's centre where the layout asked for it. The
+            // chip is centred on the node's own row rather than dropped below
+            // it, so the name sits at the end of the spoke it belongs to and a
+            // reader traces one line instead of guessing between two.
+            let side = positions
+                .label_side
+                .get(i)
+                .copied()
+                .unwrap_or(LabelSide::Below);
+            if side != LabelSide::Below {
+                let reach = node.radius + LABEL_GAP_PX + draw_width(&spec) / 2.0;
+                spec.x = if side == LabelSide::Left {
+                    x - reach
+                } else {
+                    x + reach
+                };
+                spec.y = y - CHIP_HEIGHT / 2.0;
+            }
+            Some(spec)
         })
         .collect();
     // The app offers only what cosmos.gl's point sampler returned (except on

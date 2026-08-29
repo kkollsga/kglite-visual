@@ -242,6 +242,51 @@ fn every_type_gets_a_label_on_the_meta_graph() {
     }
 }
 
+/// The node a radial layout centres is findable in one glance.
+///
+/// Before P11 round 2 the centre was a six-pixel dot identical to every leaf on
+/// the ring around it, and "it is in the middle" was the only signal — which
+/// stops being one the moment the picture holds two clusters, as this fixture's
+/// does. Asserted through the emitted document rather than the flag, because
+/// the flag being set and the glyph being drawn are two different facts.
+#[test]
+fn the_node_a_ring_is_centred_on_is_drawn_larger_and_haloed() {
+    let svg = render_to_string(&cypher_request());
+    let circles: Vec<&str> = svg
+        .lines()
+        .filter(|line| line.starts_with("<circle"))
+        .collect();
+    let radius_of = |line: &str| -> f64 {
+        line.split(" r=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.0)
+    };
+    let haloes = circles
+        .iter()
+        .filter(|line| line.contains("fill-opacity=\"0.12\""))
+        .count();
+    assert!(
+        haloes > 0,
+        "a ring's centre carries a halo; none was emitted"
+    );
+    let widest_leaf = circles
+        .iter()
+        .filter(|line| line.contains("<title>Person_"))
+        .map(|line| radius_of(line))
+        .fold(0.0f64, f64::max);
+    let centre = circles
+        .iter()
+        .filter(|line| line.contains("<title>Company_"))
+        .map(|line| radius_of(line))
+        .fold(0.0f64, f64::max);
+    assert!(
+        centre > widest_leaf,
+        "the centre ({centre}) must outsize a leaf ({widest_leaf})"
+    );
+}
+
 /// A render request that cannot produce a picture fails with a message naming
 /// what to do about it, rather than emitting an empty canvas.
 #[test]

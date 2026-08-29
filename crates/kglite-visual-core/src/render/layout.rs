@@ -185,11 +185,59 @@ pub struct Canvas {
     pub reserved_top: f64,
 }
 
+/// Which side of its node a label belongs on.
+///
+/// **A layout fact, not an emitter one** (P11 round 2). On a hop ring every
+/// label under its node points at the ring's centre, so the left half's names
+/// are drawn *across* the spokes they belong to and a reader traces the wrong
+/// line. Placing them outward — left of a node on the left, right of one on the
+/// right — makes the chip radiate with the branch it names. Only the layout
+/// knows where the centre is, so only the layout can say.
+///
+/// **No frontend counterpart, and that is not a parity gap.** The app's overlay
+/// follows a cosmos.gl force simulation, which has no ring and therefore no
+/// outward; `LabelOverlay.update` places every chip below its point because
+/// below is the only direction that means the same thing everywhere in *that*
+/// picture. What the two sides still share is the encoding — the chip, the
+/// count, the badges, the collision grid — which is what `super::encoding` and
+/// `super::labels` hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LabelSide {
+    /// Under the circle, the app's own placement.
+    #[default]
+    Below,
+    Left,
+    Right,
+}
+
 /// Where the layout put everything, in pixels, already fitted to the canvas.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Positions {
     pub xy: Vec<(f64, f64)>,
+    /// Per node, parallel to `xy`. See [`LabelSide`].
+    pub label_side: Vec<LabelSide>,
 }
+
+impl Positions {
+    /// Positions with every label under its node — what a layout with no centre
+    /// to radiate from produces.
+    fn below(xy: Vec<(f64, f64)>) -> Self {
+        let label_side = vec![LabelSide::Below; xy.len()];
+        Self { xy, label_side }
+    }
+}
+
+/// Horizontal room a side-placed label needs, in final canvas pixels.
+///
+/// Reserved out of the *fitted* box rather than added to the pre-fit extent,
+/// because [`fit`] scales positions and a pre-fit allowance would arrive scaled
+/// down by exactly the factor that made room for it. Sized at the median sodir
+/// instance title ("Statoil Petroleum AS" is longer, "1/3-4" much shorter); the
+/// emitter still clamps a chip that overruns, which is the backstop.
+const SIDE_LABEL_ROOM_PX: f64 = 100.0;
+
+/// Keep-out between the fitted picture and the canvas edge.
+const MARGIN_PX: f64 = 26.0;
 
 /// Lay `nodes` out under `links`, into a `width` x `height` canvas.
 ///
@@ -221,12 +269,13 @@ pub fn run(
     }
     let count = nodes.len();
     if count == 0 {
-        return Ok(Positions { xy: Vec::new() });
+        return Ok(Positions::below(Vec::new()));
     }
     if count == 1 {
-        return Ok(Positions {
-            xy: vec![(width / 2.0, (height + reserved_top) / 2.0)],
-        });
+        return Ok(Positions::below(vec![(
+            width / 2.0,
+            (height + reserved_top) / 2.0,
+        )]));
     }
 
     let area = width * height;
@@ -283,9 +332,14 @@ pub fn run(
         }
     }
 
-    Ok(Positions {
-        xy: fit(&xy, nodes, width, height, reserved_top),
-    })
+    Ok(Positions::below(fit(
+        &xy,
+        nodes,
+        width,
+        height,
+        reserved_top,
+        0.0,
+    )))
 }
 
 /// Clearance between two neighbours sitting side by side on a hop ring.
@@ -325,6 +379,23 @@ const SUBRING_GAP_PX: f64 = 22.0;
 /// honest about being too full.
 const MAX_SUBRINGS: usize = 6;
 
+/// Widest a ring may be stretched into an ellipse, as a multiple of its height.
+///
+/// **A circular ring in a 16:10 frame wastes the left and right thirds** — the
+/// fit step scales the whole picture to the *shorter* side, so the leaves land
+/// closer together than the canvas could have held them and roughly 30% of the
+/// image is empty margin. Stretching the ring's x-axis to the canvas's own
+/// aspect makes the ellipse fill the frame; the fit step's scale is then set by
+/// both axes at once instead of by height alone.
+///
+/// **Stretch, never squash.** The map is `x *= s` with `s >= 1` and `y`
+/// untouched, so the arc length between two neighbours only ever *grows*: at
+/// the top and bottom of the ellipse it grows by `s`, and at the sides it is
+/// unchanged. A ring that cleared its slots as a circle still clears them as an
+/// ellipse, which is why no capacity arithmetic changes here. Capped because
+/// past about 2:1 the "ring" reads as two horizontal rows.
+const MAX_RING_STRETCH: f64 = 1.8;
+
 /// Lay `nodes` out as hop rings around `seed` — the ego / expansion layout
 /// (P11 direction (a)).
 ///
@@ -363,13 +434,25 @@ pub fn radial(
         return Err(over_bound(count));
     }
     if count == 0 {
-        return Ok(Positions { xy: Vec::new() });
+        return Ok(Positions::below(Vec::new()));
     }
     if seed >= count {
         return Err(CoreError::Request(format!(
             "the layout was handed seed {seed} for a scene of {count} nodes"
         )));
     }
+    // The ellipse the rings are drawn on, and the side room the outward labels
+    // will need — both read off the box this layout was given, so an island's
+    // square sub-canvas gets a circle and no side allowance while the whole
+    // image gets the frame's own shape.
+    let usable_x = (width - 2.0 * MARGIN_PX - 2.0 * SIDE_LABEL_ROOM_PX).max(1.0);
+    let usable_y = (height - reserved_top - 2.0 * MARGIN_PX).max(1.0);
+    let stretch = (usable_x / usable_y).clamp(1.0, MAX_RING_STRETCH);
+    let side_room = if stretch > 1.0 {
+        SIDE_LABEL_ROOM_PX
+    } else {
+        0.0
+    };
 
     let (hop, parent) = structure::hops(count, links, seed);
     let deepest = hop.iter().copied().max().unwrap_or(0);
@@ -490,15 +573,33 @@ pub fn radial(
                     QUARTER_TURN_BACK + (cursor + slots[position] * scale / 2.0) / sub_radius;
                 cursor += slots[position] * scale;
                 let (ux, uy) = unit(angle);
-                xy[node] = (sub_radius * ux, sub_radius * uy);
+                // The ellipse: x is stretched, y is not. See MAX_RING_STRETCH.
+                xy[node] = (sub_radius * ux * stretch, sub_radius * uy);
                 angle_of[node] = angle;
             }
         }
         radius = inner + (rings - 1) as f64 * step;
     }
 
+    // Outward from the centre, which sits at the origin in this space: a node
+    // on the left half wears its name on its left. The seed itself keeps the
+    // app's placement — it has no outward, and its label belongs under the
+    // halo rather than beside it.
+    let label_side: Vec<LabelSide> = (0..count)
+        .map(|i| {
+            if i == seed {
+                LabelSide::Below
+            } else if xy[i].0 < 0.0 {
+                LabelSide::Left
+            } else {
+                LabelSide::Right
+            }
+        })
+        .collect();
+
     Ok(Positions {
-        xy: fit(&xy, nodes, width, height, reserved_top),
+        xy: fit(&xy, nodes, width, height, reserved_top, side_room),
+        label_side,
     })
 }
 
@@ -578,7 +679,7 @@ pub fn islands(
         return Err(over_bound(count));
     }
     if count == 0 {
-        return Ok(Positions { xy: Vec::new() });
+        return Ok(Positions::below(Vec::new()));
     }
 
     let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); groups];
@@ -616,6 +717,7 @@ pub fn islands(
         .clamp(ISLAND_SPACING_MIN_PX, ISLAND_SPACING_MAX_PX);
 
     let mut xy = vec![(0.0f64, 0.0f64); count];
+    let mut label_side = vec![LabelSide::Below; count];
     // (island index, width, height) — solved before anything is placed, so the
     // packer works on final sizes.
     let mut boxes: Vec<(f64, f64)> = Vec::with_capacity(islands.len());
@@ -680,6 +782,9 @@ pub fn islands(
                 island_seed,
             )?,
         };
+        for (member, side) in members.iter().zip(solved.label_side.iter()) {
+            label_side[*member] = *side;
+        }
         boxes.push((box_width, box_height));
         placements.push(solved.xy);
     }
@@ -719,7 +824,8 @@ pub fn islands(
     }
 
     Ok(Positions {
-        xy: fit(&xy, nodes, width, height, reserved_top),
+        xy: fit(&xy, nodes, width, height, reserved_top, 0.0),
+        label_side,
     })
 }
 
@@ -997,10 +1103,9 @@ fn fit(
     width: f64,
     height: f64,
     reserved_top: f64,
+    side_room: f64,
 ) -> Vec<(f64, f64)> {
-    // Room for the label chip that hangs below the widest circle, plus the
-    // status block the emitter draws in the top-left corner.
-    const MARGIN_PX: f64 = 26.0;
+    // Room for the label chip that hangs below the widest circle.
     const LABEL_ROOM_PX: f64 = 26.0;
 
     let mut min_x = f64::INFINITY;
@@ -1015,7 +1120,11 @@ fn fit(
     }
     let span_x = (max_x - min_x).max(1.0);
     let span_y = (max_y - min_y).max(1.0);
-    let usable_x = (width - 2.0 * MARGIN_PX).max(1.0);
+    // `side_room` is subtracted in FINAL pixels, not added to the pre-fit
+    // extent: a label drawn beside its node is the same width whatever the
+    // layout was scaled by, and an allowance folded into `span_x` would arrive
+    // shrunk by exactly the factor it was there to survive.
+    let usable_x = (width - 2.0 * MARGIN_PX - 2.0 * side_room).max(1.0);
     // `reserved_top` is the status block's strip. The app draws that block
     // *over* the canvas and lets it cover whatever is under it — it is
     // `pointer-events: none` chrome a user can scroll out from behind. An image
@@ -1024,7 +1133,7 @@ fn fit(
     let usable_y = (height - reserved_top - 2.0 * MARGIN_PX).max(1.0);
     let scale = (usable_x / span_x).min(usable_y / span_y);
     // Centre what is left over, so a wide graph is not pinned to one edge.
-    let offset_x = MARGIN_PX + (usable_x - span_x * scale) / 2.0;
+    let offset_x = MARGIN_PX + side_room + (usable_x - span_x * scale) / 2.0;
     let offset_y = reserved_top + MARGIN_PX + (usable_y - span_y * scale) / 2.0;
 
     xy.iter()
@@ -1188,6 +1297,86 @@ mod tests {
                     separation(&placed.xy, i, j)
                 );
             }
+        }
+    }
+
+    /// A star, for the ring tests below: node 0 at the centre, `count - 1`
+    /// leaves.
+    fn star(count: usize) -> (Vec<LayoutNode>, Vec<(usize, usize)>, Vec<u32>) {
+        let nodes = vec![LayoutNode { radius: 6.0 }; count];
+        let links: Vec<(usize, usize)> = (1..count).map(|i| (0, i)).collect();
+        let group = vec![0u32; count];
+        (nodes, links, group)
+    }
+
+    #[test]
+    fn a_ring_stretches_to_the_canvas_it_was_given() {
+        // The waste this fixes: a circular ring in a 16:10 frame is fitted to
+        // the shorter side, and the left and right thirds of the image are
+        // empty. Measured as the drawn extent, because that is what a reader
+        // sees; a stretch factor nobody could observe would be a no-op.
+        let (nodes, links, group) = star(40);
+        let spread = |canvas: Canvas| {
+            let placed = radial(&nodes, &links, 0, &group, canvas).expect("a star lays out");
+            let xs: Vec<f64> = placed.xy.iter().map(|(x, _)| *x).collect();
+            let ys: Vec<f64> = placed.xy.iter().map(|(_, y)| *y).collect();
+            let span = |v: &[f64]| {
+                v.iter().copied().fold(f64::MIN, f64::max)
+                    - v.iter().copied().fold(f64::MAX, f64::min)
+            };
+            span(&xs) / span(&ys)
+        };
+        let wide = spread(Canvas {
+            width: 1600.0,
+            height: 1000.0,
+            reserved_top: 0.0,
+        });
+        let square = spread(Canvas {
+            width: 1000.0,
+            height: 1000.0,
+            reserved_top: 0.0,
+        });
+        assert!(
+            (square - 1.0).abs() < 0.12,
+            "a square canvas still gets a circle: {square:.2}"
+        );
+        assert!(
+            wide > 1.3,
+            "a 16:10 canvas must get a ring that uses its width: {wide:.2}"
+        );
+    }
+
+    #[test]
+    fn ring_labels_point_away_from_the_centre() {
+        // Without this the left half's chips are drawn across the spokes they
+        // belong to. Asserted per node against its own x, so a rule that
+        // happened to be right for one half is not enough.
+        let (nodes, links, group) = star(24);
+        let placed = radial(
+            &nodes,
+            &links,
+            0,
+            &group,
+            Canvas {
+                width: 1600.0,
+                height: 1000.0,
+                reserved_top: 0.0,
+            },
+        )
+        .expect("a star lays out");
+        let centre = placed.xy[0].0;
+        assert_eq!(
+            placed.label_side[0],
+            LabelSide::Below,
+            "the centre has no outward"
+        );
+        for i in 1..24 {
+            let want = if placed.xy[i].0 < centre {
+                LabelSide::Left
+            } else {
+                LabelSide::Right
+            };
+            assert_eq!(placed.label_side[i], want, "node {i} at {:?}", placed.xy[i]);
         }
     }
 

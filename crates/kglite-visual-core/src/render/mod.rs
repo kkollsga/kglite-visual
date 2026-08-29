@@ -248,6 +248,11 @@ pub(crate) struct SceneNode {
     /// the picture — drawn as a wedge, never as a circle. See
     /// [`fold_leaf_fans`].
     pub aggregate: Option<u32>,
+    /// This node is the one a radial layout is centred on: drawn larger, with a
+    /// halo, and never thinned. Set by [`emphasise_centres`] once the plan is
+    /// known, never by a scene builder — a builder cannot know which layout
+    /// kernel the structure will choose.
+    pub emphasis: bool,
 }
 
 /// One link, ready to draw.
@@ -362,12 +367,17 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         ));
     }
 
+    let links: Vec<(usize, usize)> = scene.links.iter().map(|l| (l.source, l.target)).collect();
+    let plan = structure::plan(scene.nodes.len(), &links, &scene.seeds);
+    // Before the layout nodes are built, because emphasis changes a radius and
+    // a ring is sized from the radii it has to hold.
+    emphasise_centres(&mut scene, &plan, &links);
+
     let nodes: Vec<layout::LayoutNode> = scene
         .nodes
         .iter()
         .map(|n| layout::LayoutNode { radius: n.radius })
         .collect();
-    let links: Vec<(usize, usize)> = scene.links.iter().map(|l| (l.source, l.target)).collect();
     // The layout is told about the status block so nothing is laid out
     // underneath it; the emitter owns that rectangle's geometry.
     let canvas = layout::Canvas {
@@ -377,7 +387,7 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     };
     let groups = arc_groups(&scene);
     let started = std::time::Instant::now();
-    let positions = match structure::plan(nodes.len(), &links, &scene.seeds) {
+    let positions = match plan {
         structure::Plan::Radial { seed } => layout::radial(&nodes, &links, seed, &groups, canvas)?,
         structure::Plan::Islands { community, count } => layout::islands(
             &nodes,
@@ -410,6 +420,72 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         truncated: !scene.banners.is_empty(),
         banners: scene.banners,
     })
+}
+
+/// Smallest radius the node a layout is centred on may be drawn at.
+///
+/// An instance node's radius is a constant ([`encoding::INSTANCE_RADIUS_PX`]) —
+/// it encodes nothing, because an instance carries no count — so raising it for
+/// the ego centre takes no meaning away from the picture. On a meta-graph
+/// centre the type's own radius is an encoding and wins if it is already
+/// larger, which is what `max` says.
+const EGO_RADIUS_PX: f64 = 15.0;
+
+/// Mark the node (or nodes) a radial kernel will centre, so the emitter can
+/// draw them as centres.
+///
+/// **The plan decides this, not the request.** `Scene::seeds` is what the
+/// caller *named*; the centre is what `structure::plan` will actually put in
+/// the middle, and for an island packing there is one per star-shaped island
+/// that no request named at all.
+///
+/// The island bucketing mirrors `layout::islands` exactly — same singleton
+/// rule, same member order — because the two have to agree about which local
+/// index is which. Both are pure functions of `(community, links)`, so they
+/// agree by construction rather than by a shared mutable structure.
+fn emphasise_centres(scene: &mut Scene, plan: &structure::Plan, links: &[(usize, usize)]) {
+    let mut centres: Vec<usize> = Vec::new();
+    match plan {
+        structure::Plan::Radial { seed } => centres.push(*seed),
+        structure::Plan::Islands { community, count } => {
+            let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); *count];
+            for (index, group_id) in community.iter().enumerate() {
+                if *group_id < *count {
+                    buckets[*group_id].push(index);
+                }
+            }
+            for members in buckets.iter().filter(|b| b.len() > 1) {
+                let position_of: std::collections::HashMap<usize, usize> = members
+                    .iter()
+                    .enumerate()
+                    .map(|(local, global)| (*global, local))
+                    .collect();
+                let local_links: Vec<(usize, usize)> = links
+                    .iter()
+                    .filter_map(|(a, b)| Some((*position_of.get(a)?, *position_of.get(b)?)))
+                    .collect();
+                if let structure::Plan::Radial { seed } =
+                    structure::plan(members.len(), &local_links, &[])
+                {
+                    centres.push(members[seed]);
+                }
+            }
+        }
+        structure::Plan::Force => {}
+    }
+    for centre in centres {
+        let Some(node) = scene.nodes.get_mut(centre) else {
+            continue;
+        };
+        // A folded fan is never a centre: it stands for nodes that are not in
+        // the picture, and a halo would claim the opposite.
+        if node.aggregate.is_some() {
+            continue;
+        }
+        node.emphasis = true;
+        node.pinned = true;
+        node.radius = node.radius.max(EGO_RADIUS_PX);
+    }
 }
 
 /// The arc key each node is grouped by on a hop ring — its type.
@@ -560,6 +636,7 @@ fn fold_leaf_fans(scene: &mut Scene, canvas_area: f64) -> u32 {
             show_count: false,
             pinned: true,
             aggregate: Some(total),
+            emphasis: false,
         });
     }
 
@@ -716,6 +793,7 @@ fn live_scene(session: &Session) -> Scene {
                     show_count: true,
                     pinned: false,
                     aggregate: None,
+                    emphasis: false,
                 }
             }
             SlotEntry::Node {
@@ -746,6 +824,7 @@ fn live_scene(session: &Session) -> Scene {
                     show_count: false,
                     pinned: false,
                     aggregate: None,
+                    emphasis: false,
                 }
             }
             SlotEntry::Tombstone => unreachable!("live_entries skips tombstones"),
@@ -866,6 +945,7 @@ fn meta_scene(meta: &MetaGraphResponse, session: &Session) -> Scene {
             show_count: true,
             pinned: false,
             aggregate: None,
+            emphasis: false,
         })
         .collect();
 
@@ -969,6 +1049,7 @@ fn slice_scene(session: &Session, slice: &GraphSlice, seed_type: Option<&str>) -
             show_count: false,
             pinned: false,
             aggregate: None,
+            emphasis: false,
         })
         .collect();
 
