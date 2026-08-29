@@ -5,10 +5,12 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29 (P6 landed — the buildout plan is complete): the
-> artifact exists, and it proves itself.** Three crates (`core`, `cli`,
-> `py`), a Vite/TypeScript frontend that renders the type-level meta-graph
-> through cosmos.gl and drills into it, a versioned binary protocol (v2)
+> **Status, 2026-08-29 (P7 landed on top of the completed P0–P6 buildout):
+> the artifact exists, proves itself, and reads as a graph on real data.**
+> Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend that
+> renders the type-level meta-graph through cosmos.gl — GPU force layout by
+> default, the D2 deterministic mode behind an explicit `?deterministic=1`
+> switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v2)
 > with an exact framing baseline, an axum server on localhost with the
 > frontend embedded, **a Python wheel whose `show()` runs that same server
 > lib-linked into the extension**, a source distribution that installs
@@ -244,7 +246,12 @@ bug wearing a default. That rule is now a check: `scripts/check_bundle.py`
 refuses a `frontend/dist` older than `frontend/src`, and its
 `--resolve-binary` mode — which the e2e harness uses instead of a hard-coded
 path — refuses a binary older than the bundle it should embed. Both are
-proven able to fail by `make self-test`.
+proven able to fail by `make self-test`. One corollary P7 paid for: **a
+check that regenerates a file to prove it did not change must not leave that
+file's timestamp bumped** — ts-rs rewrites the generated `.ts` on every
+`cargo test`, and until the mtime restore landed, a *passing* gate aged its
+own bundle and the next freshness check read its own side effect as
+staleness.
 
 ## Code analysis — graph-first via the code-review MCP
 
@@ -410,7 +417,11 @@ a renderer.
     measuring phase carries a stop rule written *before* it runs: the result
     that retires the item instead of implementing it. A stop rule composed
     after the numbers are in is a rationalisation; its date is the tell.
-11. **A frame-period line sits between vsync buckets, not on one.** A
+11. **A capture runs in deterministic layout mode** (`?deterministic=1`) —
+    the harness passes it, and the reason is the measurement itself: with
+    the force layout live, a frame-time cell measures the settle, not the
+    renderer, and `positionsHash` describes nothing.
+12. **A frame-period line sits between vsync buckets, not on one.** A
     vsync-locked presenter quantises the period to k × the refresh interval,
     so testing `p95 <= 16.7 ms` fails a renderer that hit every vsync on
     jitter alone. The 60 fps line is `p95 < 1.5 × refresh`, the 30 fps line
