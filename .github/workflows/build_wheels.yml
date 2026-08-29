@@ -300,18 +300,26 @@ jobs:
           if-no-files-found: error
 
   # aarch64 Linux — extra coverage, cross-built in the container. These are the
-  # fragile combos, so the job is BEST-EFFORT: a cross-build failure must not
-  # block a release that has its must-pass wheels. A cell that does build gets
-  # published; a broken one is simply absent until a later release fixes it.
-  # `continue-on-error` here is exactly why the publish job below reads
-  # `needs.*.result` explicitly instead of relying on job success.
+  # fragile combos, so the CROSS-BUILD is BEST-EFFORT: a cross-build failure
+  # must not block a release that has its must-pass wheels. A cell that does
+  # build gets published; a broken one is simply absent until a later release
+  # fixes it.
+  #
+  # The tolerance is on ONE STEP, not on the job (`R1`). A job-level
+  # `continue-on-error` cannot fail, and a job that cannot fail makes every
+  # check inside it decorative — the bundle-freshness check, the wheel
+  # inventory and the fail-on-empty upload would all report into a result
+  # nothing reads. So the cross-build step carries the tolerance and an `id`,
+  # and the steps after it run only when it actually produced something. The
+  # two failure shapes now separate: a cross-build that cannot compile leaves a
+  # GREEN job with no artifact, and a wheel that builds but ships without its
+  # embedded frontend leaves a RED one.
   build-linux-arm:
     name: Build wheel — linux — ${{ matrix.target }} (${{ matrix.manylinux }})
     needs: [version-check]
     if: needs.version-check.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -337,19 +345,32 @@ jobs:
         run: make frontend-install frontend-build
       - name: Bundle freshness
         run: make check-bundle
+      # The one best-effort step. Everything above it is the same x86_64 work
+      # the must-pass legs do and is held to the same bar; everything below it
+      # inspects what this step produced and must be able to go red.
       - name: Build the release wheel (container)
+        id: cross-build
+        continue-on-error: true
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           args: --release -m crates/kglite-visual-py/Cargo.toml --out wheels
+      - name: Note a skipped best-effort cross-build
+        if: steps.cross-build.outcome == 'failure'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: echo "::warning::$TARGET cross-build failed; best-effort leg, no wheel this release"
       - uses: actions/setup-python@v7
+        if: steps.cross-build.outcome == 'success'
         with:
           python-version: '3.10'
       # Inventory only — an aarch64 wheel cannot be imported on an x86_64
       # runner. The inventory half is the platform-independent one, and it is
-      # the half that catches the missing-frontend-bundle failure.
+      # the half that catches the missing-frontend-bundle failure. It fails the
+      # job: a wheel that built is a wheel that must be correct.
       - name: Wheel inventory
+        if: steps.cross-build.outcome == 'success'
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -359,6 +380,7 @@ jobs:
             python scripts/check_wheel.py --wheel "$w" --inventory-only
           done
       - name: Upload wheels
+        if: steps.cross-build.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: wheels-linux-${{ matrix.target }}
@@ -502,11 +524,13 @@ jobs:
     # file, and a fork must never publish under this name.
     #
     # `always()` plus explicit `result` terms, rather than plain `needs`
-    # success: `build-linux-arm` is `continue-on-error`, and a
-    # continue-on-error job that fails still counts as a FAILED dependency,
-    # which would silently SKIP this job instead of publishing the wheels that
-    # did build. Every must-pass leg is named explicitly below; the best-effort
-    # one deliberately is not.
+    # success: `build-linux-arm` is the best-effort leg and it CAN now fail —
+    # its tolerance sits on the cross-build step, so a wheel that builds badly
+    # turns the job red. Under plain `needs`, that red job would silently SKIP
+    # this one instead of publishing the wheels that did build. Every must-pass
+    # leg is named explicitly below; the best-effort one deliberately is not,
+    # so its result reaches a human without gating the release. The artifact-set
+    # check below is what decides completeness (`R9`), not job colour.
     if: >-
       always() &&
       vars.PYPI_PUBLISH_ENABLED == 'true' &&
