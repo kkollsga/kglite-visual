@@ -30,6 +30,15 @@ abi3 = ["pyo3/abi3-py310"]
 # 0.29 matches KGLite's wheel. Two extension modules that link different pyo3
 # majors can coexist, but keeping them in step is free and removes a variable
 # from any notebook that imports both.
+#
+# The floor is 0.29.0 and it is REAL, not a caret written by habit. KGLite's
+# release-time ecosystem audit flagged the gap between this declaration and the
+# 0.29.2 the lockfile resolves, so it was measured rather than argued:
+# `cargo update -p pyo3 --precise 0.29.0`, rebuild the extension into the venv,
+# run the wheel's whole suite — 38 passed, 2026-08-29. Not "it compiles", which
+# is the weak test this project has a rule about: the suite drives `show()`,
+# the launch contract and the `to_bytes()` handover through a real interpreter.
+# The lockfile is back at 0.29.2, which is what ships.
 pyo3 = { version = "0.29" }
 
 # VERSION SITE 3 of 4. See CLAUDE.md → "Commits & releases".
