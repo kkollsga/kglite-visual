@@ -15,7 +15,7 @@ don't improvise around it (`R17`: this file is a claim).
 ```bash
 cd frontend && npm run build && cd ..     # embed-input first: dist is compiled in
 cargo build -p kglite-visual-cli
-BIN=$(python3 scripts/check_bundle.py --resolve-binary)   # newest-of-profile,
+BIN=$(python3 scripts/check_bundle.py --resolve-binary kglite-visual)   # newest-of-profile,
                                                           # refuses stale bundle
 ```
 

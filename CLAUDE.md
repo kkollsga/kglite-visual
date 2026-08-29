@@ -420,10 +420,13 @@ a renderer.
    because *our* source cannot touch it silently expires when a **dependency**
    moves instead — and this project has two moving dependencies, `kglite` and
    the renderer. Re-justify the controls after every dependency bump.
-   (kglite moved 0.16.13 → 0.16.14 on 2026-08-29; the bench `.kgl` inputs
-   under `dev-docs/bench/out/` were written by the older engine and 0.16.14
-   changed how a `.kgl` is written, so regenerate them at the next capture
-   rather than comparing across engines.) A
+   (kglite moved 0.16.13 → 0.16.14 → 0.16.15 on 2026-08-29/30; the bench
+   `.kgl` inputs under `dev-docs/bench/out/` were written by the oldest of
+   the three and 0.16.14 changed how a `.kgl` is written, so regenerate
+   them at the next capture rather than comparing across engines. 0.16.15
+   also made `.kgl` loads 5–10% faster and moved the response bound's row
+   half *inside* the executor, so any cell timing a bounded query now
+   measures a different mechanism than the last baseline described.) A
    control that moves **deterministically** across repeated re-measures is not
    instrument wander — re-measuring returns the same number forever; the
    control's premise is void, and that is a finding about the gate.
@@ -707,8 +710,15 @@ project's name. *kglite was verified present on crates.io on 2026-08-29: 99
 versions, newest and default `0.16.13`, crate not yanked*, and the workspace
 now builds and tests against the published crate. The floor moved to
 `=0.16.14` on 2026-08-29 (P8) — the release KGLite cut from this project's
-nine findings. `release.yml`'s sdist job asserts no foreign crate
-reappears.
+nine findings — and to `=0.16.15` on 2026-08-30 (P12), the release that
+answered the second round: `row_limit`, the load-memory ceiling,
+`InvalidData` across the loader, and the spill-directory race this
+project's `EEXIST` report root-caused. P12's floor move broke a test,
+correctly: 0.16.15 stopped spilling for small files and
+`tests/shutdown.rs` refused to pass on an empty `$TMPDIR`. **A version
+that can compile and still misbehave must be run** — that is the same
+rule, collecting on a different dependency. `release.yml`'s sdist job
+asserts no foreign crate reappears.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
