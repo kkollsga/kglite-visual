@@ -21,16 +21,37 @@ DEV_DOCS_MAX_MB ?= 200
 # enforcement grows with the tree).
 TARGET_WARN_MB ?= 20000
 NODE_MODULES_WARN_MB ?= 1000
+# The project-local venv the wheel's test loop lives in. Same tier, same owner
+# (`make clean-build`), same advisory report. It holds maturin, pytest and an
+# editable install of the extension; ~200 MB is a fresh one with a debug .so.
+VENV_WARN_MB ?= 800
 
 PYTHON ?= python3
 CARGO ?= cargo
 NPM ?= npm
 
+# One project-local virtualenv, created on demand and reused thereafter, so
+# `make pytest` means the same thing on every machine and in CI. Created rather
+# than skipped: an ABSENT pytest step and a passing one must not depend on
+# whether the developer happened to have a venv (doctrine R10).
+VENV ?= .venv
+VENV_STAMP = $(VENV)/.kglv-tooling
+# Wheels land in target/, which already has a bound and an owner. A new
+# top-level dist/ would be a new accumulation tier needing both (doctrine R4).
+WHEEL_DIR = target/wheels
+# `maturin build` is a debug build by default, and the gate wants it that way:
+# the embedded-bundle question this check exists to ask is answered identically
+# by either profile (rust-embed's `debug-embed` is always on), and a release
+# build on every gate run is minutes of LTO for no extra evidence. The release
+# artifact is `make wheel WHEEL_PROFILE=--release`, which is what P6's CI runs.
+WHEEL_PROFILE ?=
+
 .PHONY: help gate lint self-test clean-build \
         check-dev-docs check-skill-mirrors check-bans check-build-dirs \
         check-generated-ts check-protocol-baseline check-bundle sync-agents \
         rust-fmt rust-clippy rust-test cli-build fixture e2e \
-        frontend-install frontend-typecheck frontend-build frontend-audit
+        frontend-install frontend-typecheck frontend-build frontend-audit \
+        py-venv py-venv-refresh py-develop pytest wheel check-packaged-consumer
 
 help:  ## List the targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | \
@@ -54,13 +75,9 @@ help:  ## List the targets
 gate: check-dev-docs check-skill-mirrors check-bans check-build-dirs \
       frontend-typecheck frontend-build check-bundle \
       rust-fmt rust-clippy rust-test check-generated-ts check-protocol-baseline \
-      e2e frontend-audit  ## Local pre-push gate (runs what exists; reports the rest ABSENT)
+      e2e pytest check-packaged-consumer frontend-audit  ## Local pre-push gate
 	@echo ""
-	@echo "gate: the following steps do not exist yet and were NOT run."
-	@echo "gate: an absent step is not a pass (doctrine R10)."
-	@echo "  ABSENT  pytest                     (no wheel)"
-	@echo "  ABSENT  packaged-consumer check    (nothing is packaged)"
-	@echo "gate: 14 checks ran, 2 absent."
+	@echo "gate: 16 checks ran, 0 absent."
 
 lint: check-dev-docs check-skill-mirrors check-bans rust-fmt rust-clippy frontend-typecheck  ## Static checks only — no test execution
 
@@ -82,15 +99,19 @@ check-skill-mirrors:  ## Assert .agents/ is an unmodified adapter of the authori
 check-bans:  ## FAIL on an @cosmograph/* dependency or a #[global_allocator] in the py crate
 	@$(PYTHON) scripts/check_bans.py
 
-# target/ and node_modules/ are the two paths this project writes outside git
-# that nothing ever collects (a 2026-07 estate audit found 503 GB of cargo
-# target dirs). Advisory by design — see TARGET_WARN_MB above.
-check-build-dirs:  ## WARN when target/ or node_modules/ pass their advisory ceiling
-	@for d in target frontend/node_modules; do \
+# The three paths this project writes outside git that nothing ever collects
+# (a 2026-07 estate audit found 503 GB of cargo target dirs). `.venv/` joined
+# them in P5 with the wheel's test loop; `target/wheels/` and the fresh venv the
+# packaged-consumer probe builds need no separate entry — the first is inside
+# target/, and the second is a tempdir the probe deletes in a `finally`.
+# Advisory by design — see TARGET_WARN_MB above.
+check-build-dirs:  ## WARN when target/, node_modules/ or .venv/ pass their ceiling
+	@for d in target frontend/node_modules $(VENV); do \
 	  if [ -d "$$d" ]; then \
 	    mb=$$(du -sm "$$d" 2>/dev/null | cut -f1); \
 	    case "$$d" in \
 	      target) cap=$(TARGET_WARN_MB) ;; \
+	      $(VENV)) cap=$(VENV_WARN_MB) ;; \
 	      *)      cap=$(NODE_MODULES_WARN_MB) ;; \
 	    esac; \
 	    if [ "$$mb" -gt "$$cap" ]; then \
@@ -103,6 +124,7 @@ check-build-dirs:  ## WARN when target/ or node_modules/ pass their advisory cei
 clean-build:  ## Delete the regenerable build directories (owner of the R4 bound above)
 	@$(CARGO) clean
 	@rm -rf frontend/node_modules frontend/dist
+	@rm -rf $(VENV) .pytest_cache
 
 rust-fmt:  ## Formatting is decided by rustfmt, never in review
 	@$(CARGO) fmt --all -- --check
@@ -206,6 +228,53 @@ fixture:  ## Regenerate crates/kglite-visual-core/tests/fixtures/ (seeded, byte-
 	@rm -f /tmp/kglv-fixture-once.kgl /tmp/kglv-positions-once.json
 	@echo "fixture: OK — regenerated twice, byte-identical"
 
+# ---- the Python wheel -------------------------------------------------
+#
+# One project-local venv, created once and reused. The stamp file has no
+# prerequisites on purpose: re-resolving pip requirements on every gate run
+# would put the network on the critical path of a check that has nothing to do
+# with the network. `make py-venv-refresh` is the deliberate way to move the
+# tooling.
+$(VENV_STAMP):
+	@test -x $(VENV)/bin/python || $(PYTHON) -m venv $(VENV)
+	@$(VENV)/bin/python -m pip install -q --upgrade pip
+	@$(VENV)/bin/python -m pip install -q maturin pytest
+	@touch $@
+
+py-venv: $(VENV_STAMP)  ## Create (or reuse) the project-local venv the wheel is tested in
+
+py-venv-refresh:  ## Re-install the venv's tooling from the network
+	@rm -f $(VENV_STAMP)
+	@$(MAKE) py-venv
+
+# `maturin develop` compiles the extension into the venv. pytest depends on it
+# because a suite that silently tested last week's .so is worse than no suite —
+# the same trap as a stale frontend bundle inside a fresh binary, one toolchain
+# over.
+py-develop: py-venv  ## Build the extension into the venv (editable install)
+	@VIRTUAL_ENV=$(CURDIR)/$(VENV) $(VENV)/bin/maturin develop -q -m crates/kglite-visual-py/Cargo.toml
+
+# L5. The launch contract from Python, the to_bytes() handover, the error
+# paths, the notebook rendering, and the three shutdown routes — two of which
+# are subprocess tests with a wall-clock timeout, because the failure they
+# guard is a hang and a hang is invisible to any assertion after it.
+pytest: py-develop  ## The wheel's test suite (test-plan L5)
+	@$(VENV)/bin/python -m pytest
+
+wheel: py-venv  ## Build a wheel into target/wheels (WHEEL_PROFILE=--release for the artifact)
+	@mkdir -p $(WHEEL_DIR)
+	@VIRTUAL_ENV=$(CURDIR)/$(VENV) $(VENV)/bin/maturin build $(WHEEL_PROFILE) \
+	  -m crates/kglite-visual-py/Cargo.toml -o $(WHEEL_DIR)
+
+# The one check that can see what a source-tree test cannot: the *artifact*
+# missing something the sources have. The frontend bundle lives inside the
+# extension module, so a wheel built against an empty frontend/dist imports,
+# serves, and answers / with an error page — and nothing upstream notices.
+# Installs into a throwaway venv and probes from outside the repo root, so the
+# source tree cannot shadow the package being tested.
+check-packaged-consumer: wheel  ## Install the built wheel elsewhere and drive it
+	@$(PYTHON) scripts/check_wheel.py
+
 frontend-install:  ## Install frontend deps from the committed lockfile
 	@cd frontend && $(NPM) ci
 
@@ -232,8 +301,9 @@ sync-agents:  ## Regenerate .agents/ + AGENTS.md from the CLAUDE.md authority
 
 # A verification that has never been seen failing is not yet a verification
 # (doctrine R1). Every checker carries a self-test; run it after touching one.
-self-test:  ## Prove the gate's checks can actually fail
+self-test: wheel  ## Prove the gate's checks can actually fail
 	@$(PYTHON) scripts/check_dev_docs.py --self-test
 	@$(PYTHON) scripts/check_skill_mirrors.py --self-test
 	@$(PYTHON) scripts/check_bans.py --self-test
 	@$(PYTHON) scripts/check_bundle.py --self-test
+	@$(PYTHON) scripts/check_wheel.py --self-test

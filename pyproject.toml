@@ -29,9 +29,26 @@ dependencies = []
 # and this deliberately is not one of them.
 dynamic = ["version"]
 
+[project.scripts]
+# The lib-link pattern (plan D9): the console script re-enters the CLI crate's
+# own `run_from`, the same function `main.rs` calls, so `kglite-visual` from
+# the wheel and `kglite-visual` from `cargo install` are the same program. The
+# alternative — a second binary shipped inside the wheel — would double the
+# artifact and give the flags somewhere to drift.
+kglite-visual = "kglite_visual:_run_cli"
+
 [project.urls]
 Homepage = "https://github.com/kkollsga/kglite-visual"
 Repository = "https://github.com/kkollsga/kglite-visual"
+
+[tool.pytest.ini_options]
+# `tests/` is outside the package on purpose: `python-source = "python"` means
+# maturin ships everything under `python/`, so a `python/tests/` directory
+# would install a top-level `tests` package into every user's site-packages.
+testpaths = ["tests"]
+# So a test module can `from conftest import ...` for the HTTP helpers.
+pythonpath = ["tests"]
+addopts = "-q --strict-markers"
 
 [tool.maturin]
 manifest-path = "crates/kglite-visual-py/Cargo.toml"

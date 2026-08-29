@@ -1332,8 +1332,10 @@ dependencies = [
 name = "kglite-visual-py"
 version = "0.1.0"
 dependencies = [
+ "kglite-visual-cli",
  "kglite-visual-core",
  "pyo3",
+ "tokio",
 ]
 
 [[package]]

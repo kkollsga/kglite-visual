@@ -45,10 +45,32 @@ pub fn bind(session: Session, requested_port: u16, graph: String) -> std::io::Re
 }
 
 impl Bound {
-    /// Serve until the process is killed.
+    /// Serve until the process is killed. The CLI's shape: nothing ever asks
+    /// it to stop.
     pub async fn serve(self) -> std::io::Result<()> {
+        self.serve_until(std::future::pending()).await
+    }
+
+    /// Serve until `shutdown` resolves, then stop **without draining**.
+    ///
+    /// The wheel's `close()` shape. Deliberately not
+    /// `axum::serve(..).with_graceful_shutdown(..)`: graceful shutdown waits
+    /// for every in-flight connection to end, and a viewer's connections are
+    /// WebSockets held open by a browser tab for as long as the tab exists. A
+    /// `close()` that blocks until the user closes their tab is a hang, and
+    /// the caller asked for the port back. Dropping the server future here
+    /// closes the listener immediately; the runtime's own shutdown then drops
+    /// the connection tasks.
+    pub async fn serve_until(
+        self,
+        shutdown: impl std::future::Future<Output = ()>,
+    ) -> std::io::Result<()> {
         let listener = tokio::net::TcpListener::from_std(self.listener)?;
-        axum::serve(listener, router(self.session)).await
+        let server = axum::serve(listener, router(self.session));
+        tokio::select! {
+            result = server => result,
+            _ = shutdown => Ok(()),
+        }
     }
 }
 
