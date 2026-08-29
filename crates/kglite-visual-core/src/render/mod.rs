@@ -422,6 +422,13 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     let layout_ms = started.elapsed().as_secs_f64() * 1_000.0;
     let mut positions = positions;
     moor_folded_fans(&scene, &mut positions, f64::from(width), f64::from(height));
+    // Last, on the coordinates that are about to be drawn, and after the fold
+    // wedges have been moored: `layout::fit` scales positions and not radii, so
+    // no kernel can promise on its own that two circles clear each other in
+    // final pixels, and the wedge mooring places a glyph the kernels never saw
+    // in that arrangement. One pass over the finished picture is the only place
+    // the promise is about the picture. See `layout::separate`.
+    layout::separate(&mut positions.xy, &nodes, canvas);
 
     let document = svg::emit(&scene, &positions, width, height, request.theme);
     let bytes = match request.format {

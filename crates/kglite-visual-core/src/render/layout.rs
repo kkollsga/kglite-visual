@@ -339,14 +339,132 @@ pub fn run(
         }
     }
 
-    Ok(Positions::below(fit(
-        &xy,
-        nodes,
-        width,
-        height,
-        reserved_top,
-        0.0,
-    )))
+    Ok(Positions::below(
+        fit(&xy, nodes, width, height, reserved_top, 0.0).0,
+    ))
+}
+
+/// Slack added on top of "the circles touch", in pixels, when [`separate`]
+/// pushes an interpenetrating pair apart.
+///
+/// Touching circles read as one blob at thumbnail size, and a pass that stopped
+/// at exact contact would also leave the invariant sitting on the edge of a
+/// float comparison.
+const SEPARATION_SLACK_PX: f64 = 1.5;
+
+/// Passes [`separate`] makes before it accepts what it has.
+///
+/// Gauss–Seidel over a neighbour grid converges quickly on a layout that is
+/// nearly right and never converges at all on a canvas with less area than its
+/// circles — a fixed count is the only honest stopping rule for both, and the
+/// loop exits early the moment a pass moves nothing.
+const SEPARATION_PASSES: usize = 48;
+
+/// Push interpenetrating circles apart, in **final canvas pixels**.
+///
+/// **The invariant [`fit`] cannot hold on its own** (P11 round 3). `fit` scales
+/// positions and deliberately not radii — a radius is an encoding, and circles
+/// that shrank with the layout would stop meaning what the app's circles mean.
+/// The consequence is structural rather than incidental: any layout whose
+/// settled extent exceeds the canvas arrives scaled by `s < 1`, every gap the
+/// kernel computed arrives multiplied by `s`, and a gap that was exactly the two
+/// radii arrives smaller than them. Round 2 mitigated that by making the island
+/// packing aim lower, which is a constant standing in for a guarantee: it moved
+/// the threshold and did not move the failure.
+///
+/// So the guarantee is asserted where it is meant: after the fit, on the
+/// coordinates that are about to be drawn. Each overlapping pair is pushed apart
+/// along its own axis — half the shortfall each, plus
+/// [`SEPARATION_SLACK_PX`] — and everything is clamped back inside the canvas at
+/// the end of every pass.
+///
+/// **Deterministic**: pairs are found through the same sorted-`Vec` neighbour
+/// grid [`repel_within_cutoff`] uses, visited in index order, and the update is
+/// in place, so the result is a pure function of the input. `sqrt` is the only
+/// non-arithmetic operation. A coincident pair is separated along an
+/// index-derived axis rather than an arbitrary one.
+///
+/// **Structure-preserving by construction**: a pair that already clears is never
+/// touched, so a ring whose slots were computed correctly, or a force layout
+/// that converged with room to spare, comes through this untouched. What moves
+/// is what was overlapping.
+///
+/// **What it cannot do**: a canvas with less area than its circles have no
+/// arrangement without overlap, and this does not invent one — it spreads the
+/// remaining overlap instead of stacking it. The picture's honesty about that
+/// case is the label budget and the fold, not this.
+pub fn separate(xy: &mut [(f64, f64)], nodes: &[LayoutNode], canvas: Canvas) {
+    let count = xy.len().min(nodes.len());
+    if count < 2 {
+        return;
+    }
+    let widest = nodes[..count]
+        .iter()
+        .map(|n| n.radius)
+        .fold(0.0f64, f64::max);
+    // Two of the widest radii plus the slack is the longest push this pass can
+    // ever demand, so a pair that overlaps is always inside the 3x3 neighbourhood.
+    let cell = (2.0 * widest + SEPARATION_SLACK_PX).max(1.0);
+    let floor_y = canvas.reserved_top;
+    let mut cells: Vec<((i64, i64), usize)> = Vec::with_capacity(count);
+
+    for _ in 0..SEPARATION_PASSES {
+        cells.clear();
+        cells.extend((0..count).map(|i| ((cell_of(xy[i].0, cell), cell_of(xy[i].1, cell)), i)));
+        // Stable by construction: the key carries the node index, which is unique.
+        cells.sort_unstable();
+        let mut moved = false;
+        for i in 0..count {
+            let key_x = cell_of(xy[i].0, cell);
+            let key_y = cell_of(xy[i].1, cell);
+            for dx in -1..=1i64 {
+                for dy in -1..=1i64 {
+                    let key = (key_x + dx, key_y + dy);
+                    let start = cells.partition_point(|(c, _)| *c < key);
+                    for (c, j) in cells[start..].iter() {
+                        if *c != key {
+                            break;
+                        }
+                        let j = *j;
+                        // Each pair once, and only forward, so the visit order
+                        // is the index order and not the grid's.
+                        if j <= i {
+                            continue;
+                        }
+                        let want = nodes[i].radius + nodes[j].radius + SEPARATION_SLACK_PX;
+                        let (mut ux, mut uy) = (xy[j].0 - xy[i].0, xy[j].1 - xy[i].1);
+                        let distance = (ux * ux + uy * uy).sqrt();
+                        if distance >= want {
+                            continue;
+                        }
+                        if distance <= 1e-9 {
+                            let axis = ((i + j) % 2) as f64;
+                            (ux, uy) = (1.0 - axis, axis);
+                        } else {
+                            (ux, uy) = (ux / distance, uy / distance);
+                        }
+                        let push = (want - distance) / 2.0;
+                        xy[i].0 -= ux * push;
+                        xy[i].1 -= uy * push;
+                        xy[j].0 += ux * push;
+                        xy[j].1 += uy * push;
+                        moved = true;
+                    }
+                }
+            }
+        }
+        for i in 0..count {
+            let radius = nodes[i].radius;
+            xy[i].0 = xy[i].0.clamp(radius, (canvas.width - radius).max(radius));
+            xy[i].1 = xy[i].1.clamp(
+                floor_y + radius,
+                (canvas.height - radius).max(floor_y + radius),
+            );
+        }
+        if !moved {
+            break;
+        }
+    }
 }
 
 /// Clearance between two neighbours sitting side by side on a hop ring.
@@ -605,7 +723,7 @@ pub fn radial(
         .collect();
 
     Ok(Positions {
-        xy: fit(&xy, nodes, width, height, reserved_top, side_room),
+        xy: fit(&xy, nodes, width, height, reserved_top, side_room).0,
         label_side,
         islands: Vec::new(),
     })
@@ -761,9 +879,108 @@ pub fn islands(
     // Island box area is `1.0625 * spacing^2 * members`, so the whole packing
     // is `1.0625 * spacing^2 * count`; solve that against the share of the
     // canvas the packing should fill.
-    let spacing = (ISLAND_FILL * width * (height - reserved_top) / (1.0625 * count as f64))
+    let mut spacing = (ISLAND_FILL * width * (height - reserved_top) / (1.0625 * count as f64))
         .sqrt()
         .clamp(ISLAND_SPACING_MIN_PX, ISLAND_SPACING_MAX_PX);
+
+    // **Solve, measure what the fit would cost, and re-solve at a spacing the
+    // canvas can wear** (P11 round 3). The area estimate above ignores what
+    // shelf packing wastes — the lane between two boxes, the ragged end of a
+    // shelf, the square box a ring insists on — so the packing it sizes routinely
+    // comes out larger than the frame, and `fit` then multiplies every lane and
+    // every gap inside every island by the same `s < 1` while the circles stay
+    // full size. Shrinking `spacing` by exactly that `s` is what makes the next
+    // packing land near the frame, and the *floors* in here are why this
+    // converges to something useful rather than to nothing: a radial island's box
+    // is sized from its own circumference, the orphan tray's cell from its widest
+    // circle, and `pad` from `ISLAND_PAD_MIN_PX`. None of those follow `spacing`
+    // down, so the fixed point is "as much spacing as the frame can hold, with
+    // the room the circles actually need kept whole".
+    //
+    // Three passes because the second is usually within a few per cent of the
+    // fixed point and the third is the guard; `separate` holds the invariant
+    // whatever this converges to.
+    const PACK_PASSES: usize = 3;
+    let mut solved: Option<Packed> = None;
+    for pass in 0..PACK_PASSES {
+        let packed = pack_at_spacing(
+            nodes,
+            links,
+            &islands,
+            orphan_island,
+            group,
+            spacing,
+            canvas,
+            seed,
+            count,
+        )?;
+        let (fitted, scale) = fit(&packed.xy, nodes, width, height, reserved_top, 0.0);
+        solved = Some(Packed {
+            xy: fitted,
+            label_side: packed.label_side,
+        });
+        if scale >= 1.0 || pass + 1 == PACK_PASSES {
+            break;
+        }
+        let next = (spacing * scale).max(ISLAND_SPACING_MIN_PX);
+        // A pass that would barely move the spacing has found the floors, and
+        // re-solving to land on the same picture is a wasted force pass.
+        if next >= spacing - 0.5 {
+            break;
+        }
+        spacing = next;
+    }
+    // `PACK_PASSES` is not zero, so the loop always ran; the fallback is the
+    // compiler's price for saying so rather than a case that occurs.
+    let Packed { xy, label_side } = solved.unwrap_or_else(|| Packed {
+        xy: vec![(0.0f64, 0.0f64); count],
+        label_side: vec![LabelSide::Below; count],
+    });
+
+    let last = islands.len().saturating_sub(1);
+    let reported: Vec<Island> = islands
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut members)| {
+            members.sort_unstable();
+            Island {
+                members,
+                orphans: orphan_island && index == last,
+            }
+        })
+        .collect();
+
+    Ok(Positions {
+        xy,
+        label_side,
+        islands: reported,
+    })
+}
+
+/// One pre-fit packing: the two things [`islands`] needs back from a pass.
+struct Packed {
+    xy: Vec<(f64, f64)>,
+    label_side: Vec<LabelSide>,
+}
+
+/// Lay every island out at `spacing` and shelf-pack the results, in the
+/// packing's own coordinates — [`islands`] fits the answer to the canvas.
+///
+/// Split out of [`islands`] because that function now calls it more than once:
+/// see the fixed point there.
+#[allow(clippy::too_many_arguments)]
+fn pack_at_spacing(
+    nodes: &[LayoutNode],
+    links: &[(usize, usize)],
+    islands: &[Vec<usize>],
+    orphan_island: bool,
+    group: &[u32],
+    spacing: f64,
+    canvas: Canvas,
+    seed: u64,
+    count: usize,
+) -> Result<Packed, CoreError> {
+    let Canvas { width, height, .. } = canvas;
     let pad = (spacing * ISLAND_PAD_SPACINGS).max(ISLAND_PAD_MIN_PX);
 
     let mut xy = vec![(0.0f64, 0.0f64); count];
@@ -896,24 +1113,7 @@ pub fn islands(
         }
     }
 
-    let last = islands.len().saturating_sub(1);
-    let reported: Vec<Island> = islands
-        .into_iter()
-        .enumerate()
-        .map(|(index, mut members)| {
-            members.sort_unstable();
-            Island {
-                members,
-                orphans: orphan_island && index == last,
-            }
-        })
-        .collect();
-
-    Ok(Positions {
-        xy: fit(&xy, nodes, width, height, reserved_top, 0.0),
-        label_side,
-        islands: reported,
-    })
+    Ok(Packed { xy, label_side })
 }
 
 /// Reorder islands so heavily linked ones end up adjacent in the packing.
@@ -1265,11 +1465,27 @@ impl SpiralWalker {
 }
 
 /// Uniformly scale and translate the settled layout so every circle is inside
-/// the canvas, with room under the widest one for its label.
+/// the canvas, with room under the widest one for its label. Returns the
+/// positions and **the scale it applied**.
 ///
 /// Uniform, never per-axis: a non-uniform fit would turn a circle into an
 /// ellipse's worth of visual weight and break the size encoding, which is the
 /// one thing parity is about.
+///
+/// **Positions scale; radii do not — and the returned scale is how a caller
+/// learns what that cost.** A radius is an encoding, so shrinking it with the
+/// layout would make a circle mean something different in a crowded picture
+/// than in an empty one. The price is that a scale below 1 multiplies every gap
+/// a kernel computed while leaving the circles those gaps were sized for at full
+/// width: at `s = 0.5`, two circles laid out exactly touching arrive
+/// interpenetrating by half their radii. That is not a tuning problem, and round
+/// 2's attempt to keep `s` near 1 by aiming the island packing lower was a
+/// constant standing in for a guarantee.
+///
+/// So the scale is returned rather than swallowed, and there are two callers of
+/// it: [`islands`] re-solves at a spacing the canvas can wear when it comes back
+/// below 1, and [`separate`] holds the actual no-interpenetration invariant
+/// afterwards, in final pixels, for every kernel.
 fn fit(
     xy: &[(f64, f64)],
     nodes: &[LayoutNode],
@@ -1277,7 +1493,7 @@ fn fit(
     height: f64,
     reserved_top: f64,
     side_room: f64,
-) -> Vec<(f64, f64)> {
+) -> (Vec<(f64, f64)>, f64) {
     // Room for the label chip that hangs below the widest circle.
     const LABEL_ROOM_PX: f64 = 26.0;
 
@@ -1309,14 +1525,16 @@ fn fit(
     let offset_x = MARGIN_PX + side_room + (usable_x - span_x * scale) / 2.0;
     let offset_y = reserved_top + MARGIN_PX + (usable_y - span_y * scale) / 2.0;
 
-    xy.iter()
+    let placed = xy
+        .iter()
         .map(|(x, y)| {
             (
                 (x - min_x) * scale + offset_x,
                 (y - min_y) * scale + offset_y,
             )
         })
-        .collect()
+        .collect();
+    (placed, scale)
 }
 
 #[cfg(test)]
@@ -1661,6 +1879,141 @@ mod tests {
         assert!(
             rows * columns >= loners && rows * columns <= loners + columns,
             "nine unattached nodes must fill a lattice, not scatter: {rows} x {columns}"
+        );
+    }
+
+    /// The smallest pairwise clearance in a placed layout: distance minus the
+    /// two radii, so a negative value is interpenetration in pixels.
+    fn tightest(xy: &[(f64, f64)], nodes: &[LayoutNode]) -> (f64, usize, usize) {
+        let mut worst = (f64::INFINITY, 0usize, 0usize);
+        for i in 0..xy.len() {
+            for j in (i + 1)..xy.len() {
+                let clearance = separation(xy, i, j) - nodes[i].radius - nodes[j].radius;
+                if clearance < worst.0 {
+                    worst = (clearance, i, j);
+                }
+            }
+        }
+        worst
+    }
+
+    struct Scene {
+        nodes: Vec<LayoutNode>,
+        links: Vec<(usize, usize)>,
+        community: Vec<usize>,
+        groups: usize,
+    }
+
+    /// Twelve communities of sixteen, every member wearing a meta-graph-sized
+    /// radius — the shape that produced round 2's interpenetrating islands.
+    fn dense_islands() -> Scene {
+        const GROUPS: usize = 12;
+        const SIZE: usize = 16;
+        let count = GROUPS * SIZE;
+        // A ramp, because a meta-graph's radii span 6..36 px and a collision
+        // rule that only ever sees equal circles is not the rule under test.
+        let nodes: Vec<LayoutNode> = (0..count)
+            .map(|i| LayoutNode {
+                radius: 6.0 + ((i % SIZE) as f64) * 2.0,
+            })
+            .collect();
+        let mut links = cliques(GROUPS, SIZE);
+        // One bridge per neighbouring pair, so the partition is islands rather
+        // than components and `order_by_affinity` has something to chain on.
+        for g in 1..GROUPS {
+            links.push(((g - 1) * SIZE, g * SIZE + 1));
+        }
+        let community: Vec<usize> = (0..count).map(|i| i / SIZE).collect();
+        Scene {
+            nodes,
+            links,
+            community,
+            groups: GROUPS,
+        }
+    }
+
+    #[test]
+    fn a_packing_too_big_for_its_canvas_does_not_arrive_interpenetrating() {
+        // **The defect, and why a constant did not fix it.** `fit` scales
+        // positions and not radii, so a packing larger than the frame arrives
+        // multiplied by `s < 1` around circles that stayed full size, and every
+        // gap the packer computed shrinks by `s` while the thing the gap was for
+        // does not. Round 2 lowered `ISLAND_FILL` to keep `s` near 1 — a
+        // constant standing in for a guarantee, which moves the threshold and
+        // leaves the failure reachable. This asserts the guarantee instead, on
+        // a scene small enough to state and dense enough to have failed.
+        let scene = dense_islands();
+        let (nodes, links) = (scene.nodes, scene.links);
+        let group = vec![0u32; nodes.len()];
+        let canvas = Canvas {
+            width: 1600.0,
+            height: 1000.0,
+            reserved_top: 98.0,
+        };
+        let mut placed = islands(
+            &nodes,
+            &links,
+            &scene.community,
+            scene.groups,
+            &group,
+            canvas,
+            5,
+        )
+        .expect("twelve dense communities pack");
+
+        let before = tightest(&placed.xy, &nodes);
+        separate(&mut placed.xy, &nodes, canvas);
+        let after = tightest(&placed.xy, &nodes);
+
+        // R1: the check can go red. Deleting the `separate` call above restores
+        // `before`, which is the layout this test was written against, and this
+        // assertion is what refuses it.
+        assert!(
+            before.0 < 0.0,
+            "the scene must actually interpenetrate before the pass, or this \
+             test proves nothing: tightest clearance was {:.1} px between {} and {}",
+            before.0,
+            before.1,
+            before.2
+        );
+        assert!(
+            after.0 >= 0.0,
+            "nodes {} and {} still interpenetrate by {:.1} px after separation",
+            after.1,
+            after.2,
+            -after.0
+        );
+        // And the pass stayed inside the frame it was handed.
+        for (index, (x, y)) in placed.xy.iter().enumerate() {
+            let radius = nodes[index].radius;
+            assert!(
+                *x >= radius - 0.01 && *x <= 1600.0 - radius + 0.01,
+                "node {index} left the canvas at x={x}"
+            );
+            assert!(
+                *y >= 98.0 + radius - 0.01 && *y <= 1000.0 - radius + 0.01,
+                "node {index} left the canvas at y={y}"
+            );
+        }
+    }
+
+    #[test]
+    fn separation_leaves_a_layout_that_already_clears_alone() {
+        // The other half of the claim: this is a correction, not a relaxation.
+        // A ring whose slots were computed correctly must come through
+        // untouched, or every deliberate geometry in this module is negotiable.
+        let (nodes, links, group) = star(24);
+        let canvas = Canvas {
+            width: 1600.0,
+            height: 1000.0,
+            reserved_top: 0.0,
+        };
+        let placed = radial(&nodes, &links, 0, &group, canvas).expect("a star lays out");
+        let mut moved = placed.xy.clone();
+        separate(&mut moved, &nodes, canvas);
+        assert_eq!(
+            moved, placed.xy,
+            "a layout with room to spare must be a fixed point of the pass"
         );
     }
 
