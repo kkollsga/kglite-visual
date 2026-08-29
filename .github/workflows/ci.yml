@@ -148,6 +148,19 @@ jobs:
       - name: Protocol framing baseline
         if: matrix.os == 'ubuntu-latest'
         run: make check-protocol-baseline
+      # The render baseline is the one exact artifact whose platform
+      # independence is REASONED rather than measured, and this run is where it
+      # gets tested. The layout arithmetic is +-*/ and sqrt, which IEEE-754
+      # requires to be exact; the one libm call is `ln_1p` in the size ramp, and
+      # every number is emitted at two decimals, which is orders of magnitude
+      # coarser than any disagreement a conforming libm can produce. That is an
+      # argument, not evidence — the goldens were generated on macOS/aarch64 and
+      # have never been diffed against a Linux/x86_64 build. If this step is the
+      # one that goes red on the first CI run, the finding is real and the fix is
+      # a coarser emit, never a regenerated baseline (CLAUDE.md → "Gate honesty").
+      - name: Rendered image baseline
+        if: matrix.os == 'ubuntu-latest'
+        run: make check-render-baseline
 
   e2e:
     name: End-to-end (Playwright + SwiftShader)
