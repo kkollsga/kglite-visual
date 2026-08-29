@@ -37,11 +37,10 @@ localhost CLI and a Python wheel.
 > `github.com/kkollsga/kglite-visual`): the first-ever CI run went red on a
 > real SIGTERM-race bug the warm dev machine could not see — which is what
 > a first run is for — and everything since is green, including the full
-> wheel matrix (seven platform wheels + sdist, first try). **Not yet
-> published**: the PyPI pending publisher is registered
-> (workflow `release.yml`), and the publish job stays skipped until the
-> repository variable `PYPI_PUBLISH_ENABLED=true` is set and `/release`
-> runs. And when a planned thing becomes real, delete its
+> wheel matrix (seven platform wheels + sdist, first try). **Published:
+> v0.1.0 is on PyPI** (2026-08-29, trusted publisher, tag verified both
+> sides) — `pip install kglite-visual` is real. And when a planned thing
+> becomes real, delete its
 > caveat *in the same change*: an honesty label nobody retires becomes a
 > lie, which is how one estate repo still described itself as "brand-new, no
 > code yet" two weeks after shipping a gate and 17 test files.
@@ -222,8 +221,8 @@ runners (2026-08-29): CI's first run went red on a genuine bug and green on
 the fix; `release.yml`'s first run built all seven wheels + the sdist green
 and skipped publish as designed.** The `ci-success` aggregate has been seen
 refusing a red job in production — the R1 proof local runs could only
-reason about. The publish leg remains the one never-executed path; treat
-its first firing as the validation it is.
+reason about. The publish leg fired for v0.1.0 and went green first try:
+8-file artifact set verified on PyPI, tag minted after upload as designed.
 
 **The packaged-consumer check is the one thing a source-tree test
 structurally cannot do.** `scripts/check_wheel.py` opens the built `.whl`,

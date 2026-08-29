@@ -5,15 +5,13 @@ description: Cut a kglite-visual release — goal-check against the phased plan,
 
 # Release
 
-> **Nothing has ever been released from this repo (2026-08-29), but the
-> pipeline is live and validated.** The remote exists
-> (`github.com/kkollsga/kglite-visual`), CI has run red-then-green on real
-> runners, `release.yml`'s wheel matrix built all seven wheels + the sdist
-> green on its first run, and the PyPI pending publisher is registered
-> against `release.yml`. Still needed before the publish leg can fire: the
-> repository variable `PYPI_PUBLISH_ENABLED=true`. The publish leg itself
-> has never executed — treat its first firing as a validation, not a
-> formality. **Do not run this skill to "see what happens".** The first release
+> **First release shipped: v0.1.0, 2026-08-29** — 7 platform wheels + sdist
+> on PyPI via the trusted publisher, tag verified on both sides at the
+> release commit. The publish leg is production-validated end to end. One
+> lesson from that run is now baked into the workflow: a release commit is
+> a markdown-only commit, so `release.yml` carries no `paths-ignore` (the
+> first release needed a manual `workflow_dispatch` because `**.md` was
+> ignored). **Do not run this skill to "see what happens".** The first release
 > is preceded by a `phased-plan` that *builds* the pipeline; this file is the
 > procedure that pipeline must satisfy, written down first so the pipeline is
 > built to fit a known-good shape rather than discovered afterwards.

@@ -9,12 +9,14 @@ name: Publish Python wheels
 # A committed workflow is not a passing workflow (doctrine R10).
 
 on:
+  # No paths-ignore, deliberately: the first release proved that a release
+  # commit IS a markdown-only commit (the CHANGELOG promotion), and ignoring
+  # `**.md` silently skipped the publish run — v0.1.0 needed a manual
+  # dispatch. A docs-only push now costs one version-check job that answers
+  # should_publish=false and skips the whole matrix, which is cheaper than a
+  # release train that does not fire.
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - 'dev-docs/**'
   workflow_dispatch:
 
 permissions:
