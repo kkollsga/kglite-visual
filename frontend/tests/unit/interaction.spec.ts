@@ -187,3 +187,25 @@ test('a link with no count gets the floor rather than a fabricated width', () =>
   expect(linkWidth(102_420, 102_420)).toBeCloseTo(5, 5)
   expect(linkWidth(1_760, 102_420)).toBeGreaterThan(linkWidth(1, 102_420))
 })
+
+test('a collapse drops the slots it killed from every set it was in', () => {
+  // The counts in `window.__kglv` are the instrument every agent assertion
+  // reads, and a highlight naming a tombstoned slot leaves them describing
+  // nodes that are gone. Nothing wrong is drawn — a colour at a NaN position
+  // draws no point — which is exactly why nothing else catches it.
+  const state = new InteractionState()
+  const graph = target({ 1: [2], 2: [1, 3] })
+  state.hover(graph, 1)
+  state.setHighlighted([1, 2, 5])
+  state.setSelected([2])
+
+  state.dropSlots([1, 2])
+
+  expect(state.highlightedSlots()).toEqual([5])
+  expect(state.selectedSlots()).toEqual([])
+  expect(state.hoveredSlot()).toBeNull()
+  expect(state.emphasizedSlots()).toEqual([])
+  // The renderer is told nothing is hovered, rather than being left pointing
+  // at a slot that no longer draws.
+  expect(state.toConfig().focusedPointIndex).toBeUndefined()
+})

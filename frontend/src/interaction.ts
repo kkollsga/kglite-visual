@@ -87,6 +87,31 @@ export class InteractionState {
     this.selected = [...slots]
   }
 
+  /**
+   * Forget slots that no longer draw anything.
+   *
+   * A collapse tombstones slots without renumbering anything, so the sets here
+   * keep naming indices that are now NaN positions: nothing wrong appears on
+   * screen — a highlight colour at a NaN point draws no point — but the four
+   * counts `window.__kglv` publishes go on describing nodes that are gone, and
+   * those counts are the instrument every agent and every e2e assertion reads.
+   * A compaction already forces a full clear (it renumbers everything); this is
+   * the same duty for the cheaper operation that does not.
+   */
+  dropSlots(slots: number[]): void {
+    if (slots.length === 0) return
+    const gone = new Set(slots)
+    const keep = (list: number[]): number[] => list.filter((slot) => !gone.has(slot))
+    this.highlighted = keep(this.highlighted)
+    this.selected = keep(this.selected)
+    this.emphasized = keep(this.emphasized)
+    if (this.hovered !== null && gone.has(this.hovered)) {
+      this.hovered = null
+      this.emphasized = []
+      this.emphasizedLinks = []
+    }
+  }
+
   hoveredSlot(): number | null {
     return this.hovered
   }

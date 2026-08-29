@@ -279,6 +279,9 @@ async function handle(completed: Completed): Promise<void> {
         debugState.compactions += 1
       }
       debugState.lastSliceKind = meta.kind
+      // The slots this slice killed cannot stay in an interaction set: they
+      // draw nothing, and the counts would keep describing them.
+      interaction.dropSlots(meta.tombstones)
       noteTruncation(
         meta.bound.truncated,
         meta.bound.returned,
