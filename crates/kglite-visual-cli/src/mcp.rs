@@ -566,22 +566,29 @@ impl ViewControl {
         // The counts and the truncation state travel beside the picture as well
         // as inside it: an image is not introspectable, and a caller that only
         // read the text half must still learn the answer was clipped.
-        let summary = serde_json::json!({
+        let mut summary = serde_json::json!({
             "target": args.target,
             "nodes": rendered.nodes,
             "links": rendered.links,
-            // Absent unless the canvas clipped the schema or the grid thinned a
-            // name off the picture — an agent reading this instead of opening
-            // the image gets the same two facts the status block draws.
-            "types_shown": rendered.types_shown,
-            "types_total": rendered.types_total,
-            "names_shown": rendered.names_shown,
             "truncated": rendered.truncated,
             "banners": rendered.banners,
             "width": rendered.width,
             "height": rendered.height,
             "geometry_caveat": GEOMETRY_CAVEAT,
         });
+        // Added rather than always present, so a key that *is* there always
+        // carries a number: the canvas clipped the schema, or the grid thinned
+        // a name off the picture. An agent reading the text half instead of
+        // opening the image learns the same two things the status block draws.
+        for (key, value) in [
+            ("types_shown", rendered.types_shown),
+            ("types_total", rendered.types_total),
+            ("names_shown", rendered.names_shown),
+        ] {
+            if let (Some(value), Some(object)) = (value, summary.as_object_mut()) {
+                object.insert(key.to_string(), value.into());
+            }
+        }
         let picture = match format {
             RenderFormat::Png => ContentBlock::image(
                 base64::engine::general_purpose::STANDARD.encode(&rendered.bytes),
