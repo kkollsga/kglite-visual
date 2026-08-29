@@ -87,6 +87,13 @@ Cypher query. Leave it alone unless a deliberate analytical query needs it.
   actually reading, so an assertion checks the words rather than a boolean
   beside them. Assert on state; screenshots are artifacts. `error` non-null
   explains any `ready:false`.
+- A second hook, `window.__kglvBench`, carries exactly two fields the bench
+  harness cannot get from outside: `graph` (the live cosmos.gl instance) and
+  `firstDataFrameMs` (navigation start to the first composited frame with
+  data). It ships in the production bundle on purpose — a hook compiled out
+  of the build being measured measures a different build. Do not grow it;
+  everything else a bench needs is expressible from `page.evaluate` on top
+  of `graph`.
 
 ## 5. Stop
 

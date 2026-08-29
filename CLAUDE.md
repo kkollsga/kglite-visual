@@ -5,14 +5,14 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29 (P3 landed): Cypher, bounded expansion and
-> interaction work end to end.** Three crates (`core`, `cli`, `py`), a
+> **Status, 2026-08-29 (P4 landed): measured — the response bound is set by
+> numbers, not estimates.** Three crates (`core`, `cli`, `py`), a
 > Vite/TypeScript frontend that renders the type-level meta-graph through
 > cosmos.gl and drills into it, a versioned binary protocol (v2) with an
 > exact framing baseline, an axum server on localhost with the frontend
 > embedded, and a gate that builds, lints, tests and **drives** all of it in
-> a headless browser. What does **not** exist yet: the perf harness (P4),
-> the wheel (P5), CI, a remote, a CHANGELOG, and any published artifact. Every command below that
+> a headless browser. What does **not** exist yet: the wheel (P5), CI, a
+> remote, a CHANGELOG, and any published artifact. Every command below that
 > does not exist yet is marked **(planned)**. **A planned command is not a
 > passing gate** — if you run a step and it is absent, say so and fall back;
 > never report green for a check that could not run (`R10` corollary). And
@@ -378,6 +378,11 @@ a renderer.
     measuring phase carries a stop rule written *before* it runs: the result
     that retires the item instead of implementing it. A stop rule composed
     after the numbers are in is a rationalisation; its date is the tell.
+11. **A frame-period line sits between vsync buckets, not on one.** A
+    vsync-locked presenter quantises the period to k × the refresh interval,
+    so testing `p95 <= 16.7 ms` fails a renderer that hit every vsync on
+    jitter alone. The 60 fps line is `p95 < 1.5 × refresh`, the 30 fps line
+    `p95 < 2.5 × refresh`, and the raw p95 is reported beside both.
 
 ## dev-docs steers the sprint; commits are the durable record
 
