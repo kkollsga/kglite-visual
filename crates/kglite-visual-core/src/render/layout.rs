@@ -1342,13 +1342,14 @@ fn pack_at_spacing(
     let mut best: Option<(f64, Vec<(f64, f64)>)> = None;
     for shelves in 1..=boxes.len() {
         let strip = (total_width / shelves as f64).max(widest);
-        let (offsets, extent) = shelve(&boxes, strip, pad);
-        let aspect = extent.0 / extent.1.max(1.0);
+        let trial = shelve(&boxes, strip, pad);
+        let aspect = trial.extent.0 / trial.extent.1.max(1.0);
         // Log-ratio, so "twice as wide as wanted" and "half as wide" cost the
         // same; a linear difference would systematically prefer wide packings.
-        let cost = (aspect / want).max(want / aspect);
+        //
+        let cost = packing_cost(aspect, want, trial.waste);
         if best.as_ref().is_none_or(|(seen, _)| cost < *seen) {
-            best = Some((cost, offsets));
+            best = Some((cost, trial.offsets));
         }
     }
     let offsets = best.map(|(_, offsets)| offsets).unwrap_or_default();
@@ -1450,25 +1451,106 @@ fn order_by_affinity(islands: &mut Vec<Vec<usize>>, links: &[(usize, usize)], co
     *islands = reordered;
 }
 
-/// Lay boxes out on shelves no wider than `strip`; returns each box's offset
-/// and the extent of the whole packing.
-fn shelve(boxes: &[(f64, f64)], strip: f64, pad: f64) -> (Vec<(f64, f64)>, (f64, f64)) {
-    let (mut cursor_x, mut cursor_y, mut shelf_height) = (0.0f64, 0.0f64, 0.0f64);
-    let (mut extent_x, mut extent_y) = (0.0f64, 0.0f64);
-    let mut offsets = Vec::with_capacity(boxes.len());
+/// How heavily a shelf's unused height counts against a trial packing, beside
+/// the shape term. See [`packing_cost`].
+const SHELF_WASTE_WEIGHT: f64 = 1.5;
+
+/// What a trial packing costs: how far its shape is from the canvas's, and how
+/// much of its shelves nothing covers.
+///
+/// The shape term is a log-ratio, so "twice as wide as wanted" and "half as
+/// wide" cost the same; a linear difference would systematically prefer wide
+/// packings.
+///
+/// **And a shelf's slack is a cost too** (P11 round 3). Shape alone is blind to
+/// the one thing it cannot see: a packing whose bounding box is exactly the
+/// canvas's shape can still be a tall island beside a short one, and the band of
+/// empty canvas that leaves is the horizontal void across the round-2
+/// meta-graph. Multiplicative rather than additive so the two terms compose at
+/// every scale, and weighted so a shelf a third empty costs about what a packing
+/// half again the wrong shape does — shape still decides, and this breaks its
+/// ties.
+fn packing_cost(aspect: f64, want: f64, waste: f64) -> f64 {
+    (aspect / want).max(want / aspect) * (1.0 + SHELF_WASTE_WEIGHT * waste)
+}
+
+/// What one trial packing came out as.
+struct Shelved {
+    offsets: Vec<(f64, f64)>,
+    extent: (f64, f64),
+    /// Share of the shelves' own area that no island covers, in `0..1`.
+    ///
+    /// A shelf is as tall as its tallest box, so a short box on a tall shelf
+    /// leaves a band of empty canvas that no amount of fitting reclaims — which
+    /// is the horizontal void running across the round-2 meta-graph, and it is
+    /// invisible to an aspect-ratio cost because the *packing* is exactly the
+    /// shape that cost asked for. Measured over the boxes rather than over the
+    /// bounding rectangle so the lanes between islands, which are deliberate,
+    /// are not counted as waste.
+    waste: f64,
+}
+
+/// Lay boxes out on shelves no wider than `strip`.
+///
+/// Each box is **centred in its shelf's height** rather than hung from the top.
+/// A shelf's slack is the same either way, but split into two half-bands it
+/// reads as breathing room around a small island; all of it under one island it
+/// reads as a hole in the picture.
+fn shelve(boxes: &[(f64, f64)], strip: f64, pad: f64) -> Shelved {
+    // First the assignment, because a box's vertical offset depends on how tall
+    // its shelf turns out to be, which is not known until the shelf is closed.
+    let (mut cursor_x, mut shelf) = (0.0f64, 0usize);
+    let mut shelf_of: Vec<usize> = Vec::with_capacity(boxes.len());
+    let mut left_of: Vec<f64> = Vec::with_capacity(boxes.len());
+    let mut heights: Vec<f64> = Vec::new();
+    let mut extent_x = 0.0f64;
     for (box_width, box_height) in boxes {
         if cursor_x > 0.0 && cursor_x + box_width > strip {
             cursor_x = 0.0;
-            cursor_y += shelf_height + pad;
-            shelf_height = 0.0;
+            shelf += 1;
         }
-        offsets.push((cursor_x, cursor_y));
+        if heights.len() <= shelf {
+            heights.push(0.0);
+        }
+        shelf_of.push(shelf);
+        left_of.push(cursor_x);
         cursor_x += box_width + pad;
-        shelf_height = shelf_height.max(*box_height);
+        heights[shelf] = heights[shelf].max(*box_height);
         extent_x = extent_x.max(cursor_x);
-        extent_y = extent_y.max(cursor_y + shelf_height);
     }
-    (offsets, (extent_x.max(1.0), extent_y.max(1.0)))
+
+    let mut tops: Vec<f64> = Vec::with_capacity(heights.len());
+    let mut cursor_y = 0.0f64;
+    for height in &heights {
+        tops.push(cursor_y);
+        cursor_y += height + pad;
+    }
+    let extent_y = cursor_y - if heights.is_empty() { 0.0 } else { pad };
+
+    let (mut covered, mut available) = (0.0f64, 0.0f64);
+    let offsets: Vec<(f64, f64)> = boxes
+        .iter()
+        .enumerate()
+        .map(|(index, (box_width, box_height))| {
+            let shelf_height = heights[shelf_of[index]];
+            covered += box_width * box_height;
+            available += box_width * shelf_height;
+            (
+                left_of[index],
+                tops[shelf_of[index]] + (shelf_height - box_height) / 2.0,
+            )
+        })
+        .collect();
+
+    Shelved {
+        offsets,
+        extent: (extent_x.max(1.0), extent_y.max(1.0)),
+        waste: if available > 0.0 {
+            1.0 - covered / available
+        } else {
+            0.0
+        },
+    }
 }
 
 /// The refusal every layout entry point shares — the structural half of D5.
@@ -2088,6 +2170,48 @@ mod tests {
             "the two shells must read as two rings, not one band: \
              {:.1} px of clear space",
             outer_min - inner_max
+        );
+    }
+
+    #[test]
+    fn the_packer_prefers_shelves_that_are_not_half_empty() {
+        // Two tall boxes and two short ones, at one strip width, in the two
+        // orders the affinity chain can hand the packer. Pairing tall with tall
+        // wastes no shelf height; interleaving them leaves 300 px of empty
+        // canvas beside each short island, which is the round-2 meta-graph's
+        // horizontal void.
+        let pad = 20.0;
+        let tall = (200.0f64, 400.0f64);
+        let short = (200.0f64, 100.0f64);
+        let paired = shelve(&[tall, tall, short, short], 2.0 * tall.0 + pad, pad);
+        let mixed = shelve(&[tall, short, tall, short], 2.0 * tall.0 + pad, pad);
+        assert!(
+            paired.waste < 0.01,
+            "tall beside tall wastes nothing: {:.2}",
+            paired.waste
+        );
+        assert!(
+            mixed.waste > 0.3,
+            "tall beside short leaves a band of empty canvas: {:.2}",
+            mixed.waste
+        );
+        // And the slack it does leave is split around the short island rather
+        // than dropped under it.
+        let short_top = mixed.offsets[1].1;
+        assert!(
+            short_top > 0.0,
+            "a short box is centred in its shelf, not hung from the top: {short_top}"
+        );
+
+        // And the cost the search reads actually prefers the tidy one. Asserted
+        // at the *same* shape for both, so this is the waste term deciding and
+        // not the shape term doing it under another name.
+        let want = 1.6;
+        assert!(
+            packing_cost(want, want, paired.waste) < packing_cost(want, want, mixed.waste),
+            "the waste term must break a shape tie: {:.3} vs {:.3}",
+            packing_cost(want, want, paired.waste),
+            packing_cost(want, want, mixed.waste)
         );
     }
 
