@@ -7,6 +7,7 @@ use axum::routing::{any, get, post};
 use axum::Router;
 use kglite_visual_core::{LaunchInfo, Session};
 
+use crate::broadcast::AppState;
 use crate::{api, assets, ws};
 
 /// A bound-but-not-yet-serving server.
@@ -17,7 +18,7 @@ use crate::{api, assets, ws};
 /// it just started.
 pub struct Bound {
     listener: TcpListener,
-    session: Arc<Session>,
+    state: AppState,
     pub info: LaunchInfo,
 }
 
@@ -34,7 +35,7 @@ pub fn bind(session: Session, requested_port: u16, graph: String) -> std::io::Re
 
     Ok(Bound {
         listener,
-        session: Arc::new(session),
+        state: AppState::new(Arc::new(session)),
         info: LaunchInfo {
             url: format!("http://127.0.0.1:{port}/"),
             port,
@@ -66,7 +67,7 @@ impl Bound {
         shutdown: impl std::future::Future<Output = ()>,
     ) -> std::io::Result<()> {
         let listener = tokio::net::TcpListener::from_std(self.listener)?;
-        let server = axum::serve(listener, router(self.session));
+        let server = axum::serve(listener, router(self.state));
         tokio::select! {
             result = server => result,
             _ = shutdown => Ok(()),
@@ -74,7 +75,7 @@ impl Bound {
     }
 }
 
-fn router(session: Arc<Session>) -> Router {
+fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/meta-graph", get(api::meta_graph))
         .route("/api/session", get(api::session_info))
@@ -100,7 +101,7 @@ fn router(session: Arc<Session>) -> Router {
         // through `any` keeps the 405 for a mistaken POST out of the upgrade
         // path, where it would surface as an opaque handshake failure.
         .route("/ws", any(ws::upgrade))
-        .with_state(session)
+        .with_state(state)
         // Everything else is the embedded frontend. Registered as a fallback,
         // not a nested route, so the API paths above cannot be shadowed by an
         // asset that happens to share a prefix.

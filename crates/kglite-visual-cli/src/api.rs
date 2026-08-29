@@ -29,27 +29,29 @@ use kglite_visual_core::render::RenderRequest;
 use kglite_visual_core::request::{
     CypherRequest, ExpandRequest, Request, SearchRequest, SlotRequest, TypeRequest,
 };
-use kglite_visual_core::Session;
+
+use crate::broadcast::AppState;
 
 /// `GET /api/meta-graph` — the entry screen, positions and links included.
-pub async fn meta_graph(State(session): State<Arc<Session>>) -> Response {
+pub async fn meta_graph(State(state): State<AppState>) -> Response {
     // Serialization only; the meta-graph itself was computed once at open.
-    Json(session.meta_graph()).into_response()
+    Json(state.session.meta_graph()).into_response()
 }
 
 /// `GET /api/session` — protocol version, tier, slot space, bounds, stats.
-pub async fn session_info(State(session): State<Arc<Session>>) -> Response {
-    Json(session.info()).into_response()
+pub async fn session_info(State(state): State<AppState>) -> Response {
+    Json(state.session.info()).into_response()
 }
 
 /// `GET /api/describe` — kglite's own schema document plus this session's tier
 /// (plan D12): the same progressive-disclosure schema an agent gets from
 /// kglite's MCP server, served by the running viz session.
-pub async fn describe(State(session): State<Arc<Session>>) -> Response {
+pub async fn describe(State(state): State<AppState>) -> Response {
     // `compute_schema` walks per-type metadata rather than nodes, but it is
     // still the heaviest synchronous call in this file and it scales with the
     // schema, not with the request. Off the async runtime it goes: one slow
     // /api/describe must not stall the WebSocket feeding the renderer.
+    let session = state.session;
     match tokio::task::spawn_blocking(move || session.describe()).await {
         Ok(response) => Json(response).into_response(),
         Err(err) => task_failed("describe", &err),
@@ -58,34 +60,34 @@ pub async fn describe(State(session): State<Arc<Session>>) -> Response {
 
 /// `POST /api/cypher` — `{"query": "...", "params": {...}, "limit": n,
 /// "as_graph": bool}`.
-pub async fn cypher(state: State<Arc<Session>>, Json(body): Json<CypherRequest>) -> Response {
+pub async fn cypher(state: State<AppState>, Json(body): Json<CypherRequest>) -> Response {
     dispatch(state, Request::Cypher(body)).await
 }
 
 /// `POST /api/search` — `{"query": "...", "node_type": "...",
 /// "property": "...", "mode": "contains"|"starts-with", "limit": n}`.
-pub async fn search(state: State<Arc<Session>>, Json(body): Json<SearchRequest>) -> Response {
+pub async fn search(state: State<AppState>, Json(body): Json<SearchRequest>) -> Response {
     dispatch(state, Request::Search(body)).await
 }
 
 /// `POST /api/preview` — `{"slot": n}`. Per-relationship counts, no fetch.
-pub async fn preview(state: State<Arc<Session>>, Json(body): Json<SlotRequest>) -> Response {
+pub async fn preview(state: State<AppState>, Json(body): Json<SlotRequest>) -> Response {
     dispatch(state, Request::Preview(body)).await
 }
 
 /// `POST /api/expand` — `{"slot": n, "relationship": "...",
 /// "direction": "out"|"in"|"both", "limit": n}`.
-pub async fn expand(state: State<Arc<Session>>, Json(body): Json<ExpandRequest>) -> Response {
+pub async fn expand(state: State<AppState>, Json(body): Json<ExpandRequest>) -> Response {
     dispatch(state, Request::Expand(body)).await
 }
 
 /// `POST /api/collapse` — `{"slot": n}`.
-pub async fn collapse(state: State<Arc<Session>>, Json(body): Json<SlotRequest>) -> Response {
+pub async fn collapse(state: State<AppState>, Json(body): Json<SlotRequest>) -> Response {
     dispatch(state, Request::Collapse(body)).await
 }
 
 /// `POST /api/node` — `{"slot": n}`. One node's stored properties.
-pub async fn node_detail(state: State<Arc<Session>>, Json(body): Json<SlotRequest>) -> Response {
+pub async fn node_detail(state: State<AppState>, Json(body): Json<SlotRequest>) -> Response {
     dispatch(state, Request::NodeDetail(body)).await
 }
 
@@ -103,13 +105,10 @@ pub async fn node_detail(state: State<Arc<Session>>, Json(body): Json<SlotReques
 /// session over the same read-only graph, so a `POST /api/render` cannot move
 /// the slot space of whatever browser tab is attached. (Rendering the *live*
 /// view is a different request, and P10 is where it lands.)
-pub async fn render(
-    State(session): State<Arc<Session>>,
-    Json(body): Json<RenderRequest>,
-) -> Response {
-    let graph = Arc::clone(session.graph());
-    let name = session.info().graph;
-    let config = session.config();
+pub async fn render(State(state): State<AppState>, Json(body): Json<RenderRequest>) -> Response {
+    let graph = Arc::clone(state.session.graph());
+    let name = state.session.info().graph;
+    let config = state.session.config();
     // A render lays out a bounded slice and, for PNG, rasterises it: tens of
     // milliseconds, and on the async runtime that is the WebSocket feeding the
     // renderer stalling for all of them.
@@ -148,7 +147,7 @@ pub async fn render(
 }
 
 /// `POST /api/property-stats` — `{"node_type": "..."}`.
-pub async fn property_stats(state: State<Arc<Session>>, Json(body): Json<TypeRequest>) -> Response {
+pub async fn property_stats(state: State<AppState>, Json(body): Json<TypeRequest>) -> Response {
     dispatch(state, Request::PropertyStats(body)).await
 }
 
@@ -157,9 +156,18 @@ pub async fn property_stats(state: State<Arc<Session>>, Json(body): Json<TypeReq
 /// Named handlers above rather than a single `/api/request` endpoint because a
 /// `curl` line that says what it is asking for is the whole value of the twin;
 /// they all funnel here so there is still exactly one dispatch.
-async fn dispatch(State(session): State<Arc<Session>>, request: Request) -> Response {
+async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
+    let session = Arc::clone(&state.session);
     match tokio::task::spawn_blocking(move || session.handle(&request)).await {
-        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Ok(response)) => {
+            // The fix for the divergence this API shipped with: a POST that
+            // moved the slot space now reaches every attached browser as the
+            // same slice a WebSocket request would have produced. The caller
+            // still gets its body — an HTTP client is not subscribed, so this
+            // is an addition to the wire, not a change to it.
+            state.bus.publish_if_view_mutating(&response);
+            Json(response).into_response()
+        }
         Ok(Err(err)) => error_response(&err),
         Err(err) => task_failed("request", &err),
     }
