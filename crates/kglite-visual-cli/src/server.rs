@@ -67,6 +67,56 @@ impl Bound {
         self.serve_until(shutdown_signal()).await
     }
 
+    /// Arm the stop handler now; return the future that waits on it.
+    ///
+    /// Registration happens at **creation**, inside this call — not at the
+    /// returned future's first poll. The distinction is the launch contract's
+    /// safety: the stdout line is the signal a supervisor may `kill` on, so
+    /// the handler must exist before the line does. Printing first and
+    /// arming inside `serve()` left a window where `SIGTERM` met the default
+    /// disposition — microseconds on a warm machine, real on a cold CI
+    /// runner, and either way a death with no destructor and a leaked spill.
+    pub fn arm_shutdown(
+        runtime: &tokio::runtime::Runtime,
+    ) -> impl std::future::Future<Output = ()> {
+        #[cfg(unix)]
+        let terminate = {
+            use tokio::signal::unix::{signal, SignalKind};
+            let _guard = runtime.enter();
+            match signal(SignalKind::terminate()) {
+                Ok(stream) => Some(stream),
+                Err(err) => {
+                    eprintln!(
+                        "kglite-visual: WARNING could not listen for SIGTERM ({err}); \
+                         a `kill` will leave this graph's temporary spill behind"
+                    );
+                    None
+                }
+            }
+        };
+        #[cfg(not(unix))]
+        let _ = runtime;
+        async move {
+            #[cfg(unix)]
+            match terminate {
+                Some(mut stream) => {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {}
+                        _ = stream.recv() => {}
+                    }
+                }
+                None => {
+                    let _ = tokio::signal::ctrl_c().await;
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+            eprintln!("kglite-visual: shutting down");
+        }
+    }
+
     /// Serve until `shutdown` resolves, then stop **without draining**.
     ///
     /// The wheel's `close()` shape. Deliberately not

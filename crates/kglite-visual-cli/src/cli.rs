@@ -160,8 +160,27 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     let bound = server::bind(session, cli.port, file.display().to_string())?;
     let url = bound.info.url.clone();
 
-    // THE one stdout line. Printed after the port is resolved and the socket
-    // is listening, so a harness that reads it can connect immediately.
+    // `thread_stack_size` reaches the **blocking** pool as well as the worker
+    // threads, and that is the half that matters: every Cypher execution runs
+    // in `spawn_blocking`, and kglite's parser overflows tokio's 2 MiB default.
+    // Verified against tokio 1.53.1 rather than assumed — `runtime/blocking/
+    // pool.rs` copies `builder.thread_stack_size` into the pool's `stack_size`
+    // and applies it to every thread it spawns. The failure mode if it did not
+    // is a stack overflow inside a blocking task: a process abort with no
+    // message naming the query.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(QUERY_THREAD_STACK_BYTES)
+        .build()?;
+
+    // Armed BEFORE the stdout line: the line is what a supervisor kills on,
+    // so the stop handler must predate it (the first CI run caught the
+    // reversed order as a SIGTERM death with no destructor).
+    let shutdown = server::Bound::arm_shutdown(&runtime);
+
+    // THE one stdout line. Printed after the port is resolved, the socket is
+    // listening, and the stop handler is armed — so a harness that reads it
+    // can connect, or kill, immediately.
     println!("{}", bound.info.to_json_line());
     use std::io::Write as _;
     std::io::stdout().flush()?;
@@ -175,19 +194,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // `thread_stack_size` reaches the **blocking** pool as well as the worker
-    // threads, and that is the half that matters: every Cypher execution runs
-    // in `spawn_blocking`, and kglite's parser overflows tokio's 2 MiB default.
-    // Verified against tokio 1.53.1 rather than assumed — `runtime/blocking/
-    // pool.rs` copies `builder.thread_stack_size` into the pool's `stack_size`
-    // and applies it to every thread it spawns. The failure mode if it did not
-    // is a stack overflow inside a blocking task: a process abort with no
-    // message naming the query.
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_stack_size(QUERY_THREAD_STACK_BYTES)
-        .build()?
-        .block_on(bound.serve())?;
+    runtime.block_on(bound.serve_until(shutdown))?;
     Ok(())
 }
 
