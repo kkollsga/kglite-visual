@@ -11,8 +11,10 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
-Nothing has been released yet, so everything the project does is listed once,
-here. The first release promotes this block whole.
+## [0.1.0] - 2026-08-29
+
+Everything the project does, listed once: this is the first release, and it
+ships the whole build-out.
 
 ### Added
 
