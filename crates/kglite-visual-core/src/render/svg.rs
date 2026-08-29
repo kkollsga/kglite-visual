@@ -90,6 +90,17 @@ pub(crate) fn status_block_height(lines: usize) -> f64 {
     STATUS_Y + lines as f64 * STATUS_LINE_PX + 2.0 * STATUS_PAD_Y + STATUS_Y
 }
 
+/// How far above its circle a label can reach.
+///
+/// The layout keeps every *circle* out of the status block's strip, and until
+/// this was added to the reservation that was not enough: a node placed right
+/// under the block whose label the ring layout put *above* it drew its chip
+/// inside the panel. Round 3's 800x500 meta render lost `WellboreCore 8,510`
+/// that way, and round 4's lost it again one row further down. A label above a
+/// node is `LABEL_GAP_PX + CHIP_HEIGHT` up from the circle's edge, so that is
+/// what the strip owes it.
+pub(crate) const LABEL_REACH_ABOVE: f64 = LABEL_GAP_PX + CHIP_HEIGHT;
+
 /// Emit the whole document.
 pub(crate) fn emit(
     scene: &Scene,

@@ -3,34 +3,34 @@
 <title>meta.kgl</title>
 <rect width="900" height="600" fill="#ffffff"/>
 <g stroke="#57606a" stroke-opacity="0.45" stroke-linecap="round">
-<line x1="453.98" y1="242.96" x2="700.2" y2="336.44" stroke-width="5"/>
-<line x1="453.98" y1="242.96" x2="453.98" y2="242.96" stroke-width="5"/>
-<line x1="453.98" y1="242.96" x2="199.8" y2="154.24" stroke-width="4.43"/>
-<line x1="453.98" y1="242.96" x2="228.99" y2="427.48" stroke-width="4.06"/>
-<line x1="199.8" y1="154.24" x2="199.8" y2="154.24" stroke-width="3.25"/>
-<line x1="228.99" y1="427.48" x2="199.8" y2="154.24" stroke-width="2.95"/>
-<line x1="228.99" y1="427.48" x2="476.86" y2="553.93" stroke-width="2.4"/>
+<line x1="453.76" y1="261.38" x2="686.27" y2="349.66" stroke-width="5"/>
+<line x1="453.76" y1="261.38" x2="453.76" y2="261.38" stroke-width="5"/>
+<line x1="453.76" y1="261.38" x2="213.73" y2="177.6" stroke-width="4.43"/>
+<line x1="453.76" y1="261.38" x2="241.29" y2="435.64" stroke-width="4.06"/>
+<line x1="213.73" y1="177.6" x2="213.73" y2="177.6" stroke-width="3.25"/>
+<line x1="241.29" y1="435.64" x2="213.73" y2="177.6" stroke-width="2.95"/>
+<line x1="241.29" y1="435.64" x2="475.36" y2="555.05" stroke-width="2.4"/>
 </g>
 <g>
-<circle cx="453.98" cy="242.96" r="36" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Person</title></circle>
-<circle cx="199.8" cy="154.24" r="28.22" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Project</title></circle>
-<circle cx="700.2" cy="336.44" r="28.22" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Skill</title></circle>
-<circle cx="476.86" cy="553.93" r="23.5" fill="#fabf52" fill-opacity="0.92" stroke="#fabf52" stroke-opacity="1" stroke-width="1"><title>City</title></circle>
-<circle cx="228.99" cy="427.48" r="22.03" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Company</title></circle>
+<circle cx="453.76" cy="261.38" r="36" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Person</title></circle>
+<circle cx="213.73" cy="177.6" r="28.22" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Project</title></circle>
+<circle cx="686.27" cy="349.66" r="28.22" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Skill</title></circle>
+<circle cx="475.36" cy="555.05" r="23.5" fill="#fabf52" fill-opacity="0.92" stroke="#fabf52" stroke-opacity="1" stroke-width="1"><title>City</title></circle>
+<circle cx="241.29" cy="435.64" r="22.03" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Company</title></circle>
 </g>
 <g font-size="12">
-<rect x="413.88" y="282.96" width="80.2" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
-<text x="420.88" y="296.96" fill="#1f2328" font-weight="600">Person<tspan fill="#656d76" font-weight="400" dx="6">60</tspan></text>
-<rect x="155.85" y="186.46" width="87.9" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
-<text x="162.85" y="200.46" fill="#1f2328" font-weight="600">Project<tspan fill="#656d76" font-weight="400" dx="6">20</tspan></text>
-<rect x="663.95" y="368.66" width="72.5" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
-<text x="670.95" y="382.66" fill="#1f2328" font-weight="600">Skill<tspan fill="#656d76" font-weight="400" dx="6">20</tspan></text>
-<rect x="427.46" y="574" width="98.8" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
-<text x="434.46" y="588" fill="#1f2328" font-weight="600">City<tspan fill="#656d76" font-weight="400" dx="6">10</tspan></text>
-<rect x="491.26" y="577" width="28" height="14" rx="7" fill="#2ea043"><title>has lat/lon locations</title></rect>
-<text x="496.26" y="587" fill="#ffffff" font-size="10" font-weight="700" letter-spacing="0.4">LOC</text>
-<rect x="188.54" y="453.52" width="80.9" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
-<text x="195.54" y="467.52" fill="#1f2328" font-weight="600">Company<tspan fill="#656d76" font-weight="400" dx="6">8</tspan></text>
+<rect x="413.66" y="301.38" width="80.2" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="420.66" y="315.38" fill="#1f2328" font-weight="600">Person<tspan fill="#656d76" font-weight="400" dx="6">60</tspan></text>
+<rect x="169.78" y="209.82" width="87.9" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="176.78" y="223.82" fill="#1f2328" font-weight="600">Project<tspan fill="#656d76" font-weight="400" dx="6">20</tspan></text>
+<rect x="650.02" y="381.88" width="72.5" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="657.02" y="395.88" fill="#1f2328" font-weight="600">Skill<tspan fill="#656d76" font-weight="400" dx="6">20</tspan></text>
+<rect x="425.96" y="574" width="98.8" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="432.96" y="588" fill="#1f2328" font-weight="600">City<tspan fill="#656d76" font-weight="400" dx="6">10</tspan></text>
+<rect x="489.76" y="577" width="28" height="14" rx="7" fill="#2ea043"><title>has lat/lon locations</title></rect>
+<text x="494.76" y="587" fill="#ffffff" font-size="10" font-weight="700" letter-spacing="0.4">LOC</text>
+<rect x="200.84" y="461.67" width="80.9" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="207.84" y="475.67" fill="#1f2328" font-weight="600">Company<tspan fill="#656d76" font-weight="400" dx="6">8</tspan></text>
 </g>
 <rect x="12" y="12" width="263.25" height="73.6" rx="6" fill="#ffffff" fill-opacity="0.85" stroke="#57606a" stroke-opacity="0.30"/>
 <g font-family="ui-monospace, SFMono-Regular, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="12">

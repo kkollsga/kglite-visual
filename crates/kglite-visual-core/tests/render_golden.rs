@@ -431,6 +431,72 @@ fn a_canvas_that_fits_the_schema_reports_no_tier() {
     assert!(!svg.contains("names shown"));
 }
 
+/// No label lands inside the status block.
+///
+/// The layout keeps every *circle* below the block's strip, and that was not
+/// enough: a node right under the block whose label the ring layout puts
+/// *above* it drew its chip inside the panel, which is where round 3's 800x500
+/// sodir render lost `WellboreCore 8,510`. The strip owes a label its reach.
+///
+/// **What this check does and does not cover.** It goes red on a reservation
+/// that ignores the status block entirely — proven by removing it — but the
+/// committed 5-type fixture never settles a node close enough under the panel
+/// to exercise the `LABEL_REACH_ABOVE` term on its own; the evidence for that
+/// term is the sodir meta-graph at 800x500, where round 4's first tiered render
+/// still had a chip inside the panel and this one does not.
+#[test]
+fn no_label_is_drawn_inside_the_status_block() {
+    for (width, height) in [(300, 250), (400, 250), (900, 600), (800, 500)] {
+        let svg = render_to_string(&RenderRequest {
+            width,
+            height,
+            ..meta_request(Theme::Dark)
+        });
+        let block = rects(&svg, 6.0);
+        assert_eq!(block.len(), 1, "{width}x{height}: one status panel");
+        let chips = rects(&svg, 5.0);
+        assert!(!chips.is_empty(), "{width}x{height}: no chips to check");
+        for chip in &chips {
+            assert!(
+                !overlaps(chip, &block[0]),
+                "{width}x{height}: a label chip {chip:?} is under the status block {:?}",
+                block[0]
+            );
+        }
+    }
+}
+
+/// Every `<rect>` in the document with the given corner radius, as
+/// `(x, y, x + width, y + height)`. The radius is what tells the three kinds
+/// apart: 5 is a label chip, 6 the status panel, 22 an island boundary.
+fn rects(svg: &str, radius: f64) -> Vec<(f64, f64, f64, f64)> {
+    let number = |line: &str, key: &str| -> Option<f64> {
+        line.split(&format!("{key}=\""))
+            .nth(1)?
+            .split('"')
+            .next()?
+            .parse()
+            .ok()
+    };
+    svg.lines()
+        .filter(|line| line.starts_with("<rect"))
+        .filter(|line| number(line, "rx") == Some(radius))
+        .filter_map(|line| {
+            let (x, y) = (number(line, "x")?, number(line, "y")?);
+            Some((
+                x,
+                y,
+                x + number(line, "width")?,
+                y + number(line, "height")?,
+            ))
+        })
+        .collect()
+}
+
+fn overlaps(a: &(f64, f64, f64, f64), b: &(f64, f64, f64, f64)) -> bool {
+    a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3
+}
+
 fn render_meta(request: &RenderRequest) -> render::Rendered {
     let graph = fixture_graph();
     render::render(&graph, "meta.kgl", QueryConfig::default(), request)

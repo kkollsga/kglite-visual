@@ -420,7 +420,7 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         height: f64::from(height),
         reserved_top: svg::status_block_height(
             scene.status.len() + scene.banners.len() + usize::from(scene.place_all_labels),
-        ),
+        ) + svg::LABEL_REACH_ABOVE,
     };
     let groups = arc_groups(&scene);
     let started = std::time::Instant::now();
