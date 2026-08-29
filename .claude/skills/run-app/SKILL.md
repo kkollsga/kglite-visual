@@ -100,13 +100,27 @@ Cypher query. Leave it alone unless a deliberate analytical query needs it.
 
     "$BIN" render crates/kglite-visual-core/tests/fixtures/meta.kgl --meta -o /tmp/m.svg
     # {"out":"/tmp/m.svg","format":"svg","width":2000,"height":1250,"nodes":5,
-    #  "links":7,"truncated":false,"banners":[],"bytes":3705}
+    #  "links":7,"folded":0,"layout_ms":0.06,"truncated":false,"banners":[],
+    #  "bytes":3867}
 
 Same stdout rule as the server: exactly one JSON line, diagnostics on stderr,
 **nothing on stdout when it fails** — so a harness that read a line got a
 render. Sources are mutually exclusive: `--meta` (default), `--cypher "…"`,
 `--expand type=T rel=R dir=out`. `--format png`, `--theme light`,
 `--width/--height`, `--seed`, `--limit`.
+
+Four fields appear only when they have something to say, so a key that is
+present always carries a number: `folded` (nodes drawn as one wedge rather
+than individually), and `types_shown` / `types_total` / `names_shown`. The
+last three are the render's own honesty: a meta-graph on a canvas too small
+for the schema draws the largest types it can hold and says so —
+
+    "$BIN" render sodir.kgl --meta --width 800 --height 500 -o /tmp/s.svg
+    # {…,"nodes":24,"links":20,"types_shown":24,"types_total":98,
+    #  "names_shown":17,…}
+
+— and the same two lines are drawn into the picture. 1600x1000 holds sodir's
+98 types and reports none of this.
 
 The layout is seeded and deterministic — same request, same bytes, forever —
 so `--seed` is how you get a *different* arrangement of the same data, and
@@ -124,10 +138,11 @@ changes what the user is looking at. Rendering the *user's actual* geometry
 is P10 + the deferred client-position capture, not this.
 
 **What the image is not:** content-identical to the app,
-geometry-different. The browser's layout runs on the user's GPU; this is a
-seeded Fruchterman-Reingold in core. Same nodes, same links, same
-truncation, a different arrangement — never claim "your screen shows X at
-the top left".
+geometry-different. The browser's layout runs on the user's GPU; this is
+one of three structure-chosen kernels in core — hop rings, packed islands,
+or a seeded Fruchterman-Reingold when the input has no shape to find. Same
+nodes, same links, same truncation, a different arrangement — never claim
+"your screen shows X at the top left".
 
 ## 3c. Drive the live view over MCP
 
@@ -195,6 +210,11 @@ from one that reached the user.
 
 Kill the `pid` from the stdout JSON line. Verify the port is released before
 relaunching on a fixed port.
+
+`kill -TERM` (the default) is caught: the server shuts down, exits **0**,
+releases the port, and removes kglite's temporary spill from `$TMPDIR` —
+370 MB for a half-million-node graph. `kill -9` skips all of it and leaves
+the spill behind. Ctrl-C is the same handler.
 
 ## Report shape
 

@@ -5,10 +5,16 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29 (P10 landed on top of P0–P9): the artifact exists,
+> **Status, 2026-08-29 (P11 landed on top of P0–P10): the artifact exists,
 > proves itself, reads as a graph on real data, hands that graph to an
-> agent as an image — and lets the agent navigate it while a human
-> watches.**
+> agent as a picture a human can read — and lets the agent navigate it
+> while a human watches.** The render is structure-aware, not one force
+> layout: a neighbourhood is drawn as hop rings, a community-structured
+> graph as packed islands, and anything shapeless falls back to the seeded
+> force pass. Where the canvas cannot hold what was asked for — a hundred
+> type names in a thumbnail, a name with no free cell near it — it draws
+> what fits and **says what it dropped**, in the picture and in the JSON
+> line.
 > Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend that
 > renders the type-level meta-graph through cosmos.gl — GPU force layout by
 > default, the D2 deterministic mode behind an explicit `?deterministic=1`
@@ -107,8 +113,9 @@ summary that belongs in standing rules, because it decides what code is
 allowed to go where:
 
 - **`kglite-visual-core`** — embeds the `kglite` crate. Sessions, Cypher,
-  snapshots, the type-level meta-graph, bounded neighborhood expansion, an
-  optional Rust-side ForceAtlas2 layout, and a **transport-agnostic binary
+  snapshots, the type-level meta-graph, bounded neighborhood expansion, three
+  structure-chosen layout kernels (hop-ring radial, packed islands, seeded
+  force) plus a final separation pass, and a **transport-agnostic binary
   protocol** (typed-array buffers for topology and positions, JSON for
   metadata). *Transport-agnostic is a rule, not a description:* nothing in
   this crate may know it is talking to a WebSocket. It has three consumers
