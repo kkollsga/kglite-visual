@@ -490,6 +490,20 @@ async function interactionCosts(context, url, out, repeats) {
   out.compaction_slots_after = { statistic: 'exact', value: reclaimed }
 }
 
+/**
+ * The app URL in D2's deterministic layout mode.
+ *
+ * Every cell in this harness starts from a known layout: the frontend's user
+ * default is the GPU force simulation, which moves points continuously until
+ * it settles, and a frame-period capture taken over a settling layout measures
+ * the settle rather than the thing under test. The synthetic cells toggle the
+ * simulation on themselves (`__bench.simulation(true)`), which is what makes
+ * "simulation on" a *variable* here rather than an ambient condition.
+ */
+function appUrl(info) {
+  return `${info.url}?deterministic=1`
+}
+
 async function readyPage(context, url) {
   const page = await context.newPage()
   const errors = []
@@ -535,7 +549,7 @@ async function main() {
       // opening the tool experiences.
       const coldContext = await browser.newContext({ viewport: { width: 1280, height: 800 } })
       const cold = await coldContext.newPage()
-      await cold.goto(server.info.url)
+      await cold.goto(appUrl(server.info))
       await cold.waitForFunction(() => window.__kglvBench?.firstDataFrameMs !== null, undefined, {
         timeout: 60_000,
       })
@@ -557,7 +571,7 @@ async function main() {
 
     // ── the real path: a slice the server actually produced ────────────
     for (const size of args.sizes) {
-      const { page, errors } = await readyPage(context, server.info.url)
+      const { page, errors } = await readyPage(context, appUrl(server.info))
       await page.locator('.kglv-label:has-text("Person")').click()
       await page.getByTestId('expand-limit').fill(String(size))
       await page.getByTestId('expand-KNOWS-out').click()
@@ -603,7 +617,7 @@ async function main() {
 
     // ── the synthetic path: in-bound cross-check, plus above the bound ──
     for (const size of args.synthetic) {
-      const { page, errors } = await readyPage(context, server.info.url)
+      const { page, errors } = await readyPage(context, appUrl(server.info))
       await installCapture(page)
       const loaded = await page.evaluate(([n, d]) => window.__bench.synthetic(n, d), [size, 3])
       const label = `synthetic_${size}`
@@ -618,7 +632,7 @@ async function main() {
       out[`${label}_console_errors`] = { statistic: 'exact', value: errors }
       await page.close()
     }
-    await interactionCosts(context, server.info.url, out, 3)
+    await interactionCosts(context, appUrl(server.info), out, 3)
   } finally {
     await browser.close()
     server.child.kill()
