@@ -439,7 +439,7 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     };
     let layout_ms = started.elapsed().as_secs_f64() * 1_000.0;
     let mut positions = positions;
-    moor_folded_fans(&scene, &mut positions, f64::from(width), f64::from(height));
+    moor_folded_fans(&scene, &mut positions, canvas);
     // Last, on the coordinates that are about to be drawn, and after the fold
     // wedges have been moored: `layout::fit` scales positions and not radii, so
     // no kernel can promise on its own that two circles clear each other in
@@ -519,7 +519,8 @@ const WEDGE_TETHER_PX: f64 = 26.0;
 /// kernels and depends on none of them: the constraint is "adjacent to a named
 /// parent", and every kernel that produced a position has already answered the
 /// question this corrects.
-fn moor_folded_fans(scene: &Scene, positions: &mut layout::Positions, width: f64, height: f64) {
+fn moor_folded_fans(scene: &Scene, positions: &mut layout::Positions, canvas: layout::Canvas) {
+    let (width, height) = (canvas.width, canvas.height);
     if !scene.nodes.iter().any(|node| node.aggregate.is_some()) {
         return;
     }
@@ -586,8 +587,17 @@ fn moor_folded_fans(scene: &Scene, positions: &mut layout::Positions, width: f64
         }
         let reach = fan + WEDGE_TETHER_PX + scene.nodes[index].radius;
         let radius = scene.nodes[index].radius;
+        // The status block's strip is out of bounds for a wedge as much as for
+        // any other node: the layout kernels were told about it, and this
+        // override runs after them. A moored wedge that landed under the panel
+        // took its count with it — `Wellbore x 33 (showing none)` sat behind
+        // the block in every P11 render of the truncated expansion — and the
+        // count is the only thing on the picture saying what the glyph stands
+        // for. The label's own reach is included, because that count is drawn
+        // above the wedge as often as below it.
+        let top = canvas.reserved_top + radius + svg::LABEL_REACH_ABOVE;
         let x = (px + dx / length * reach).clamp(radius, (width - radius).max(radius));
-        let y = (py + dy / length * reach).clamp(radius, (height - radius).max(radius));
+        let y = (py + dy / length * reach).clamp(top, (height - radius).max(top));
         positions.xy[index] = (x, y);
         // Outward from the parent, so the count never sits on top of the name
         // that makes it mean something.
@@ -1400,6 +1410,16 @@ fn clamp_u32(value: u64) -> u32 {
 mod tests {
     use super::*;
 
+    /// A canvas with no status block above it, for the tests that only care
+    /// where a wedge lands relative to its parent.
+    fn canvas(width: f64, height: f64) -> layout::Canvas {
+        layout::Canvas {
+            width,
+            height,
+            reserved_top: 0.0,
+        }
+    }
+
     #[test]
     fn the_names_line_counts_the_chips_drawn_and_appears_only_when_one_is_missing() {
         // The committed fixture has five types, so no canvas both fits them all
@@ -1472,7 +1492,7 @@ mod tests {
             label_side: vec![layout::LabelSide::Below; 2],
             islands: Vec::new(),
         };
-        moor_folded_fans(&scene, &mut positions, 1000.0, 600.0);
+        moor_folded_fans(&scene, &mut positions, canvas(1000.0, 600.0));
         assert_eq!(positions.xy[0], (200.0, 300.0), "the parent does not move");
         let (x, y) = positions.xy[1];
         let gap = ((x - 200.0f64).powi(2) + (y - 300.0f64).powi(2)).sqrt();
@@ -1485,6 +1505,50 @@ mod tests {
             positions.label_side[1],
             layout::LabelSide::Right,
             "its count is drawn away from the parent's own name"
+        );
+    }
+
+    /// And never inside the status block.
+    ///
+    /// The mooring runs *after* the layout kernels, which were told where the
+    /// status block is; the override was not, so a wedge pushed upward landed
+    /// under the panel with its count behind it — `Wellbore x 33 (showing
+    /// none)` sat there in every P11 render of the truncated Discovery
+    /// expansion. The count is the only thing on the picture saying what the
+    /// glyph stands for.
+    #[test]
+    fn a_folded_fan_is_never_moored_under_the_status_block() {
+        let scene = Scene {
+            nodes: vec![node("parent", 10.0, None), node("T x 27", 20.0, Some(27))],
+            links: vec![SceneLink {
+                source: 0,
+                target: 1,
+                width: 1.0,
+            }],
+            status: Vec::new(),
+            banners: Vec::new(),
+            place_all_labels: false,
+            canvas_tier: None,
+            seeds: Vec::new(),
+        };
+        // The parent sits just under the block and the layout put the glyph
+        // straight above it, which is the arrangement that used to end inside
+        // the panel.
+        let mut positions = layout::Positions {
+            xy: vec![(500.0, 130.0), (500.0, 40.0)],
+            label_side: vec![layout::LabelSide::Below; 2],
+            islands: Vec::new(),
+        };
+        let block = layout::Canvas {
+            width: 1000.0,
+            height: 600.0,
+            reserved_top: 110.0,
+        };
+        moor_folded_fans(&scene, &mut positions, block);
+        let (_, y) = positions.xy[1];
+        assert!(
+            y - scene.nodes[1].radius - svg::LABEL_REACH_ABOVE >= block.reserved_top,
+            "the wedge and the count above it clear the block: y = {y}"
         );
     }
 
@@ -1536,7 +1600,7 @@ mod tests {
             label_side: vec![layout::LabelSide::Below; count],
             islands: Vec::new(),
         };
-        moor_folded_fans(&scene, &mut positions, 1400.0, 900.0);
+        moor_folded_fans(&scene, &mut positions, canvas(1400.0, 900.0));
 
         let (gx, gy) = positions.xy[glyph];
         for sibling in 1..glyph {
@@ -1585,7 +1649,7 @@ mod tests {
             label_side: vec![layout::LabelSide::Below; 3],
             islands: Vec::new(),
         };
-        moor_folded_fans(&scene, &mut positions, 1000.0, 600.0);
+        moor_folded_fans(&scene, &mut positions, canvas(1000.0, 600.0));
         assert!(
             positions.xy[2].0 > 700.0,
             "a coincident glyph goes outward: {:?}",
