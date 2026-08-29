@@ -144,6 +144,11 @@ fn expanding_a_type_node_appends_instance_slots_to_the_same_space() {
     assert!(!slice.meta.bound.truncated);
     assert_eq!(slice.meta.bound.returned, 60);
     assert_eq!(slice.meta.bound.total, 60);
+    // Nothing was cut, and the link half of the bound says so too: the fixture
+    // is far under the shared byte budget, so this is the ceiling staying quiet.
+    assert_eq!(slice.meta.link_bound.returned, 180);
+    assert_eq!(slice.meta.link_bound.total, 180);
+    assert!(!slice.meta.link_bound.truncated);
 
     let slots: Vec<u32> = slice.meta.nodes.iter().map(|n| n.slot).collect();
     assert_eq!(slots, (5..65).collect::<Vec<u32>>(), "dense, appended");
@@ -192,6 +197,13 @@ fn the_expansion_bound_can_fail_and_says_so() {
     for edge in &slice.meta.edges {
         assert!(edge.source_slot < 45 && edge.target_slot < 45, "{edge:?}");
     }
+
+    // …and the response says how many it dropped doing so. Without this, 40
+    // nodes carrying 108 of their 180 KNOWS edges read as a complete
+    // neighbourhood, which is the node bound's own failure mode one level down.
+    assert_eq!(slice.meta.link_bound.returned, 108);
+    assert_eq!(slice.meta.link_bound.total, 180);
+    assert!(slice.meta.link_bound.truncated);
 }
 
 #[test]

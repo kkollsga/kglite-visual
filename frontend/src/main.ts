@@ -23,6 +23,7 @@ import {
 } from './appearance'
 import { markRendererMounted, publishBenchHook } from './bench'
 import { debugState, probeDeviceFeatures, publishDebugState } from './debug'
+import type { BoundInfo } from './generated/BoundInfo'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
 import type { NodeDetail } from './generated/NodeDetail'
@@ -204,6 +205,7 @@ async function handle(completed: Completed): Promise<void> {
         meta.bound.returned,
         meta.bound.total,
         meta.kind === 'collapse' ? 'collapsed' : 'nodes',
+        meta.link_bound,
       )
       // A compaction renumbers every slot, so anything the user had selected or
       // hovered now names something else. Dropping the sets is the only honest
@@ -489,11 +491,21 @@ function noteTruncation(
   returned: number,
   total: number,
   unit: string,
+  links: BoundInfo | null = null,
 ): void {
   truncation = { returned, total, truncated }
-  truncationBanner = truncated
-    ? `showing ${returned.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ${unit}`
-    : null
+  const count = (n: number): string => n.toLocaleString('en-US')
+  const clauses: string[] = []
+  if (truncated) clauses.push(`${count(returned)} of ${count(total)} ${unit}`)
+  // The node list can be complete while the link list is not: nodes and links
+  // share one byte budget in core, and a dense relationship spends it on links.
+  // A slice that says nothing here reads as "these nodes have no other edges".
+  // "up to" because the server's link total counts every edge its walk found
+  // and refused, and a both-directions walk can find one edge from either end.
+  if (links !== null && links.truncated) {
+    clauses.push(`${count(links.returned)} of up to ${count(links.total)} links`)
+  }
+  truncationBanner = clauses.length === 0 ? null : `showing ${clauses.join(' and ')}`
   syncCounts()
 }
 

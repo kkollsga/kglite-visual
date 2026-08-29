@@ -25,6 +25,16 @@ const META_LINKS = 7
 const KNOWS_REACHABLE = 60
 /** What the `max nodes` box asks for, so the bound fires visibly. */
 const EXPAND_LIMIT = 40
+/**
+ * The KNOWS-out links of those 40, and every KNOWS-out link the walk found.
+ *
+ * Observed against the fixture through the JSON twin, not derived: a link whose
+ * far endpoint the node bound refused cannot be sent (it would be an index into
+ * a slot the client was never given), so bounding the nodes cuts links too, and
+ * the slice says which.
+ */
+const LINKS_SENT = 108
+const LINKS_FOUND = 180
 
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => window.__kglv?.ready === true, undefined, {
@@ -121,16 +131,20 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
     expect(expanded.pointCount).toBe(META_POINTS + EXPAND_LIMIT)
     expect(expanded.tombstoneCount).toBe(0)
     expect(expanded.linkCount).toBeGreaterThan(META_LINKS)
-    // D5: the bound fired and the UI says so, in the words the user reads.
+    // D5: the bound fired and the UI says so, in the words the user reads —
+    // for the links as well as the nodes. A slice that reported only its node
+    // bound would let 40 nodes carrying 108 of their 180 edges read as a
+    // complete neighbourhood.
+    const banner =
+      `showing ${EXPAND_LIMIT} of ${KNOWS_REACHABLE} nodes` +
+      ` and ${LINKS_SENT} of up to ${LINKS_FOUND} links`
     expect(expanded.truncation).toEqual({
       returned: EXPAND_LIMIT,
       total: KNOWS_REACHABLE,
       truncated: true,
-      banner: `showing ${EXPAND_LIMIT} of ${KNOWS_REACHABLE} nodes`,
+      banner,
     })
-    await expect(page.getByTestId('truncation-banner')).toHaveText(
-      `showing ${EXPAND_LIMIT} of ${KNOWS_REACHABLE} nodes`,
-    )
+    await expect(page.getByTestId('truncation-banner')).toHaveText(banner)
     // Instance nodes are labelled with their titles, not with slot numbers.
     await expect(page.locator('.kglv-label:has-text("Person_")').first()).toBeVisible()
 

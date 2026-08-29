@@ -50,6 +50,7 @@ function slice(overrides: Partial<GraphSliceMeta>): GraphSliceMeta {
     slot_count: 0,
     tombstone_count: 0,
     bound: { returned: 0, total: 0, truncated: false },
+    link_bound: { returned: 0, total: 0, truncated: false },
     ...overrides,
   }
 }

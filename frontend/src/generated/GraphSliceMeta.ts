@@ -41,4 +41,15 @@ slot_count: number, tombstone_count: number,
  * What the bound did to this response (D5). Present whether or not it
  * fired: "all 12 of 12" is information the UI needs the rest of the time.
  */
-bound: BoundInfo, };
+bound: BoundInfo, 
+/**
+ * What the bound did to *this slice's* links — not to `edges`, which
+ * re-sends the whole view.
+ *
+ * The byte budget is shared between nodes and links
+ * (`expand::MAX_EXPANSION_BYTES`), so a dense relationship spends it on
+ * links and the slice arrives with fewer nodes *and* fewer links than the
+ * walk found. A node whose edges were cut is indistinguishable from an
+ * isolated one unless the response says so; this is where it says so.
+ */
+link_bound: BoundInfo, };

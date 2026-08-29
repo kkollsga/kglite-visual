@@ -55,23 +55,28 @@ use crate::request::EdgeDirection;
 /// 60 fps one.
 pub const MAX_EXPANSION_NODES: usize = 5_000;
 
-/// Hard ceiling on the serialized size of one expansion's node list.
+/// Hard ceiling on the serialized size of one expansion — **nodes and links
+/// together, in one budget**.
 ///
 /// The count bound alone is defeated by shape: 5 000 nodes with 8-character
 /// titles is 400 KB and 5 000 with a paragraph in the title field is 50 MB.
 /// Four protocol chunks' worth.
 ///
 /// **Measured at the count bound, 2026-08-29:** a 5 000-node slice serializes
-/// its node list at ~74 bytes per node, ~0.37 MB, so this ceiling carries about
-/// 5x headroom over the shape the generator produces.
+/// its node list at ~74 bytes per node (~0.37 MB) and its 15 007 links at
+/// ~67 bytes each (~1.0 MB) — the links are the larger term, and average degree
+/// there is only 3. A ceiling charged against nodes alone would let a denser
+/// relationship grow the response without limit at the same node count, which
+/// is the shape argument `bound.rs` makes for having a byte bound at all. So
+/// both lists are charged here, against the same total.
 ///
-/// **It bounds the node list and nothing else, and the link list is already the
-/// larger term.** The same 5 000-node slice carried 15 007 links at ~67 bytes
-/// each — 1.0 MB against the node list's 0.37 MB, in a single `GraphSlice`
-/// metadata frame that is never chunked — and no ceiling applies to it, so a
-/// denser relationship at the same node count grows the response without limit.
-/// Closing that needs its own change and its own test that the new bound can
-/// fire; this note exists so the gap is not rediscovered as a surprise.
+/// **One budget, not two, and that is the consistency property.** A link is
+/// only ever admitted after both its endpoints are, and once the budget is
+/// spent no further node is admitted either — so the slice that crosses the
+/// wire never contains an index into something the client was not sent. What it
+/// *can* contain is a node whose edges were cut, and that is exactly what
+/// `GraphSliceMeta::link_bound` reports: a client is never left to infer that
+/// the edges it can see are all the edges there are.
 pub const MAX_EXPANSION_BYTES: usize = 2 * 1024 * 1024;
 
 /// Nodes returned when a client names no limit.
@@ -92,6 +97,17 @@ pub const DEFAULT_EXPANSION_NODES: usize = 1_000;
 /// byte bound that does not hold.
 pub(crate) fn slice_node_bytes(title: &str, node_type: &str) -> usize {
     title.len() + node_type.len() + 96
+}
+
+/// Serialized-size estimate for one link in a slice.
+///
+/// A `ViewEdge` is two slot numbers, the relationship name and the `meta` flag,
+/// plus the two f32 slots the same link occupies in the `Links` array. Measured
+/// against a real 5 000-node slice at ~67 bytes per link; over-estimated here
+/// for the same reason as the node estimate — a byte bound that under-counts is
+/// a byte bound that does not hold.
+pub(crate) fn slice_link_bytes(name: &str) -> usize {
+    name.len() + 64
 }
 
 /// The bound one expansion actually runs under.
@@ -281,8 +297,18 @@ pub struct Expansion {
     pub nodes: Vec<NodeIndex>,
     /// Edges among them. Never references a node outside `nodes`.
     pub edges: Vec<FoundEdge>,
-    /// What the bound did (D5).
+    /// What the bound did to the node list (D5).
     pub bound: BoundInfo,
+    /// What the bound did to the link list.
+    ///
+    /// `returned` is exact. `total` is `returned` plus every edge the walk
+    /// found and refused — refused because the shared byte budget was spent, or
+    /// because an endpoint was not admitted — and it is an **upper bound** on
+    /// the distinct links cut: a `Both` walk reaches a reciprocated edge from
+    /// each end, and the refusal path has no set to deduplicate against
+    /// (building one would be the unbounded allocation this bound exists to
+    /// prevent). Same convention as [`RelationshipPreview::count`].
+    pub link_bound: BoundInfo,
 }
 
 /// Walk the neighbourhood of `seeds`, bounded.
@@ -315,6 +341,10 @@ pub fn expand(
     // say "5 000", which reads as complete.
     let mut total_reachable: HashSet<NodeIndex> = HashSet::new();
     let mut truncated = false;
+    // Edges the walk found and did not send. Counted rather than collected: on
+    // the dense expansion this bound exists for, the refused set is the large
+    // one, and holding it would be the unbounded allocation.
+    let mut links_refused: usize = 0;
 
     // The arena guard the disk backend needs for materialised node reads. A
     // no-op on memory and mapped graphs; leaving it out would grow the query
@@ -395,10 +425,32 @@ pub fn expand(
                     || !admit(peer, &mut nodes, &mut seen, &mut bytes)
                 {
                     truncated = true;
+                    links_refused += 1;
                     // Keep walking: `total_reachable` is what makes "showing X
                     // of Y" true, and stopping here would make Y a lie.
                     continue;
                 }
+                // The link is charged to the same budget its endpoints were.
+                // Refusing it here (rather than not metering it at all) is what
+                // stops a dense relationship from riding to the client
+                // unmetered: the links of a 5 000-node slice already outweigh
+                // its nodes 3:1 at an average degree of 3.
+                //
+                // A `Both` walk can reach one edge twice and pay for it twice;
+                // the dedup below reclaims the duplicate from the response but
+                // not from the budget. Over-charging keeps the ceiling true,
+                // which under-charging would not.
+                //
+                // A refusal here is *not* node truncation, and does not set
+                // `truncated`: the node list can be complete while the link
+                // list is not, and `BoundInfo` says "returned < total" about
+                // its own list. Two flags, two facts.
+                let link_size = slice_link_bytes(&name);
+                if bytes + link_size > bound.max_bytes {
+                    links_refused += 1;
+                    continue;
+                }
+                bytes += link_size;
                 let (source, target) = match dir {
                     Direction::Outgoing => (*seed, peer),
                     Direction::Incoming => (peer, *seed),
@@ -423,16 +475,163 @@ pub fn expand(
         total: total_reachable.len() as u32,
         truncated: truncated || nodes.len() < total_reachable.len(),
     };
+    let link_info = BoundInfo {
+        returned: edges.len() as u32,
+        total: (edges.len() + links_refused) as u32,
+        truncated: links_refused > 0,
+    };
     Expansion {
         nodes,
         edges,
         bound: info,
+        link_bound: link_info,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A clique of `n` `P` nodes joined by `KNOWS`, in memory.
+    ///
+    /// `n * (n - 1)` links over `n` nodes is the shape the link ceiling exists
+    /// for — the node count stays trivial while the link list runs away — and it
+    /// is the shape no committed fixture has, because a fixture dense enough to
+    /// trip a 2 MB ceiling is a megabyte of git history for one assertion.
+    fn dense_clique(n: usize) -> DirGraph {
+        use kglite::api::session::{execute_mut, ExecuteOptions};
+        use std::fmt::Write as _;
+
+        let mut script = String::new();
+        for i in 0..n {
+            let _ = writeln!(script, "CREATE (n{i}:P {{title: 'P{i}'}})");
+        }
+        for a in 0..n {
+            for b in 0..n {
+                if a != b {
+                    let _ = writeln!(script, "CREATE (n{a})-[:KNOWS]->(n{b})");
+                }
+            }
+        }
+        let mut graph = DirGraph::new();
+        let params = std::collections::HashMap::new();
+        execute_mut(&mut graph, &script, &ExecuteOptions::eager(&params)).expect("build");
+        graph
+    }
+
+    #[test]
+    fn the_link_ceiling_can_fire_with_the_node_count_well_inside_its_own_bound() {
+        // R1 for the link half of the byte bound: 200 nodes is 4% of
+        // MAX_EXPANSION_NODES and the node byte cost is ~20 KB, so nothing but
+        // the links can spend a 2 MB budget — and 39 800 of them at ~69 bytes
+        // want 2.7 MB. Before this bound existed the whole 2.7 MB shipped.
+        let graph = dense_clique(200);
+        let seeds: Vec<NodeIndex> = (0..200).map(NodeIndex::new).collect();
+        let found = expand(
+            &graph,
+            &seeds,
+            Some("KNOWS"),
+            EdgeDirection::Out,
+            effective_bound(Some(MAX_EXPANSION_NODES as u32)),
+            None,
+        );
+
+        assert!(
+            found.link_bound.truncated,
+            "39 800 links did not trip a 2 MB ceiling: {:?}",
+            found.link_bound
+        );
+        assert_eq!(found.link_bound.returned as usize, found.edges.len());
+        assert_eq!(
+            found.link_bound.total, 39_800,
+            "every link the walk found is counted, sent or not"
+        );
+
+        // The budget is what stopped it, and it stopped it where the arithmetic
+        // says: node bytes plus link bytes, both charged.
+        let node_bytes: usize = found
+            .nodes
+            .iter()
+            .map(|i| {
+                let view = graph.node_view(*i).expect("clique node");
+                slice_node_bytes(
+                    &crate::values::value_to_display(&view.title()),
+                    view.node_type_str(&graph.interner),
+                )
+            })
+            .sum();
+        let link_bytes = found.edges.len() * slice_link_bytes("KNOWS");
+        assert!(
+            node_bytes + link_bytes <= MAX_EXPANSION_BYTES,
+            "{node_bytes} + {link_bytes} exceeds the ceiling"
+        );
+        assert!(
+            node_bytes + link_bytes + slice_link_bytes("KNOWS") > MAX_EXPANSION_BYTES - 200,
+            "the budget was left largely unspent, so this is not the ceiling firing"
+        );
+
+        // The consistency invariant, which is the whole reason the two lists
+        // share one budget: no link points at a node the client was not sent.
+        let sent: HashSet<NodeIndex> = found.nodes.iter().copied().collect();
+        for edge in &found.edges {
+            assert!(
+                sent.contains(&edge.source) && sent.contains(&edge.target),
+                "{edge:?} references a node outside the slice"
+            );
+        }
+    }
+
+    #[test]
+    fn a_node_whose_links_were_cut_is_never_reported_as_complete() {
+        // The failure this bound is really about: a truncated link list that
+        // nothing declares reads as "these nodes have no other edges". The node
+        // list here IS complete (200 of 200, not truncated) — so the link
+        // metadata is the only thing that can tell the client its picture of the
+        // neighbourhood is partial, and it does.
+        let graph = dense_clique(200);
+        let seeds: Vec<NodeIndex> = (0..200).map(NodeIndex::new).collect();
+        let found = expand(
+            &graph,
+            &seeds,
+            Some("KNOWS"),
+            EdgeDirection::Out,
+            effective_bound(Some(MAX_EXPANSION_NODES as u32)),
+            None,
+        );
+        assert_eq!(found.bound.returned, 200);
+        assert_eq!(found.bound.total, 200);
+        assert!(
+            !found.bound.truncated,
+            "the NODE list is complete; only the links were cut"
+        );
+        assert!(found.link_bound.truncated);
+        assert!(found.link_bound.returned < found.link_bound.total);
+    }
+
+    #[test]
+    fn an_expansion_that_fits_reports_its_links_untruncated() {
+        // The other half of R1: the ceiling is silent when it does not fire, so
+        // `truncated: true` above is a fact about the input and not a constant.
+        let graph = dense_clique(20);
+        let seeds: Vec<NodeIndex> = (0..20).map(NodeIndex::new).collect();
+        let found = expand(
+            &graph,
+            &seeds,
+            Some("KNOWS"),
+            EdgeDirection::Out,
+            effective_bound(None),
+            None,
+        );
+        assert_eq!(found.edges.len(), 380, "20 * 19 links, all of them sent");
+        assert_eq!(
+            found.link_bound,
+            BoundInfo {
+                returned: 380,
+                total: 380,
+                truncated: false
+            }
+        );
+    }
 
     #[test]
     fn no_request_can_ask_for_an_unbounded_expansion() {

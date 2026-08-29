@@ -107,6 +107,17 @@ pub struct GraphSlice {
     pub links: Vec<f32>,
 }
 
+/// What the bound did to one slice, both halves.
+///
+/// Nodes and links are bounded together — one byte budget, charged by whichever
+/// list is asking — so they are also produced and reported together. Passing
+/// them as two arguments through the assembly path is how one of them gets
+/// forgotten at a call site.
+struct SliceBounds {
+    nodes: BoundInfo,
+    links: BoundInfo,
+}
+
 /// Every answer a request can produce.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
@@ -253,6 +264,10 @@ impl Session {
                 })
                 .collect::<Vec<_>>(),
             BoundInfo::new(table.node_ids.len(), table.node_ids.len()),
+            // The query path refuses no link of its own: the row bound already
+            // decided what this result contains. Links whose endpoints did not
+            // make it into the slot space are counted inside `absorb`.
+            0,
         );
         Ok(Response::Slice(slice))
     }
@@ -329,7 +344,14 @@ impl Session {
             .iter()
             .map(|e| (e.source, e.target, e.name.clone()))
             .collect();
-        Ok(self.absorb(SliceKind::Expand, &found.nodes, &edges, found.bound))
+        let links_refused = (found.link_bound.total - found.link_bound.returned) as usize;
+        Ok(self.absorb(
+            SliceKind::Expand,
+            &found.nodes,
+            &edges,
+            found.bound,
+            links_refused,
+        ))
     }
 
     /// Map a set of kglite nodes and edges into the slot space and describe the
@@ -338,12 +360,18 @@ impl Session {
     /// The one place slots are allocated after open, so the write lock is taken
     /// exactly here — after every graph read the request needed, never around
     /// one.
+    /// `links_refused` is what the producer found and did not hand over — the
+    /// expansion's byte budget firing. Links dropped *here*, for an endpoint
+    /// the node bound did not admit, are counted below and land in the same
+    /// number: from the client's side they are one fact, "this slice is not
+    /// showing you every edge it found".
     fn absorb(
         &self,
         kind: SliceKind,
         nodes: &[NodeIndex],
         edges: &[(NodeIndex, NodeIndex, String)],
         bound: BoundInfo,
+        links_refused: usize,
     ) -> GraphSlice {
         let mut view = self.write();
         let first_slot = view.slot_count();
@@ -369,6 +397,8 @@ impl Session {
             }
         }
 
+        let mut links_added = 0usize;
+        let mut links_dropped = links_refused;
         for (source, target, name) in edges {
             let (Some(source_slot), Some(target_slot)) = (
                 view.slot_of_node(source.index() as u32),
@@ -376,6 +406,7 @@ impl Session {
             ) else {
                 // An endpoint the bound did not admit. Sending the link anyway
                 // would be an index into a slot the client was never given.
+                links_dropped += 1;
                 continue;
             };
             view.add_edge(ViewEdge {
@@ -384,9 +415,25 @@ impl Session {
                 name: name.clone(),
                 meta: false,
             });
+            links_added += 1;
         }
+        let link_bound = BoundInfo {
+            returned: links_added as u32,
+            total: (links_added + links_dropped) as u32,
+            truncated: links_dropped > 0,
+        };
 
-        self.finish_slice(&mut view, kind, first_slot, added, Vec::new(), bound)
+        self.finish_slice(
+            &mut view,
+            kind,
+            first_slot,
+            added,
+            Vec::new(),
+            SliceBounds {
+                nodes: bound,
+                links: link_bound,
+            },
+        )
     }
 
     fn collapse(&self, request: &SlotRequest) -> Result<GraphSlice, CoreError> {
@@ -413,7 +460,12 @@ impl Session {
             first_slot,
             Vec::new(),
             tombstones,
-            BoundInfo::new(count, count),
+            SliceBounds {
+                nodes: BoundInfo::new(count, count),
+                // A collapse adds no links; it removes them. Nothing was cut
+                // from what it *did* send, which is what this field is about.
+                links: BoundInfo::new(0, 0),
+            },
         ))
     }
 
@@ -430,7 +482,7 @@ impl Session {
         first_slot: u32,
         nodes: Vec<SliceNode>,
         tombstones: Vec<u32>,
-        bound: BoundInfo,
+        bounds: SliceBounds,
     ) -> GraphSlice {
         let compaction: Option<Compaction> = view
             .should_compact()
@@ -469,7 +521,8 @@ impl Session {
                 edges: view.edges().to_vec(),
                 slot_count: view.slot_count(),
                 tombstone_count: view.tombstone_count(),
-                bound,
+                bound: bounds.nodes,
+                link_bound: bounds.links,
             },
             compaction,
             points,
