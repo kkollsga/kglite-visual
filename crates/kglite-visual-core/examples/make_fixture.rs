@@ -120,26 +120,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut graph = build_graph(staging.path())?;
 
-    // Fill the type-connectivity cache BEFORE saving. `.kgl` persists the
-    // cache if it exists and nothing else; a file saved without it loads with
-    // triples *derived* from `connection_type_metadata` whose counts are all
-    // zero (kglite 0.16.13, `io/file.rs` `apply_to_with`), and that derived
-    // zero-count set is then itself cached — so the meta-graph would show
-    // seven relationship types each claiming zero edges. Any graph kglite's
-    // own `describe()` or Cypher planner has touched already carries the
-    // cache; a fixture built straight from CREATE statements does not.
+    // Fill the type-connectivity cache BEFORE saving, so the fixture carries
+    // real per-triple counts rather than making every loader pay the lazy O(E)
+    // recompute. `.kgl` persists the cache if the graph holds one and nothing
+    // else; a graph built straight from CREATE statements does not hold one
+    // until something asks.
     //
-    // The triples are re-sorted before being cached because kglite builds them
-    // by draining a `HashMap`, so their order — and therefore the bytes of the
-    // section `.kgl` writes them into — varies run to run. Sorting makes the
-    // fixture byte-reproducible; `make fixture` regenerates twice and diffs,
-    // which is what caught this.
-    let mut triples = graph.get_or_compute_type_connectivity();
-    triples.sort_by(|a, b| {
-        (&a.src, &a.conn, &a.tgt)
-            .cmp(&(&b.src, &b.conn, &b.tgt))
-            .then_with(|| a.count.cmp(&b.count))
-    });
+    // This used to also *sort* the triples, because kglite drained a `HashMap`
+    // to write them and the section's bytes varied run to run. kglite 0.16.14
+    // sorts every hash-ordered persisted sequence at the write — the triples,
+    // the three index-key snapshots and the disk-mode sidecars — so the sort
+    // here is gone and `make fixture` proves byte-stability without it.
+    //
+    // One thing that sort would never have fixed and no workaround can:
+    // byte-reproducibility does NOT survive an HNSW vector-index *rebuild*.
+    // The concurrent build produces a genuinely different link graph run to
+    // run. An index carried through save/load is stable; a rebuilt one is not.
+    // This fixture has no embeddings, so the question does not arise today —
+    // it will the moment one is added here, and the failure would read as a
+    // regression in the sorting rather than as what it is.
+    let triples = graph.get_or_compute_type_connectivity();
     eprintln!(
         "type connectivity: {} triples cached before save",
         triples.len()

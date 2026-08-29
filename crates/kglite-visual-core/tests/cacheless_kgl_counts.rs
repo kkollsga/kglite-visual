@@ -1,19 +1,27 @@
 //! A `.kgl` saved without a cardinality cache must still report real counts.
 //!
-//! **The failure this pins.** kglite (0.16.13) persists the type-connectivity
-//! cache only if the in-memory graph already holds one. A file saved without
-//! it loads with triples *derived* from `connection_type_metadata` whose counts
-//! are all zero, and that derived set is then itself cached — so
-//! `get_or_compute_type_connectivity()` never performs the O(E) walk that would
-//! correct it. The viewer's meta-graph then draws every relationship type
-//! claiming zero edges on a graph with hundreds of thousands of them (hit live
-//! on a 546 850-node / 765 373-edge graph, 2026-08-29).
+//! **What this used to pin, and what it pins now.** kglite 0.16.13 persisted
+//! the type-connectivity cache only if the in-memory graph already held one; a
+//! file saved without it loaded with triples *derived* from
+//! `connection_type_metadata` whose counts were all zero, and that derived set
+//! was then itself cached, so the O(E) walk that would have corrected it never
+//! ran. The viewer drew every relationship type claiming zero edges on a graph
+//! with 765 373 of them (hit live on a 546 850-node graph, 2026-08-29).
+//! This project carried a load-time repair for it; **kglite 0.16.14 fixed it
+//! at the source** — the load path leaves the cache cold when real counts are
+//! absent and distrusts persisted all-zero triples on a graph that has edges —
+//! and the repair was deleted in the same change that moved the floor.
 //!
-//! The graph below is built through Cypher `CREATE` and saved without touching
-//! the connectivity accessor first, which is exactly the shape of a `.kgl`
-//! produced by an ingest pipeline that never ran `describe()` or a planner.
-//! Calling `get_or_compute_type_connectivity()` before the save would *fill*
-//! the cache and defeat the test.
+//! So this file no longer covers code of ours. It covers the engine
+//! **contract** the whole entry screen rests on, on the exact save shape that
+//! broke it: a graph built through Cypher `CREATE` and saved without touching
+//! the connectivity accessor, which is what an ingest pipeline that never ran
+//! `describe()` or a planner produces. Calling
+//! `get_or_compute_type_connectivity()` before the save would *fill* the cache
+//! and defeat the test. It is two seconds of test time against a
+//! silent-wrong-answer class that has bitten this project once already; if a
+//! future engine regresses here, the meta-graph goes quietly wrong again and
+//! this is what says so.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -56,9 +64,9 @@ fn a_cacheless_kgl_still_reports_real_relationship_counts() {
     write_cacheless_graph(&path);
 
     let graph = load_graph(GraphSource::Path(&path)).expect("the saved graph loads");
-    // The premise, asserted rather than assumed: if kglite ever starts saving
-    // (or recomputing) the cache on this path, the fallback becomes
-    // unreachable and this test would otherwise pass for the wrong reason.
+    // The premise, asserted rather than assumed: a graph with no edges would
+    // report zero counts honestly and this test would pass for the wrong
+    // reason.
     assert_eq!(graph.graph.edge_count(), 5, "five edges were written");
 
     let session = Session::open(graph, "cacheless.kgl");

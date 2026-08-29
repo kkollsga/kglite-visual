@@ -11,9 +11,11 @@
 //! cardinality cache persisted inside the `.kgl`. The similarly-named
 //! `kglite::api::introspection::compute_type_connectivity` is the O(E) scan
 //! that *fills* that cache — calling it here would walk every edge of a 100M
-//! node graph on every meta-graph request. `loader::repair_zero_connectivity`
-//! runs it at most once per load, and only for a file whose persisted cache is
-//! the fabricated all-zero one.
+//! node graph on every meta-graph request. When a `.kgl` carries no real
+//! counts, kglite 0.16.14 leaves the cache cold at load and
+//! `get_or_compute_type_connectivity()` pays that scan once, on first ask
+//! (10.8 ms over 765k edges, measured 2026-08-29); every later call is a cache
+//! read.
 
 use std::collections::HashMap;
 
