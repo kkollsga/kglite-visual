@@ -49,4 +49,14 @@ here. The first release promotes this block whole.
   source on a platform with no matching wheel needs a Rust toolchain — and
   deliberately not Node, npm or a network round trip to a JavaScript registry.
 
+### Fixed
+
+- **Relationship counts on a `.kgl` saved without a cardinality cache.** Such a
+  file loads with every relationship count fabricated as zero, which made the
+  meta-graph claim a graph with three quarters of a million edges had none and
+  left the expansion preview empty. The viewer now detects that shape at load,
+  recomputes the counts from the edges themselves (11 ms for 765 373 edges),
+  and says on stderr that it did so — a recomputed number and a stored one are
+  different provenance, and the difference is reported rather than laundered.
+
 [Unreleased]: https://github.com/kkollsga/kglite-visual/commits/main

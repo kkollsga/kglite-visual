@@ -190,16 +190,19 @@ pub struct ExpansionPreview {
 /// and read at session open. Using the cache gives the same numbers in
 /// O(#triples) with no node access, which is the property the whole
 /// progressive-disclosure entry screen rests on. `compute_neighbors_schema`
-/// stays the right answer for a graph whose cache is absent; kglite fills the
-/// cache on load (see the boundary doc's finding 1), so that case does not
-/// arise here.
+/// stays the right answer for a graph whose cache is absent — and a `.kgl`
+/// saved without one *is* that graph, because kglite loads it with a
+/// fabricated all-zero cache rather than an empty one. `loader::load_graph`
+/// heals that at load, so the triples reaching here carry real counts whatever
+/// the file held.
 pub fn preview_for_type(graph: &DirGraph, node_type: &str) -> Vec<RelationshipPreview> {
     let mut out = Vec::new();
     for triple in graph.get_or_compute_type_connectivity() {
         if triple.count == 0 {
-            // kglite derives all-zero triples for a `.kgl` saved without a
-            // cardinality cache (boundary doc, finding 1). A preview button
-            // promising zero edges is worse than no button.
+            // The load-time repair fixes the whole-cache poisoning, but a
+            // *single* zero can still survive it (an edge whose endpoint type
+            // does not resolve). A preview button promising zero edges is
+            // worse than no button.
             continue;
         }
         if triple.src == node_type {
