@@ -489,23 +489,29 @@ fn emit_labels(
                 x: *x,
                 y: y + node.radius + LABEL_GAP_PX,
             };
-            // Outward from a ring's centre where the layout asked for it. The
-            // chip is centred on the node's own row rather than dropped below
-            // it, so the name sits at the end of the spoke it belongs to and a
-            // reader traces one line instead of guessing between two.
+            // Outward from a ring's centre where the layout asked for it. A
+            // side chip is centred on the node's own row rather than dropped
+            // below it, so the name sits at the end of the spoke it belongs to
+            // and a reader traces one line instead of guessing between two; at
+            // the top of a ring outward is *up*, which is the direction with the
+            // room in it. See `layout::LabelSide`.
             let side = positions
                 .label_side
                 .get(i)
                 .copied()
                 .unwrap_or(LabelSide::Below);
-            if side != LabelSide::Below {
-                let reach = node.radius + LABEL_GAP_PX + draw_width(&spec) / 2.0;
-                spec.x = if side == LabelSide::Left {
-                    x - reach
-                } else {
-                    x + reach
-                };
-                spec.y = y - CHIP_HEIGHT / 2.0;
+            match side {
+                LabelSide::Below => {}
+                LabelSide::Above => spec.y = y - node.radius - LABEL_GAP_PX - CHIP_HEIGHT,
+                LabelSide::Left | LabelSide::Right => {
+                    let reach = node.radius + LABEL_GAP_PX + draw_width(&spec) / 2.0;
+                    spec.x = if side == LabelSide::Left {
+                        x - reach
+                    } else {
+                        x + reach
+                    };
+                    spec.y = y - CHIP_HEIGHT / 2.0;
+                }
             }
             Some(spec)
         })

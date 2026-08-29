@@ -194,6 +194,15 @@ pub struct Canvas {
 /// right — makes the chip radiate with the branch it names. Only the layout
 /// knows where the centre is, so only the layout can say.
 ///
+/// **Outward has four directions, not two** (P11 round 3). Round 2 read only the
+/// sign of `x`, so a node at the very top of a ring — where its neighbours are
+/// beside it and the free space is above it — was given a chip pointing *along*
+/// the ring, straight into the two names next to it. The collision grid then
+/// dropped whichever lost, which is where six of the wellbore and Troll renders'
+/// missing labels went. At the top and bottom of an ellipse the outward
+/// direction is vertical, and the rule is the same rule: the chip radiates with
+/// the branch it names. See [`outward`] for where the sectors are cut.
+///
 /// **No frontend counterpart, and that is not a parity gap.** The app's overlay
 /// follows a cosmos.gl force simulation, which has no ring and therefore no
 /// outward; `LabelOverlay.update` places every chip below its point because
@@ -208,6 +217,8 @@ pub enum LabelSide {
     Below,
     Left,
     Right,
+    /// Over the circle — the outward direction at the top of a ring.
+    Above,
 }
 
 /// Where the layout put everything, in pixels, already fitted to the canvas.
@@ -944,8 +955,24 @@ fn shells(
 
 /// Which side of a node its name belongs on, given the node's offset from the
 /// centre it radiates from.
-fn outward((x, _y): (f64, f64)) -> LabelSide {
-    if x < 0.0 {
+///
+/// **The sector is cut on the offset itself, in the ring's own — already
+/// stretched — coordinates**, so the boundary follows the shape a reader is
+/// looking at rather than an angle in an ellipse nobody drew. A node whose
+/// vertical offset beats its horizontal one is at the top or the bottom of the
+/// ring, where its neighbours are beside it and the room is above or below; at
+/// the sides it is the other way round. On a ring stretched to a 16:10 frame
+/// that puts roughly the top and bottom sixths in the vertical sectors, which is
+/// exactly the arc where round 2's side-only rule was drawing chips through
+/// their neighbours.
+fn outward((x, y): (f64, f64)) -> LabelSide {
+    if y.abs() > x.abs() {
+        if y < 0.0 {
+            LabelSide::Above
+        } else {
+            LabelSide::Below
+        }
+    } else if x < 0.0 {
         LabelSide::Left
     } else {
         LabelSide::Right
@@ -1961,8 +1988,11 @@ mod tests {
     #[test]
     fn ring_labels_point_away_from_the_centre() {
         // Without this the left half's chips are drawn across the spokes they
-        // belong to. Asserted per node against its own x, so a rule that
-        // happened to be right for one half is not enough.
+        // belong to, and the top and bottom of the ring — where the neighbours
+        // are beside the node and the room is above it — get a chip pointing
+        // straight into the two names next to it. Asserted per node against its
+        // own offset, so a rule that happened to be right for one sector is not
+        // enough.
         let (nodes, links, group) = star(24);
         let placed = radial(
             &nodes,
@@ -1976,20 +2006,29 @@ mod tests {
             },
         )
         .expect("a star lays out");
-        let centre = placed.xy[0].0;
+        let centre = placed.xy[0];
         assert_eq!(
             placed.label_side[0],
             LabelSide::Below,
             "the centre has no outward"
         );
         for i in 1..24 {
-            let want = if placed.xy[i].0 < centre {
-                LabelSide::Left
-            } else {
-                LabelSide::Right
-            };
-            assert_eq!(placed.label_side[i], want, "node {i} at {:?}", placed.xy[i]);
+            let offset = (placed.xy[i].0 - centre.0, placed.xy[i].1 - centre.1);
+            assert_eq!(
+                placed.label_side[i],
+                outward(offset),
+                "node {i} at {offset:?}"
+            );
         }
+        // And the vertical sectors are actually reached: a rule the geometry
+        // never enters is a rule nobody can see the effect of.
+        let vertical = (1..24)
+            .filter(|i| matches!(placed.label_side[*i], LabelSide::Above | LabelSide::Below))
+            .count();
+        assert!(
+            vertical >= 4,
+            "a 24-leaf ring must put some names above and below: {vertical}"
+        );
     }
 
     /// `k` cliques of `size`, plus whatever extra links the caller adds.
