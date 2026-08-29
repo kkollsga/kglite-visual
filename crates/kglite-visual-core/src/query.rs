@@ -57,18 +57,25 @@ pub const MAX_QUERY_ROWS: usize = 5_000;
 /// Serialized ceiling for one result table. Four protocol chunks.
 pub const MAX_QUERY_BYTES: usize = 2 * 1024 * 1024;
 
-/// Work-unit budget handed to the executor as `ExecuteOptions::max_rows`.
+/// Work-unit budget handed to the executor as `ExecuteOptions::max_work_units`.
 ///
-/// **`max_rows` is not a row cap.** Measured against kglite 0.16.13, not read
-/// off the field name: it is the executor's *work* budget — "the maximum
-/// materialized row-set cardinality and the maximum number of collection items
-/// a single expanding operator may emit" (`cypher/executor/budget.rs`) — and
-/// exceeding it **errors** rather than truncating. Setting it to the caller's
-/// requested row count therefore turns an ordinary query into a failure:
-/// `MATCH (p:Person)-[:WORKS_AT]->(c) RETURN c.title, count(p)` with
-/// `max_rows: 4` returns *"Query produced 118 work units … exceeding max_rows
-/// limit of 4"*, not four rows. The response bound is applied by
-/// [`to_table`] instead, where it can truncate and say so.
+/// **Not a row cap, and the field name now says so.** Measured against kglite
+/// 0.16.13 while the field was still spelled `max_rows`, not read off that
+/// name: it is the executor's *work* budget — "the maximum materialized
+/// row-set cardinality and the maximum number of collection items a single
+/// expanding operator may emit" (`cypher/executor/budget.rs`) — and exceeding
+/// it **errors** rather than truncating. Setting it to the caller's requested
+/// row count therefore turns an ordinary query into a failure:
+/// `MATCH (p:Person)-[:WORKS_AT]->(c) RETURN c.title, count(p)` with a budget
+/// of 4 returns *"Query produced 118 work units … exceeding max_rows limit of
+/// 4"* (0.16.13 wording; 0.16.14 says "exceeding the max_work_units budget of
+/// 4"), not four rows. That measurement is what this project reported upstream
+/// and what the 0.16.14 rename came from — the semantics never moved, only the
+/// spelling. The response bound is applied by [`to_table`] instead, where it
+/// can truncate and say so.
+///
+/// Nothing in this crate matches on the message text, so the wording change
+/// crosses no code path here: the engine's error is forwarded verbatim.
 ///
 /// So this number is what it says: a runaway guard. Well under kglite's own
 /// 10 000 000 unbounded backstop, because that backstop is sized for a batch
@@ -187,7 +194,7 @@ pub fn run_cypher(
 /// `lazy_eligible` false (no lazy materializer here, and true would hand back
 /// an empty `rows` that reads as a successful query with no results),
 /// `deadline` set (an interactive tool cannot host an unbounded query),
-/// `max_rows` set to [`MAX_QUERY_WORK_UNITS`] — a runaway guard, **not** the
+/// `max_work_units` set to [`MAX_QUERY_WORK_UNITS`] — a runaway guard, **not** the
 /// response bound; see that constant for the measurement that separates them.
 fn execute(
     graph: &DirGraph,
@@ -197,7 +204,7 @@ fn execute(
 ) -> Result<kglite::api::session::ExecuteOutcome, CoreError> {
     let mut opts = ExecuteOptions::eager(params);
     opts.deadline = config.deadline();
-    opts.max_rows = Some(MAX_QUERY_WORK_UNITS);
+    opts.max_work_units = Some(MAX_QUERY_WORK_UNITS);
     Ok(execute_read(graph, query, &opts)?)
 }
 

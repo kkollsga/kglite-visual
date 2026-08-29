@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
 
 [dependencies]
-# The engine, from crates.io. `=0.16.13` is EXACT on purpose (D11): kglite is
+# The engine, from crates.io. `=0.16.14` is EXACT on purpose (D11): kglite is
 # pre-1.0 and ships documented breaking changes in patch releases, so a caret
 # range would let a routine `cargo update` swap the engine under us. Moving
 # this floor means reading kglite's CHANGELOG and re-greping every declaration
@@ -18,7 +18,8 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 #
 # crates.io status, checked 2026-08-29 against the registry API (not the
 # README): kglite IS published — 99 versions, newest and default `0.16.13`,
-# crate not yanked.
+# crate not yanked. Re-checked later the same day after KGLite shipped the
+# fixes this project's findings drove: `0.16.14` is published and current.
 #
 # NO `path` component, and its removal (P6) fixed a shipped defect rather than
 # tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
@@ -36,7 +37,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.16.13"
+kglite = "=0.16.14"
 
 serde = { workspace = true }
 serde_json = { workspace = true }
