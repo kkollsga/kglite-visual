@@ -1130,10 +1130,12 @@ pub fn islands(
     // the room the circles actually need kept whole".
     //
     // Three passes because the second is usually within a few per cent of the
-    // fixed point and the third is the guard; `separate` holds the invariant
-    // whatever this converges to.
+    // fixed point and the third is the guard; the loop keeps the best pass
+    // rather than the last, and `separate` holds the invariant whatever this
+    // converges to.
     const PACK_PASSES: usize = 3;
     let mut solved: Option<Packed> = None;
+    let mut best_scale = 0.0f64;
     for pass in 0..PACK_PASSES {
         let packed = pack_at_spacing(
             nodes,
@@ -1147,10 +1149,24 @@ pub fn islands(
             count,
         )?;
         let (fitted, scale) = fit(&packed.xy, nodes, width, height, reserved_top, 0.0);
-        solved = Some(Packed {
-            xy: fitted,
-            label_side: packed.label_side,
-        });
+        // **Keep the best pass, not the last one**, and stop as soon as a pass
+        // stops improving. A smaller spacing does not always buy a bigger fit:
+        // it shrinks the lanes and the non-radial boxes but *not* the floors,
+        // so on a scene of radial islands it can reshuffle the shelves into a
+        // taller packing that fits worse than the one before — which is what it
+        // did to the wellbore/field render, turning a full-width row of six
+        // stars into a narrow column with a third of its names dropped. Keeping
+        // the best makes this monotone by construction: the mechanism can never
+        // leave a picture worse than not running it.
+        if scale > best_scale {
+            best_scale = scale;
+            solved = Some(Packed {
+                xy: fitted,
+                label_side: packed.label_side,
+            });
+        } else {
+            break;
+        }
         if scale >= 1.0 || pass + 1 == PACK_PASSES {
             break;
         }
@@ -2170,6 +2186,57 @@ mod tests {
             "the two shells must read as two rings, not one band: \
              {:.1} px of clear space",
             outer_min - inner_max
+        );
+    }
+
+    #[test]
+    fn a_packing_of_uneven_stars_still_uses_the_frame_it_was_given() {
+        // Six star islands of different sizes on a 16:10 canvas — the wellbore /
+        // field render's shape. The spacing fixed point re-solves at a smaller
+        // spacing when the first packing overflows, and a smaller spacing does
+        // not always buy a better fit: it shrinks the lanes but not the boxes'
+        // own circumference floors, so a later pass can reshuffle six stars from
+        // a full-width row into a narrow column. Measured as the drawn extent's
+        // shape against the canvas's, because a column in a wide frame is
+        // exactly what the reader sees.
+        let sizes = [60usize, 30, 20, 12, 8, 6];
+        let mut nodes = Vec::new();
+        let mut links = Vec::new();
+        let mut community = Vec::new();
+        for (island, size) in sizes.iter().enumerate() {
+            let centre = nodes.len();
+            nodes.push(LayoutNode { radius: 15.0 });
+            community.push(island);
+            for _ in 1..*size {
+                links.push((centre, nodes.len()));
+                nodes.push(LayoutNode { radius: 6.0 });
+                community.push(island);
+            }
+        }
+        let group = vec![0u32; nodes.len()];
+        let placed = islands(
+            &nodes,
+            &links,
+            &community,
+            sizes.len(),
+            &group,
+            Canvas {
+                width: 1600.0,
+                height: 1000.0,
+                reserved_top: 68.0,
+            },
+            0,
+        )
+        .expect("six stars pack");
+        let span = |pick: fn(&(f64, f64)) -> f64| {
+            placed.xy.iter().map(pick).fold(f64::MIN, f64::max)
+                - placed.xy.iter().map(pick).fold(f64::MAX, f64::min)
+        };
+        let drawn = span(|p| p.0) / span(|p| p.1).max(1.0);
+        let want = 1600.0 / 1000.0;
+        assert!(
+            (drawn / want).max(want / drawn) < 1.8,
+            "the packing must use the frame: drawn {drawn:.2} against {want:.2}"
         );
     }
 
