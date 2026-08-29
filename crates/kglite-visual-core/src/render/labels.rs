@@ -32,8 +32,24 @@ pub struct LabelSpec {
     pub badges: Vec<String>,
     /// Bigger wins a screen cell. Node count, in practice.
     pub weight: u64,
+    /// Whether the count chip is drawn at all.
+    ///
+    /// **False for a plain instance node, whose count is always 1** (P11). The
+    /// P9 renders put a grey `1` beside every wellbore name in the picture — a
+    /// number with no information in it, repeated three hundred times, eating
+    /// the width the name needed. A count chip appears where there is a count:
+    /// on a type node, on an aggregate, and on anything else standing for more
+    /// than one thing.
+    pub show_count: bool,
     /// A supporting type's name is drawn quieter, matching its circle.
     pub dimmed: bool,
+    /// This label is placed before every other and is never dropped.
+    ///
+    /// For the one node the picture is *about* — an ego layout's centre, an
+    /// aggregate glyph whose count is the only thing making it honest. Weight
+    /// cannot express that: an ego centre's weight is 1, and inflating it to
+    /// win a cell would put a fabricated number in the chip.
+    pub pinned: bool,
     /// Centre of the label, in canvas pixels.
     pub x: f64,
     /// Top of the label — below the circle it names, never on top of it: a
@@ -56,14 +72,20 @@ pub struct PlacedLabel {
 /// character of the tabular-nums count, and 34 px per badge. The estimate only
 /// has to be good enough to keep a 200 px name from claiming one 130 px cell
 /// and then sitting on top of two neighbours'.
+///
+/// The gap and the count term are charged only when the chip has a count in it
+/// ([`LabelSpec::show_count`]) — an estimate that reserved room for a number
+/// nobody drew would thin the labels on an instance slice for nothing.
 pub fn estimate_width(spec: &LabelSpec) -> f64 {
-    let count_chars = super::encoding::group_thousands(spec.weight)
-        .chars()
-        .count();
-    14.0 + spec.text.chars().count() as f64 * 6.9
-        + 6.0
-        + count_chars as f64 * 6.3
-        + spec.badges.len() as f64 * 34.0
+    let count = if spec.show_count {
+        6.0 + super::encoding::group_thousands(spec.weight)
+            .chars()
+            .count() as f64
+            * 6.3
+    } else {
+        0.0
+    };
+    14.0 + spec.text.chars().count() as f64 * 6.9 + count + spec.badges.len() as f64 * 34.0
 }
 
 /// Cells a displaced label will try, in order, before it gives up and overlaps.
@@ -116,11 +138,16 @@ fn claim(taken: &mut std::collections::HashSet<(i64, i64)>, from: i64, to: i64, 
 /// not a picture at any density.
 pub fn choose(specs: &[LabelSpec], place_all: bool) -> Vec<PlacedLabel> {
     // Sorted rather than compared in place: the winner of a cell must not
-    // depend on the caller's output order. Heaviest first, and an exact tie
-    // goes to the lower slot — the one identifier that is stable across zooms,
-    // expansions and reconnects.
+    // depend on the caller's output order. Pinned first, then heaviest, and an
+    // exact tie goes to the lower slot — the one identifier that is stable
+    // across zooms, expansions and reconnects.
     let mut ordered: Vec<&LabelSpec> = specs.iter().collect();
-    ordered.sort_by(|a, b| b.weight.cmp(&a.weight).then_with(|| a.slot.cmp(&b.slot)));
+    ordered.sort_by(|a, b| {
+        b.pinned
+            .cmp(&a.pinned)
+            .then_with(|| b.weight.cmp(&a.weight))
+            .then_with(|| a.slot.cmp(&b.slot))
+    });
 
     let mut taken: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
     let mut placed: Vec<PlacedLabel> = Vec::new();
@@ -136,7 +163,12 @@ pub fn choose(specs: &[LabelSpec], place_all: bool) -> Vec<PlacedLabel> {
             });
             continue;
         }
-        if !place_all {
+        // A pinned label takes the meta-graph's branch whatever the mode is:
+        // it is nudged, and drawn overlapping if nothing near it is free. An
+        // aggregate glyph without its count is a circle standing for forty
+        // nodes with nothing on the picture saying so, which is the honesty
+        // failure D5 is about.
+        if !place_all && !spec.pinned {
             continue;
         }
         let nudge = NUDGES
@@ -174,7 +206,9 @@ mod tests {
             text: "T".to_string(),
             badges: Vec::new(),
             weight,
+            show_count: true,
             dimmed: false,
+            pinned: false,
             x,
             y,
         }
@@ -225,6 +259,36 @@ mod tests {
         let placed = choose(&[wide, spec(1, 1, 200.0 + CELL_WIDTH, 15.0)], false);
         assert_eq!(placed.len(), 1, "the neighbour's cell was already claimed");
         assert_eq!(placed[0].slot, 0);
+    }
+
+    #[test]
+    fn a_pinned_label_survives_a_cell_it_would_otherwise_lose() {
+        // R1 for the pin: without it the ego centre and the aggregate glyphs —
+        // the two labels a picture cannot be read without — are exactly the
+        // lightest ones, and the grid drops the lightest first.
+        let heavy = spec(1, 5_000, 60.0, 15.0);
+        let pinned = LabelSpec {
+            pinned: true,
+            ..spec(0, 1, 60.0, 15.0)
+        };
+        let placed = choose(&[heavy.clone(), pinned], false);
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].slot, 0, "the pin outranks the weight");
+        // …and without the pin the same pair resolves the other way, so the
+        // assertion above is testing the pin and not the sort's tie-break.
+        let unpinned = choose(&[heavy, spec(0, 1, 60.0, 15.0)], false);
+        assert_eq!(unpinned.len(), 1);
+        assert_eq!(unpinned[0].slot, 1);
+    }
+
+    #[test]
+    fn a_chip_with_no_count_reserves_no_room_for_one() {
+        let with = spec(0, 1, 0.0, 0.0);
+        let without = LabelSpec {
+            show_count: false,
+            ..spec(0, 1, 0.0, 0.0)
+        };
+        assert!((estimate_width(&with) - estimate_width(&without) - (6.0 + 6.3)).abs() < 1e-9);
     }
 
     #[test]

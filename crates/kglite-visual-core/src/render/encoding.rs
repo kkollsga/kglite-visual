@@ -96,12 +96,87 @@ pub const TYPE_PLAIN_COLOR: Rgba = [0.35, 0.65, 0.98, 0.92];
 /// Mirrors the non-`plain` branch of `baseColor` in `frontend/src/main.ts`.
 pub const TYPE_CAPABLE_COLOR: Rgba = [0.98, 0.75, 0.32, 0.92];
 
-/// An instance node, drawn in its own muted hue so the meta-graph stays legible
-/// under an expansion.
+/// An instance node whose type is unknown — the only case left after P11 gave
+/// instance nodes a per-type hue.
 ///
-/// Mirrors the `!label.isType` branch of `baseColor` in
-/// `frontend/src/main.ts`.
+/// Mirrors the `nodeType === null` fallback of `instanceColor` in
+/// `frontend/src/appearance.ts`.
 pub const INSTANCE_COLOR: Rgba = [0.55, 0.70, 0.90, 0.85];
+
+/// One hue per node type, for instance nodes.
+///
+/// **The P9 renders drew every instance node in one blue** (`INSTANCE_COLOR`
+/// above), which on a mixed neighbourhood — a wellbore with its licences, its
+/// cores and its logs — said "these are all the same kind of thing" about a
+/// picture whose whole content is that they are not. The colour channel was
+/// carrying nothing, and it is the channel that survives being scaled to a
+/// thumbnail.
+///
+/// **Type, not community.** The layout already puts a community in one place
+/// (`super::layout::islands`), so colouring by community would spend the one
+/// free channel restating what position says. Type is orthogonal to both, and
+/// it is what a reader is actually trying to tell apart inside a group.
+///
+/// Chosen for separability at small size on **both** grounds — every entry
+/// clears 3:1 contrast against `#0d1117` and against `#ffffff` — and ordered so
+/// that adjacent indices are far apart in hue, because the assignment below is
+/// by hash and neighbours in the table are what a two-type picture is most
+/// likely to draw.
+///
+/// Mirrors `TYPE_HUES` in `frontend/src/appearance.ts`.
+pub const TYPE_HUES: [Rgba; 10] = [
+    [0.36, 0.68, 0.98, 0.90], // blue
+    [0.98, 0.62, 0.30, 0.90], // orange
+    [0.42, 0.82, 0.52, 0.90], // green
+    [0.85, 0.50, 0.92, 0.90], // violet
+    [0.98, 0.80, 0.34, 0.90], // amber
+    [0.40, 0.83, 0.85, 0.90], // teal
+    [0.96, 0.51, 0.60, 0.90], // rose
+    [0.62, 0.74, 0.42, 0.90], // olive
+    [0.68, 0.62, 0.96, 0.90], // periwinkle
+    [0.92, 0.68, 0.52, 0.90], // clay
+];
+
+/// The hue a type name maps to.
+///
+/// FNV-1a over the name's bytes, not a `HashMap` and not the type's position in
+/// any list: the same type must get the same colour in every image forever, and
+/// a position-derived index would repaint the whole picture the day a query
+/// returned its rows in a different order. `std`'s default hasher is
+/// randomly seeded per process and would give two runs two different pictures.
+///
+/// Mirrors `typeHue` in `frontend/src/appearance.ts`.
+pub fn type_hue(node_type: &str) -> Rgba {
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in node_type.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    TYPE_HUES[(hash % TYPE_HUES.len() as u32) as usize]
+}
+
+/// An aggregate glyph's fill — one grey, never a type hue.
+///
+/// **An aggregate is not a node, and it must not be mistakable for one**
+/// (P11 direction (e)). It stands for nodes that were *not* drawn, so it is
+/// deliberately outside the type palette: a reader who has learned that green
+/// means `Wellbore` must not read a folded fan of wellbores as one green
+/// wellbore. Shape carries the distinction too — `super::svg` draws it as a
+/// sector, not a circle — and colour repeats it, because at thumbnail size
+/// shape is the first thing to go.
+pub const AGGREGATE_COLOR: Rgba = [0.58, 0.62, 0.68, 0.80];
+
+/// Radius of the wedge standing for `count` folded nodes.
+///
+/// The same log ramp the type nodes use, against a fixed ceiling rather than
+/// the scene's largest: an aggregate is not competing with the type nodes for
+/// the size channel, and a ramp normalised per image would make the same fan of
+/// forty draw at two sizes in two renders of the same graph.
+pub fn aggregate_radius(count: u32) -> f64 {
+    const CEILING: f64 = 500.0;
+    let ramp = (f64::from(count).ln_1p() / CEILING.ln_1p()).min(1.0);
+    10.0 + 22.0 * ramp
+}
 
 /// Alpha multiplier for a supporting type — it keeps its hue and loses most of
 /// its opacity, so the core types it hangs off carry the picture.
@@ -116,6 +191,10 @@ pub const SUPPORTING_ALPHA: f64 = 0.45;
 /// a render request carries no appearance selection, so the two bits a type
 /// node carries here are exactly the two the app shows with no colour-by
 /// chosen — whether it declares a capability, and whether it is supporting.
+///
+/// An instance node takes its type's hue ([`type_hue`]); a type node keeps the
+/// capability/supporting encoding, which is a *different* fact and would be
+/// destroyed by overwriting it with a hue.
 pub fn base_color(is_type: bool, has_capabilities: bool, supporting: bool) -> Rgba {
     if !is_type {
         return INSTANCE_COLOR;

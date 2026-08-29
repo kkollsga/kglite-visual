@@ -19,6 +19,7 @@ import {
   compileNumericSize,
   fillColors,
   linkWidth,
+  typeHue,
   typeRadius,
   UNSET_COLOR,
   type Rgba,
@@ -508,7 +509,10 @@ function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rg
   const label = view.label(slot)
   if (label === undefined) return UNSET_COLOR
   if (colorOf !== null && appearanceValues.has(slot)) return colorOf(appearanceValues.get(slot))
-  if (!label.isType) return [0.55, 0.70, 0.90, 0.85]
+  // An instance node takes its type's hue; a type node keeps the
+  // capability/supporting encoding, which is a different fact and would be
+  // destroyed by overwriting it with a hue.
+  if (!label.isType) return typeHue(label.nodeType)
   const plain = label.badges.length === 0
   // cosmos.gl takes 0..1 channels, not 0..255.
   const [r, g, b, a]: Rgba = plain
@@ -593,6 +597,7 @@ function applyInteraction(): void {
  * slice funnels through.
  */
 function refreshLabelSpecs(): void {
+  const selected = new Set(interaction.selectedSlots())
   labels.setLabels(
     view.liveSlots().map((slot) => {
       const label = view.label(slot)
@@ -601,6 +606,11 @@ function refreshLabelSpecs(): void {
         text: label?.text ?? '',
         badges: label?.badges ?? [],
         weight: label?.weight ?? 0,
+        // A count chip where there is a count. A type node's count is the whole
+        // reason it is that size; an instance node's is always 1, and a chip
+        // that says so on every node is width spent on nothing.
+        showCount: label?.isType === true || (label?.weight ?? 0) > 1,
+        pinned: selected.has(slot),
         dimmed: label?.supporting === true,
       }
     }),

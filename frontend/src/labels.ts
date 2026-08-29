@@ -23,6 +23,21 @@ export type LabelSpec = {
   badges: string[]
   /** Bigger wins a screen cell. Node count, in practice. */
   weight: number
+  /**
+   * Whether the count chip is drawn at all.
+   *
+   * **Ported to Rust** as `LabelSpec::show_count` in
+   * `crates/kglite-visual-core/src/render/labels.rs`.
+   *
+   * False for a plain instance node, whose count is always 1: a grey `1`
+   * beside every wellbore name is a number with no information in it, repeated
+   * once per node, eating the width the name needed. Defaults to true so a
+   * caller that has a real count does not have to say so.
+   */
+  showCount?: boolean
+  /** Placed before every other candidate and never dropped — see
+   * `chooseLabels`. Set for the selected slot. */
+  pinned?: boolean
   /** A supporting type's name is drawn quieter, matching its circle. */
   dimmed?: boolean
 }
@@ -70,8 +85,12 @@ type Placed = { slot: number; x: number; y: number }
  * overlapping text after every type got a label.
  */
 function estimateWidth(spec: LabelSpec): number {
-  const count = spec.weight.toLocaleString('en-US').length
-  return 14 + spec.text.length * 6.9 + 6 + count * 6.3 + spec.badges.length * 34
+  // The gap and the count are charged only when the chip has a count in it:
+  // an estimate that reserved room for a number nobody draws would thin the
+  // labels on an instance slice for nothing.
+  const count =
+    spec.showCount === false ? 0 : 6 + spec.weight.toLocaleString('en-US').length * 6.3
+  return 14 + spec.text.length * 6.9 + count + spec.badges.length * 34
 }
 
 /** The column range a label centred on `x` covers, inclusive. */
@@ -135,15 +154,35 @@ const NUDGES: readonly [number, number][] = [
  * not a picture at any density.
  */
 export function chooseLabels(
-  candidates: { slot: number; x: number; y: number; weight: number; width?: number }[],
+  candidates: {
+    slot: number
+    x: number
+    y: number
+    weight: number
+    width?: number
+    /**
+     * Placed before every other candidate, and never dropped.
+     *
+     * **Ported to Rust** as `LabelSpec::pinned` in
+     * `crates/kglite-visual-core/src/render/labels.rs`, where it keeps an
+     * aggregate glyph's count on the picture. Here it keeps the *selected*
+     * node named: a selection whose label the grid thinned is a selection the
+     * user cannot see they made, and weight cannot express it — a selected
+     * instance node weighs 1, which is last.
+     */
+    pinned?: boolean
+  }[],
   placeAll = false,
 ): Placed[] {
   // Sorted rather than compared in place: the winner of a cell must not depend
-  // on the sampler's output order, which changes on every zoom. Heaviest
-  // first, and an exact tie goes to the lower slot — the one identifier that
-  // is stable across zooms, expansions and reconnects.
+  // on the sampler's output order, which changes on every zoom. Pinned first,
+  // then heaviest, and an exact tie goes to the lower slot — the one identifier
+  // that is stable across zooms, expansions and reconnects.
   const ordered = [...candidates].sort(
-    (a, b) => b.weight - a.weight || a.slot - b.slot,
+    (a, b) =>
+      Number(b.pinned ?? false) - Number(a.pinned ?? false) ||
+      b.weight - a.weight ||
+      a.slot - b.slot,
   )
   const taken = new Set<string>()
   const placed: Placed[] = []
@@ -155,7 +194,7 @@ export function chooseLabels(
       placed.push({ slot: candidate.slot, x: candidate.x, y: candidate.y })
       continue
     }
-    if (!placeAll) continue
+    if (!placeAll && candidate.pinned !== true) continue
     const nudge = NUDGES.find(([dx, dy]) => isFree(taken, from + dx, to + dx, row + dy))
     if (nudge === undefined) {
       // Every neighbour is spoken for. Drawing it anyway is the deliberate
@@ -244,6 +283,7 @@ export class LabelOverlay {
         y: y + source.radius(slot) + 4,
         weight: spec.weight,
         width: estimateWidth(spec),
+        pinned: spec.pinned,
       })
     }
 
@@ -283,10 +323,12 @@ export class LabelOverlay {
     name.textContent = spec.text
     element.appendChild(name)
 
-    const count = document.createElement('span')
-    count.className = 'kglv-label-count'
-    count.textContent = spec.weight.toLocaleString('en-US')
-    element.appendChild(count)
+    if (spec.showCount !== false) {
+      const count = document.createElement('span')
+      count.className = 'kglv-label-count'
+      count.textContent = spec.weight.toLocaleString('en-US')
+      element.appendChild(count)
+    }
 
     if (this.handlers !== null) {
       const handlers = this.handlers

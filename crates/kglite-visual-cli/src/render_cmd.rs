@@ -128,6 +128,11 @@ struct RenderSummary<'a> {
     height: u32,
     nodes: u32,
     links: u32,
+    /// Nodes drawn as part of an aggregate wedge rather than individually
+    /// (P11). `nodes - folded` is what a reader can count in the picture.
+    folded: u32,
+    /// Milliseconds the layout pass took, so a slow image says which half.
+    layout_ms: f64,
     /// True when a bound clipped this answer. The banners say what was clipped;
     /// they are also drawn into the image, because an image travels without its
     /// response (D5).
@@ -178,6 +183,8 @@ pub fn run(args: &RenderArgs) -> Result<(), Box<dyn std::error::Error>> {
         height: rendered.height,
         nodes: rendered.nodes,
         links: rendered.links,
+        folded: rendered.folded,
+        layout_ms: (rendered.layout_ms * 100.0).round() / 100.0,
         truncated: rendered.truncated,
         banners: &rendered.banners,
         bytes: rendered.bytes.len(),

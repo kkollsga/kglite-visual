@@ -173,6 +173,10 @@ fn emit_nodes(out: &mut String, scene: &Scene, positions: &Positions) {
         let Some((x, y)) = positions.xy.get(i) else {
             continue;
         };
+        if node.aggregate.is_some() {
+            emit_wedge(out, scene, positions, i, *x, *y);
+            continue;
+        }
         let [r, g, b, a] = node.color;
         // A hairline of the node's OWN colour at a stronger opacity than its
         // fill. The supporting-type dim is an alpha (`SUPPORTING_ALPHA`), and an
@@ -197,6 +201,102 @@ fn emit_nodes(out: &mut String, scene: &Scene, positions: &Positions) {
     out.push_str("</g>\n");
 }
 
+/// Half-angle of the aggregate wedge, as a rotation matrix.
+///
+/// `cos(0.85)` and `sin(0.85)` written out as literals rather than computed:
+/// this is the one place the emitter would otherwise call a trigonometric
+/// function, and a decimal literal is bit-identical on every platform where a
+/// libm is not. 0.85 rad opens the fan to ~97°, which reads as a fan and not as
+/// a pie chart with a slice missing.
+const WEDGE_COS: f64 = 0.659_983_145_884_982_2;
+const WEDGE_SIN: f64 = 0.751_280_405_140_292_7;
+
+/// Where the wedge's apex sits, as a fraction of its radius behind the node's
+/// own point — so the glyph's *mass* lands where the layout put it while its
+/// point still touches the link coming in.
+const WEDGE_APEX_BACK: f64 = 0.55;
+
+/// One folded fan, drawn as a wedge opening away from its parent.
+///
+/// **Shape is the honesty channel** (P11 direction (e)). This glyph stands for
+/// nodes that are not in the picture, so it must not be mistakable for one that
+/// is: it is a sector rather than a circle, it is dashed rather than solid, and
+/// it is drawn in `AGGREGATE_COLOR` rather than in any type's hue. Its label
+/// carries the exact count and the words "showing none"; none of the three
+/// signals is load-bearing alone, and at thumbnail size the colour is the one
+/// that survives.
+///
+/// The orientation comes from the single link the glyph has — a fan opens away
+/// from the thing it hangs off, which is where a reader expects its members to
+/// be. With no link (a fan whose parent was itself dropped, which the fold does
+/// not produce today) it opens right, and the arbitrary choice is fixed rather
+/// than derived so the document stays a function of the input.
+fn emit_wedge(
+    out: &mut String,
+    scene: &Scene,
+    positions: &Positions,
+    index: usize,
+    x: f64,
+    y: f64,
+) {
+    let node = &scene.nodes[index];
+    let anchor = scene
+        .links
+        .iter()
+        .find_map(|link| match (link.source, link.target) {
+            (source, target) if source == index => positions.xy.get(target),
+            (source, target) if target == index => positions.xy.get(source),
+            _ => None,
+        });
+    let (ux, uy) = match anchor {
+        Some((ax, ay)) => {
+            let (dx, dy) = (x - ax, y - ay);
+            let length = (dx * dx + dy * dy).sqrt();
+            if length <= 1e-9 {
+                (1.0, 0.0)
+            } else {
+                (dx / length, dy / length)
+            }
+        }
+        None => (1.0, 0.0),
+    };
+    let radius = node.radius;
+    let (apex_x, apex_y) = (
+        x - ux * radius * WEDGE_APEX_BACK,
+        y - uy * radius * WEDGE_APEX_BACK,
+    );
+    let arc = radius * 1.6;
+    // Rotate the axis by ±the half-angle. A 2x2 rotation, so no trigonometric
+    // call is made at render time at all.
+    let left = (
+        ux * WEDGE_COS + uy * WEDGE_SIN,
+        -ux * WEDGE_SIN + uy * WEDGE_COS,
+    );
+    let right = (
+        ux * WEDGE_COS - uy * WEDGE_SIN,
+        ux * WEDGE_SIN + uy * WEDGE_COS,
+    );
+    let [r, g, b, a] = node.color;
+    out.push_str(&format!(
+        "<path d=\"M {} {} L {} {} A {} {} 0 0 1 {} {} Z\" fill=\"{}\" fill-opacity=\"{}\" \
+         stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"1.5\" stroke-dasharray=\"5 3\">\
+         <title>{}</title></path>\n",
+        num(apex_x),
+        num(apex_y),
+        num(apex_x + arc * left.0),
+        num(apex_y + arc * left.1),
+        num(arc),
+        num(arc),
+        num(apex_x + arc * right.0),
+        num(apex_y + arc * right.1),
+        rgb(r, g, b),
+        num(a * 0.45),
+        rgb(r, g, b),
+        num((a * 1.6).min(1.0)),
+        escape(&node.text)
+    ));
+}
+
 fn emit_labels(
     out: &mut String,
     scene: &Scene,
@@ -216,7 +316,12 @@ fn emit_labels(
                 text: node.text.clone(),
                 badges: node.badges.clone(),
                 weight: node.weight,
+                show_count: node.show_count,
                 dimmed: node.dimmed,
+                // An aggregate's label is the only thing on the picture saying
+                // how many nodes are behind the glyph, so neither it nor the
+                // node it hangs off is ever thinned.
+                pinned: node.pinned || node.aggregate.is_some(),
                 x: *x,
                 y: y + node.radius + LABEL_GAP_PX,
             })
@@ -288,17 +393,27 @@ fn emit_labels(
         // glyphs actually measured and the two can never land on top of each
         // other. Placing the count at an estimated offset is what put "1" over
         // the "FM" of "BALDER FM" on the first sodir neighbourhood render.
+        let count = if spec.show_count {
+            format!(
+                "<tspan fill=\"{}\" font-weight=\"400\" dx=\"{}\">{}</tspan>",
+                palette.label_count,
+                num(CHIP_GAP),
+                escape(&encoding::group_thousands(spec.weight))
+            )
+        } else {
+            // No count where there is no count. Every instance node in the
+            // graph carries the number 1, and the P9 renders printed it beside
+            // three hundred names.
+            String::new()
+        };
         out.push_str(&format!(
-            "<text x=\"{}\" y=\"{}\" fill=\"{}\" font-weight=\"{}\">{}\
-             <tspan fill=\"{}\" font-weight=\"400\" dx=\"{}\">{}</tspan></text>\n",
+            "<text x=\"{}\" y=\"{}\" fill=\"{}\" font-weight=\"{}\">{}{}</text>\n",
             num(left + CHIP_PAD_X),
             num(baseline),
             text_color,
             name_weight,
             escape(&spec.text),
-            palette.label_count,
-            num(CHIP_GAP),
-            escape(&encoding::group_thousands(spec.weight))
+            count
         ));
 
         // Badges are rectangles, so they cannot ride the text flow; they are
@@ -393,11 +508,14 @@ fn emit_status(out: &mut String, scene: &Scene, palette: &Palette) {
 /// The chip's drawn width — see [`NAME_ADVANCE`] for why this is not
 /// [`super::labels::estimate_width`].
 fn draw_width(spec: &LabelSpec) -> f64 {
-    let count_chars = encoding::group_thousands(spec.weight).chars().count();
+    let count = if spec.show_count {
+        CHIP_GAP + encoding::group_thousands(spec.weight).chars().count() as f64 * COUNT_ADVANCE
+    } else {
+        0.0
+    };
     CHIP_PAD_X * 2.0
         + spec.text.chars().count() as f64 * NAME_ADVANCE
-        + CHIP_GAP
-        + count_chars as f64 * COUNT_ADVANCE
+        + count
         + spec.badges.len() as f64 * BADGE_WIDTH
 }
 

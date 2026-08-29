@@ -34,6 +34,7 @@ pub mod encoding;
 pub mod labels;
 pub mod layout;
 pub mod raster;
+pub mod structure;
 pub mod svg;
 
 use std::sync::Arc;
@@ -202,10 +203,20 @@ pub struct Rendered {
     pub format: RenderFormat,
     pub width: u32,
     pub height: u32,
-    /// Nodes drawn.
+    /// Nodes the slice carried — **drawn plus folded**, so this stays the
+    /// answer to "how big was the result" whether or not any fan was folded.
     pub nodes: u32,
     /// Links drawn.
     pub links: u32,
+    /// Nodes folded into aggregate wedges and therefore NOT drawn individually
+    /// (P11). `nodes - folded` is what a reader can count in the picture.
+    pub folded: u32,
+    /// Wall-clock milliseconds the layout pass took.
+    ///
+    /// Reported because the layout is now chosen per scene and the three
+    /// kernels have different costs; a caller that suddenly waits seconds for
+    /// an image needs the number that says which half is slow.
+    pub layout_ms: f64,
     /// True when any bound clipped this answer.
     pub truncated: bool,
     /// The banner text drawn into the image, verbatim — the same words the app
@@ -223,6 +234,19 @@ pub(crate) struct SceneNode {
     pub color: encoding::Rgba,
     pub badges: Vec<String>,
     pub dimmed: bool,
+    /// The node's type — what the hue is drawn from and what the ring layout
+    /// groups a fan by. A type node's own name for a meta node; `None` only
+    /// where the source could not say.
+    pub node_type: Option<String>,
+    /// Whether the count chip is drawn. See [`labels::LabelSpec::show_count`].
+    pub show_count: bool,
+    /// This node's label is placed before all others and never dropped. See
+    /// [`labels::LabelSpec::pinned`].
+    pub pinned: bool,
+    /// This node is a folded fan standing for `Some(n)` nodes that are NOT in
+    /// the picture — drawn as a wedge, never as a circle. See
+    /// [`fold_leaf_fans`].
+    pub aggregate: Option<u32>,
 }
 
 /// One link, ready to draw.
@@ -247,6 +271,13 @@ pub(crate) struct Scene {
     /// condition `isMetaGraphOnly` tests in `frontend/src/main.ts`, and the one
     /// that decides whether a label that loses its cell is nudged or dropped.
     pub place_all_labels: bool,
+    /// Node indices the *request* named as its origin.
+    ///
+    /// One entry is an ego request and gets a radial layout on the caller's
+    /// word alone; more than one is an expansion from a whole type, which names
+    /// no centre, and falls through to [`structure::plan`]. Empty for a request
+    /// with no origin at all.
+    pub seeds: Vec<usize>,
 }
 
 /// Build the slice, lay it out, and emit the image.
@@ -297,7 +328,7 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     let width = check_dimension(request.width, "width")?;
     let height = check_dimension(request.height, "height")?;
 
-    let scene = build_scene(session, request)?;
+    let mut scene = build_scene(session, request)?;
     if scene.nodes.is_empty() {
         // An empty canvas is the worst possible answer here: it is
         // indistinguishable from a rendering failure, and an agent handed one
@@ -311,22 +342,48 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         ));
     }
 
+    let slice_nodes = scene.nodes.len() as u32;
+    let folded = fold_leaf_fans(&mut scene, f64::from(width) * f64::from(height));
+    if folded > 0 {
+        // Drawn INTO the image, beside the truncation banner and for the same
+        // reason (D5): a picture with a fan glyph in it and nothing saying how
+        // many nodes are behind the glyph is a picture that reads as complete.
+        scene.status.push(format!(
+            "{} folded into {} fans",
+            encoding::group_thousands(u64::from(folded)),
+            scene.nodes.iter().filter(|n| n.aggregate.is_some()).count()
+        ));
+    }
+
     let nodes: Vec<layout::LayoutNode> = scene
         .nodes
         .iter()
         .map(|n| layout::LayoutNode { radius: n.radius })
         .collect();
     let links: Vec<(usize, usize)> = scene.links.iter().map(|l| (l.source, l.target)).collect();
-    let positions = layout::run(
-        &nodes,
-        &links,
-        f64::from(width),
-        f64::from(height),
-        request.seed,
-        // The layout is told about the status block so nothing is laid out
-        // underneath it; the emitter owns that rectangle's geometry.
-        svg::status_block_height(scene.status.len() + scene.banners.len()),
-    )?;
+    // The layout is told about the status block so nothing is laid out
+    // underneath it; the emitter owns that rectangle's geometry.
+    let canvas = layout::Canvas {
+        width: f64::from(width),
+        height: f64::from(height),
+        reserved_top: svg::status_block_height(scene.status.len() + scene.banners.len()),
+    };
+    let groups = arc_groups(&scene);
+    let started = std::time::Instant::now();
+    let positions = match structure::plan(nodes.len(), &links, &scene.seeds) {
+        structure::Plan::Radial { seed } => layout::radial(&nodes, &links, seed, &groups, canvas)?,
+        structure::Plan::Islands { community, count } => layout::islands(
+            &nodes,
+            &links,
+            &community,
+            count,
+            &groups,
+            canvas,
+            request.seed,
+        )?,
+        structure::Plan::Force => layout::run(&nodes, &links, canvas, request.seed)?,
+    };
+    let layout_ms = started.elapsed().as_secs_f64() * 1_000.0;
 
     let document = svg::emit(&scene, &positions, width, height, request.theme);
     let bytes = match request.format {
@@ -339,11 +396,212 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         format: request.format,
         width,
         height,
-        nodes: scene.nodes.len() as u32,
+        nodes: slice_nodes,
         links: scene.links.len() as u32,
+        folded,
+        layout_ms,
         truncated: !scene.banners.is_empty(),
         banners: scene.banners,
     })
+}
+
+/// The arc key each node is grouped by on a hop ring — its type.
+///
+/// Interned to a `u32` here rather than compared as strings inside the layout:
+/// the layout sorts by this key on every ring, and the key's *value* never
+/// reaches the picture, only its equality does. First-appearance order, so it
+/// is a function of the scene and not of a hash seed.
+fn arc_groups(scene: &Scene) -> Vec<u32> {
+    let mut seen: Vec<&str> = Vec::new();
+    scene
+        .nodes
+        .iter()
+        .map(|node| {
+            let name = node.node_type.as_deref().unwrap_or("");
+            match seen.iter().position(|s| *s == name) {
+                Some(index) => index as u32,
+                None => {
+                    seen.push(name);
+                    (seen.len() - 1) as u32
+                }
+            }
+        })
+        .collect()
+}
+
+/// Fan-out threshold: below this many same-type leaves on one parent, the
+/// nodes are drawn.
+///
+/// **The number is a legibility measurement, not a taste.** Twenty-five dots
+/// around a parent still resolve as twenty-five things at 800x500; past that
+/// they merge into a smear whose only readable property is "lots", and a glyph
+/// that says `Wellbore x 61` carries strictly more than the smear does — it
+/// carries the exact number.
+const FAN_THRESHOLD: usize = 25;
+
+/// Canvas pixels per node, above which the picture has room and nothing is
+/// folded at all.
+///
+/// **Folding a picture that had space for its nodes is a loss, not a
+/// summary.** The 150-node bipartite result fits on a 1600x1000 canvas with
+/// room to read every wellbore name; folding three of its fields into wedges
+/// there threw away 121 nodes to save space nothing needed. The threshold
+/// above says *when a fan is too big to read*; this one says *when the image
+/// is too full to hold it*, and both have to be true.
+const FOLD_ABOVE_PX_PER_NODE: f64 = 6_000.0;
+
+/// Fold every same-type fan of leaves into one wedge (P11 direction (e)).
+///
+/// A **leaf** here is a node with exactly one link in this scene. That is a
+/// statement about the picture, not about the graph: the node may have a
+/// thousand edges the bound never fetched, and this does not claim otherwise —
+/// which is why the glyph says how many nodes it stands for and how many of
+/// them are drawn, rather than pretending to summarise the graph.
+///
+/// **Render-side only.** The protocol, the live view and every count in the
+/// response are untouched; this runs on a `Scene` that already exists and is
+/// about to be drawn. An aggregation that reached the slot space would change
+/// what a later `expand` means.
+///
+/// Returns how many nodes were folded away.
+fn fold_leaf_fans(scene: &mut Scene, canvas_area: f64) -> u32 {
+    let count = scene.nodes.len();
+    if (count as f64) * FOLD_ABOVE_PX_PER_NODE <= canvas_area {
+        return 0;
+    }
+    let links: Vec<(usize, usize)> = scene.links.iter().map(|l| (l.source, l.target)).collect();
+    let degree = structure::degrees(count, &links);
+
+    // parent -> its degree-1 children, in index order.
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); count];
+    for (a, b) in &links {
+        if *a >= count || *b >= count || a == b {
+            continue;
+        }
+        if degree[*a] == 1 && degree[*b] > 1 {
+            children[*b].push(*a);
+        } else if degree[*b] == 1 && degree[*a] > 1 {
+            children[*a].push(*b);
+        }
+    }
+
+    let mut folded_into: Vec<Option<usize>> = vec![None; count];
+    let mut fans: Vec<(usize, String, Vec<usize>)> = Vec::new();
+    for (parent, kids) in children.iter().enumerate() {
+        // Grouped by type, in first-appearance order, so the grouping does not
+        // depend on a map's iteration.
+        let mut by_type: Vec<(String, Vec<usize>)> = Vec::new();
+        for kid in kids {
+            // A node the layout is about to centre is never folded, whatever
+            // its degree: the request asked for it by name.
+            if scene.seeds.contains(kid) || scene.nodes[*kid].aggregate.is_some() {
+                continue;
+            }
+            let name = scene.nodes[*kid].node_type.clone().unwrap_or_default();
+            match by_type.iter_mut().find(|(t, _)| *t == name) {
+                Some((_, group)) => group.push(*kid),
+                None => by_type.push((name, vec![*kid])),
+            }
+        }
+        for (node_type, group) in by_type {
+            if group.len() <= FAN_THRESHOLD {
+                continue;
+            }
+            fans.push((parent, node_type, group));
+        }
+    }
+    if fans.is_empty() {
+        return 0;
+    }
+
+    let mut folded = 0u32;
+    for (fan, (parent, node_type, group)) in fans.iter().enumerate() {
+        // A wedge hanging off an unnamed dot says "twenty-seven of something
+        // are attached to *that*" without saying what `that` is. The parent's
+        // label is part of the aggregate's honesty, so it is pinned with it.
+        scene.nodes[*parent].pinned = true;
+        let glyph = scene.nodes.len();
+        let total = group.len() as u32;
+        folded += total;
+        for kid in group {
+            folded_into[*kid] = Some(glyph);
+        }
+        scene.nodes.push(SceneNode {
+            // Its own slot space: a real slot would be a lie an agent could
+            // pass back to `expand`. Numbered above every real slot, so the
+            // label grid's tie-break stays total.
+            slot: u32::MAX - fan as u32,
+            text: format!(
+                "{} × {} (showing {})",
+                if node_type.is_empty() {
+                    "nodes"
+                } else {
+                    node_type
+                },
+                encoding::group_thousands(u64::from(total)),
+                "none"
+            ),
+            weight: u64::from(total),
+            radius: encoding::aggregate_radius(total),
+            color: encoding::AGGREGATE_COLOR,
+            badges: Vec::new(),
+            dimmed: false,
+            node_type: Some(node_type.clone()),
+            // The count is inside the text, where the words "showing none"
+            // qualify it. A second bare number in a chip beside it would read
+            // as a second, different fact.
+            show_count: false,
+            pinned: true,
+            aggregate: Some(total),
+        });
+    }
+
+    // Rebuild: drop the folded nodes, remap every surviving index, and rewrite
+    // each folded child's link to point at its glyph.
+    let mut new_index: Vec<Option<usize>> = vec![None; scene.nodes.len()];
+    let mut kept: Vec<SceneNode> = Vec::with_capacity(scene.nodes.len());
+    for (index, node) in scene.nodes.iter().enumerate() {
+        if index < count && folded_into[index].is_some() {
+            continue;
+        }
+        new_index[index] = Some(kept.len());
+        kept.push(node.clone());
+    }
+    let resolve = |index: usize| -> Option<usize> {
+        let target = folded_into.get(index).copied().flatten().unwrap_or(index);
+        new_index[target]
+    };
+    let mut links_out: Vec<SceneLink> = Vec::with_capacity(scene.links.len());
+    for link in &scene.links {
+        let (Some(source), Some(target)) = (resolve(link.source), resolve(link.target)) else {
+            continue;
+        };
+        if source == target {
+            continue;
+        }
+        // One line per parent-to-glyph pair, not one per folded child: the
+        // count is on the glyph, and forty coincident lines are forty times the
+        // ink for no information.
+        if links_out
+            .iter()
+            .any(|l| l.source == source && l.target == target)
+        {
+            continue;
+        }
+        links_out.push(SceneLink {
+            source,
+            target,
+            width: link.width,
+        });
+    }
+    scene.nodes = kept;
+    scene.links = links_out;
+    scene.seeds = scene
+        .seeds
+        .iter()
+        .filter_map(|s| new_index.get(*s).copied().flatten())
+        .collect();
+    folded
 }
 
 fn check_dimension(value: u32, name: &str) -> Result<u32, CoreError> {
@@ -368,7 +626,7 @@ fn build_scene(session: &Session, request: &RenderRequest) -> Result<Scene, Core
             let Response::Slice(slice) = session.handle(&Request::Cypher(cypher))? else {
                 unreachable!("as_graph was forced above, and that path answers with a slice");
             };
-            Ok(slice_scene(session, &slice))
+            Ok(slice_scene(session, &slice, None))
         }
         RenderSource::Expand(expand) => {
             let slot = session.slot_of_type(&expand.node_type).ok_or_else(|| {
@@ -387,7 +645,7 @@ fn build_scene(session: &Session, request: &RenderRequest) -> Result<Scene, Core
             else {
                 unreachable!("an expand request answers with a slice");
             };
-            Ok(slice_scene(session, &slice))
+            Ok(slice_scene(session, &slice, Some(&expand.node_type)))
         }
         RenderSource::LiveView => Ok(live_scene(session)),
     }
@@ -447,6 +705,10 @@ fn live_scene(session: &Session) -> Scene {
                     color: encoding::base_color(true, !capabilities.is_empty(), supporting),
                     badges: capabilities,
                     dimmed: supporting,
+                    node_type: Some(name.clone()),
+                    show_count: true,
+                    pinned: false,
+                    aggregate: None,
                 }
             }
             SlotEntry::Node {
@@ -468,9 +730,15 @@ fn live_scene(session: &Session) -> Scene {
                     },
                     weight: 1,
                     radius: encoding::INSTANCE_RADIUS_PX,
-                    color: encoding::base_color(false, false, false),
+                    color: encoding::type_hue(node_type),
                     badges: Vec::new(),
                     dimmed: false,
+                    node_type: Some(node_type.clone()),
+                    // An instance node's count is always 1, and a chip that
+                    // says so every time is width spent on nothing.
+                    show_count: false,
+                    pinned: false,
+                    aggregate: None,
                 }
             }
             SlotEntry::Tombstone => unreachable!("live_entries skips tombstones"),
@@ -537,6 +805,9 @@ fn live_scene(session: &Session) -> Scene {
         // The same condition `isMetaGraphOnly` tests in `frontend/src/main.ts`:
         // a view that is nothing but type nodes is a picture OF its labels.
         place_all_labels: instance_count == 0,
+        // A live view is whatever the user navigated to; the request that drew
+        // it named no origin, so the layout is chosen from the shape alone.
+        seeds: Vec::new(),
     }
 }
 
@@ -583,6 +854,11 @@ fn meta_scene(meta: &MetaGraphResponse, session: &Session) -> Scene {
             color: encoding::base_color(true, !n.capabilities.is_empty(), n.supporting),
             badges: n.capabilities.clone(),
             dimmed: n.supporting,
+            node_type: Some(n.name.clone()),
+            // A type node's count is the whole reason it is that size.
+            show_count: true,
+            pinned: false,
+            aggregate: None,
         })
         .collect();
 
@@ -638,6 +914,7 @@ fn meta_scene(meta: &MetaGraphResponse, session: &Session) -> Scene {
         banners,
         // The meta-graph IS its labels: a type node with no name on it is a dot.
         place_all_labels: true,
+        seeds: Vec::new(),
     }
 }
 
@@ -649,7 +926,7 @@ fn meta_scene(meta: &MetaGraphResponse, session: &Session) -> Scene {
 /// circles around the thing the caller actually asked for. The app does not
 /// have this choice — it has one continuous view a user navigates — and an
 /// image is a snapshot of one question.
-fn slice_scene(session: &Session, slice: &GraphSlice) -> Scene {
+fn slice_scene(session: &Session, slice: &GraphSlice, seed_type: Option<&str>) -> Scene {
     let index_of: std::collections::HashMap<u32, usize> = slice
         .meta
         .nodes
@@ -678,9 +955,13 @@ fn slice_scene(session: &Session, slice: &GraphSlice) -> Scene {
             // label grid's tie-break falls through to the slot id.
             weight: 1,
             radius: encoding::INSTANCE_RADIUS_PX,
-            color: encoding::base_color(false, false, false),
+            color: encoding::type_hue(&n.node_type),
             badges: Vec::new(),
             dimmed: false,
+            node_type: Some(n.node_type.clone()),
+            show_count: false,
+            pinned: false,
+            aggregate: None,
         })
         .collect();
 
@@ -701,6 +982,18 @@ fn slice_scene(session: &Session, slice: &GraphSlice) -> Scene {
             })
         })
         .collect();
+
+    let seeds: Vec<usize> = match seed_type {
+        Some(name) => slice
+            .meta
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.node_type == name)
+            .map(|(i, _)| i)
+            .collect(),
+        None => Vec::new(),
+    };
 
     let unit = if slice.meta.kind == SliceKind::Collapse {
         "collapsed"
@@ -727,6 +1020,11 @@ fn slice_scene(session: &Session, slice: &GraphSlice) -> Scene {
         // An instance slice keeps dropping: at the 5 000-node response bound
         // "every label" is not a picture at any density.
         place_all_labels: false,
+        // What the *request* called its origin. An expansion out of one type
+        // seeds every node of that type, so this is usually a long list and the
+        // layout treats it as "no centre named" — see `Scene::seeds`. It is one
+        // entry exactly when the type has one member, which is the ego case.
+        seeds,
     }
 }
 

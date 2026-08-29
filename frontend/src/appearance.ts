@@ -37,6 +37,54 @@ const CATEGORY_COLORS: Rgba[] = [
 export const UNSET_COLOR: Rgba = [0.42, 0.47, 0.55, 0.75]
 
 /**
+ * One hue per node type, for instance nodes with no colour-by chosen.
+ *
+ * **Ported to Rust** as `TYPE_HUES` / `type_hue` in
+ * `crates/kglite-visual-core/src/render/encoding.rs`, entry for entry.
+ *
+ * Every instance node used to be drawn in one blue, which on a mixed
+ * neighbourhood — a wellbore with its licences, its cores and its logs — said
+ * "these are all the same kind of thing" about a view whose whole content is
+ * that they are not. Separable at small size against both the dark and the
+ * light ground, and ordered so adjacent indices are far apart in hue, because
+ * the assignment is by hash and neighbours in the table are what a two-type
+ * view is most likely to draw.
+ */
+const TYPE_HUES: Rgba[] = [
+  [0.36, 0.68, 0.98, 0.9],
+  [0.98, 0.62, 0.3, 0.9],
+  [0.42, 0.82, 0.52, 0.9],
+  [0.85, 0.5, 0.92, 0.9],
+  [0.98, 0.8, 0.34, 0.9],
+  [0.4, 0.83, 0.85, 0.9],
+  [0.96, 0.51, 0.6, 0.9],
+  [0.62, 0.74, 0.42, 0.9],
+  [0.68, 0.62, 0.96, 0.9],
+  [0.92, 0.68, 0.52, 0.9],
+]
+
+/** An instance node whose type is unknown. */
+export const INSTANCE_COLOR: Rgba = [0.55, 0.7, 0.9, 0.85]
+
+/**
+ * The hue a type name maps to.
+ *
+ * FNV-1a over the name, not the type's position in any list: the same type
+ * must get the same colour in every view forever, and a position-derived index
+ * would repaint everything the day a query returned its rows in a different
+ * order.
+ */
+export function typeHue(nodeType: string | null): Rgba {
+  if (nodeType === null || nodeType === '') return INSTANCE_COLOR
+  let hash = 0x811c9dc5
+  for (let i = 0; i < nodeType.length; i += 1) {
+    hash = (hash ^ nodeType.charCodeAt(i)) >>> 0
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return TYPE_HUES[hash % TYPE_HUES.length] as Rgba
+}
+
+/**
  * Radius range for a meta-graph type node, in graph units before zoom.
  *
  * **Ported to Rust** as `TYPE_MIN_PX` / `TYPE_MAX_PX` in
