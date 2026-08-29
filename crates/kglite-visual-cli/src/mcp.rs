@@ -570,6 +570,12 @@ impl ViewControl {
             "target": args.target,
             "nodes": rendered.nodes,
             "links": rendered.links,
+            // Absent unless the canvas clipped the schema or the grid thinned a
+            // name off the picture — an agent reading this instead of opening
+            // the image gets the same two facts the status block draws.
+            "types_shown": rendered.types_shown,
+            "types_total": rendered.types_total,
+            "names_shown": rendered.names_shown,
             "truncated": rendered.truncated,
             "banners": rendered.banners,
             "width": rendered.width,

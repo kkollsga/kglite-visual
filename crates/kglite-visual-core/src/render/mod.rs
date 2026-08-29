@@ -203,8 +203,13 @@ pub struct Rendered {
     pub format: RenderFormat,
     pub width: u32,
     pub height: u32,
-    /// Nodes the slice carried — **drawn plus folded**, so this stays the
+    /// Nodes the picture carried — **drawn plus folded**, so this stays the
     /// answer to "how big was the result" whether or not any fan was folded.
+    ///
+    /// On a meta-graph render the canvas clipped, this is the *drawn* type
+    /// count and [`Rendered::types_total`] is what the schema has; the two
+    /// together are what the status block says, and the JSON never disagrees
+    /// with the image.
     pub nodes: u32,
     /// Links the slice carried — counted, like `nodes`, before any fan was
     /// folded, so the JSON and the status block drawn into the image agree.
@@ -218,6 +223,24 @@ pub struct Rendered {
     /// kernels have different costs; a caller that suddenly waits seconds for
     /// an image needs the number that says which half is slow.
     pub layout_ms: f64,
+    /// Type nodes drawn, and type nodes the meta-graph carried.
+    ///
+    /// `Some` only on a meta-graph render whose canvas could not hold every
+    /// type ([`meta_scene`]). An agent that reads the JSON and never opens the
+    /// image learns the same thing the status block tells a human: the picture
+    /// is the largest N of M, and a bigger canvas has the rest. Absent
+    /// everywhere else, because "types" is not a quantity an instance slice
+    /// has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub types_shown: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub types_total: Option<u32>,
+    /// Names the label grid actually drew, when it drew fewer than there are
+    /// nodes on the picture. Same obligation, one level down: a reader of the
+    /// JSON should not have to count chips to find out the picture is partly
+    /// unnamed. `None` when every node on the picture is named.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub names_shown: Option<u32>,
     /// True when any bound clipped this answer.
     pub truncated: bool,
     /// The banner text drawn into the image, verbatim — the same words the app
@@ -277,6 +300,10 @@ pub(crate) struct Scene {
     /// condition `isMetaGraphOnly` tests in `frontend/src/main.ts`, and the one
     /// that decides whether a label that loses its cell is nudged or dropped.
     pub place_all_labels: bool,
+    /// How many type nodes the meta-graph handed this scene, when the canvas
+    /// could not hold them all and [`meta_scene`] kept only the largest.
+    /// `None` for every scene that drew what it was given.
+    pub canvas_tier: Option<u32>,
     /// Node indices the *request* named as its origin.
     ///
     /// One entry is an ego request and gets a radial layout on the caller's
@@ -426,12 +453,10 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     // Deriving it from the budget alone (which is what round 2 did) reports a
     // number the picture contradicts the moment a region thins.
     let placed = svg::place_labels(&scene, &positions, width, height);
-    if scene.place_all_labels && placed.len() < scene.nodes.len() {
-        scene.status.push(format!(
-            "{} of {} names shown",
-            encoding::group_thousands(placed.len() as u64),
-            encoding::group_thousands(scene.nodes.len() as u64)
-        ));
+    let names_shown = (scene.place_all_labels && placed.len() < scene.nodes.len())
+        .then_some(clamp_u32(placed.len() as u64));
+    if let Some(line) = names_shown_line(scene.place_all_labels, placed.len(), scene.nodes.len()) {
+        scene.status.push(line);
     }
 
     let document = svg::emit(&scene, &positions, width, height, request.theme, &placed);
@@ -449,6 +474,11 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         links: slice_links,
         folded,
         layout_ms,
+        types_shown: scene
+            .canvas_tier
+            .map(|_| clamp_u32(scene.nodes.len() as u64)),
+        types_total: scene.canvas_tier,
+        names_shown,
         truncated: !scene.banners.is_empty(),
         banners: scene.banners,
     })
@@ -848,7 +878,11 @@ fn check_dimension(value: u32, name: &str) -> Result<u32, CoreError> {
 
 fn build_scene(session: &Session, request: &RenderRequest) -> Result<Scene, CoreError> {
     match &request.source {
-        RenderSource::Meta => Ok(meta_scene(session.meta_graph(), session)),
+        RenderSource::Meta => Ok(meta_scene(
+            session.meta_graph(),
+            session,
+            labels::budget(request.width, request.height),
+        )),
         RenderSource::Cypher(cypher) => {
             let mut cypher = cypher.clone();
             // A render is a picture of a graph, so the graph half of the result
@@ -1042,6 +1076,7 @@ fn live_scene(session: &Session) -> Scene {
         place_all_labels: instance_count == 0,
         // A live view is whatever the user navigated to; the request that drew
         // it named no origin, so the layout is chosen from the shape alone.
+        canvas_tier: None,
         seeds: Vec::new(),
     }
 }
@@ -1067,19 +1102,47 @@ fn meta_edge_count(session: &Session, edge: &crate::view::ViewEdge) -> u32 {
 }
 
 /// The entry screen, as a scene.
-fn meta_scene(meta: &MetaGraphResponse, session: &Session) -> Scene {
+///
+/// **`canvas_names` is a tier the canvas chooses** (P11 round 4). The
+/// meta-graph already arrives at one of `describe()`'s tiers — sodir's 98 types
+/// come back `compact`, every type, because kglite's classifier is answering
+/// "how big is this schema", which is a question about the graph. At 800x500
+/// that is 98 circles and 98 names in a canvas with room for 24 of them, and
+/// round 3's verdict on the resulting image was that it was honest and useless.
+///
+/// A canvas is a second bound on the same list, and it is the render's to
+/// apply: the drawing keeps the `canvas_names` largest types and *says so*, the
+/// way a clipped result says so (D5). The app is untouched — it has a camera,
+/// and `GET /api/meta-graph` still answers with every type the engine's tier
+/// kept.
+fn meta_scene(meta: &MetaGraphResponse, session: &Session, canvas_names: usize) -> Scene {
     let largest = meta.meta.nodes.iter().map(|n| n.count).max().unwrap_or(1);
-    let index_of: std::collections::HashMap<u32, usize> = meta
+    // Largest first, name breaking ties — the order `meta_graph::compute`
+    // already sorted the list into, restated rather than assumed because a
+    // silent dependency on an upstream sort is how a "top 24" becomes an
+    // arbitrary 24.
+    let kept: std::collections::HashSet<u32> = {
+        let mut by_size: Vec<&crate::meta_graph::MetaTypeNode> = meta.meta.nodes.iter().collect();
+        by_size.sort_unstable_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+        by_size
+            .into_iter()
+            .take(canvas_names)
+            .map(|n| n.slot)
+            .collect()
+    };
+    let canvas_tier =
+        (meta.meta.nodes.len() > kept.len()).then_some(clamp_u32(meta.meta.nodes.len() as u64));
+
+    let drawn: Vec<&crate::meta_graph::MetaTypeNode> = meta
         .meta
         .nodes
         .iter()
-        .enumerate()
-        .map(|(i, n)| (n.slot, i))
+        .filter(|n| kept.contains(&n.slot))
         .collect();
+    let index_of: std::collections::HashMap<u32, usize> =
+        drawn.iter().enumerate().map(|(i, n)| (n.slot, i)).collect();
 
-    let nodes: Vec<SceneNode> = meta
-        .meta
-        .nodes
+    let nodes: Vec<SceneNode> = drawn
         .iter()
         .map(|n| SceneNode {
             slot: n.slot,
@@ -1143,13 +1206,23 @@ fn meta_scene(meta: &MetaGraphResponse, session: &Session) -> Scene {
         ));
     }
 
+    let mut status = status_lines(session, nodes.len(), links.len(), "types");
+    if let Some(total) = canvas_tier {
+        status.push(format!(
+            "top {} of {} types shown — render larger for all",
+            encoding::group_thousands(nodes.len() as u64),
+            encoding::group_thousands(u64::from(total))
+        ));
+    }
+
     Scene {
-        status: status_lines(session, nodes.len(), links.len(), "types"),
+        status,
         nodes,
         links,
         banners,
         // The meta-graph IS its labels: a type node with no name on it is a dot.
         place_all_labels: true,
+        canvas_tier,
         seeds: Vec::new(),
     }
 }
@@ -1257,6 +1330,7 @@ fn slice_scene(session: &Session, slice: &GraphSlice, seed_type: Option<&str>) -
         // An instance slice keeps dropping: at the 5 000-node response bound
         // "every label" is not a picture at any density.
         place_all_labels: false,
+        canvas_tier: None,
         // What the *request* called its origin. An expansion out of one type
         // seeds every node of that type, so this is usually a long list and the
         // layout treats it as "no centre named" — see `Scene::seeds`. It is one
@@ -1288,6 +1362,25 @@ fn status_lines(session: &Session, nodes: usize, links: usize, unit: &str) -> Ve
     ]
 }
 
+/// What a picture that could not name everything on it says about that.
+///
+/// `None` when every node is named — a status line that appeared
+/// unconditionally would be noise, and "5 of 5 names shown" is not information.
+///
+/// The counts are the chips the emitter is about to draw and the nodes it is
+/// about to draw them on, never the canvas's *capacity*: the grid thins for two
+/// reasons now (the capacity, and a region with no room left in it), so a line
+/// derived from the capacity alone is a number the picture contradicts.
+fn names_shown_line(place_all: bool, placed: usize, nodes: usize) -> Option<String> {
+    (place_all && placed < nodes).then(|| {
+        format!(
+            "{} of {} names shown",
+            encoding::group_thousands(placed as u64),
+            encoding::group_thousands(nodes as u64)
+        )
+    })
+}
+
 /// Order-insensitive slot pair — the meta-graph draws one line per pair and the
 /// width channel is about the pair, not about a direction a line cannot show.
 /// Mirrors `pairKey` in `frontend/src/view.ts`.
@@ -1306,6 +1399,35 @@ fn clamp_u32(value: u64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_names_line_counts_the_chips_drawn_and_appears_only_when_one_is_missing() {
+        // The committed fixture has five types, so no canvas both fits them all
+        // and makes the grid thin one — the case this line exists for is
+        // sodir's 98 types at 1600x1000, where the budget is 116 and the grid
+        // seats 60. The rule is asserted here instead, at the only altitude a
+        // 5-type fixture can reach it.
+        assert_eq!(
+            names_shown_line(true, 60, 98).as_deref(),
+            Some("60 of 98 names shown"),
+            "the count is the chips drawn, not the canvas's capacity"
+        );
+        assert_eq!(
+            names_shown_line(true, 98, 98),
+            None,
+            "a picture that named everything says nothing"
+        );
+        assert_eq!(
+            names_shown_line(false, 60, 400),
+            None,
+            "an instance slice never promised every label, so it owes no count"
+        );
+        assert_eq!(
+            names_shown_line(true, 1_234, 5_678).as_deref(),
+            Some("1,234 of 5,678 names shown"),
+            "grouped like every other number in the block"
+        );
+    }
 
     fn node(text: &str, radius: f64, aggregate: Option<u32>) -> SceneNode {
         SceneNode {
@@ -1342,6 +1464,7 @@ mod tests {
             status: Vec::new(),
             banners: Vec::new(),
             place_all_labels: false,
+            canvas_tier: None,
             seeds: Vec::new(),
         };
         let mut positions = layout::Positions {
@@ -1404,6 +1527,7 @@ mod tests {
             status: Vec::new(),
             banners: Vec::new(),
             place_all_labels: false,
+            canvas_tier: None,
             seeds: Vec::new(),
         };
         let count = scene.nodes.len();
@@ -1451,6 +1575,7 @@ mod tests {
             status: Vec::new(),
             banners: Vec::new(),
             place_all_labels: false,
+            canvas_tier: None,
             seeds: Vec::new(),
         };
         let mut positions = layout::Positions {

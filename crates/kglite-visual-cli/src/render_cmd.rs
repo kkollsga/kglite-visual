@@ -133,6 +133,16 @@ struct RenderSummary<'a> {
     folded: u32,
     /// Milliseconds the layout pass took, so a slow image says which half.
     layout_ms: f64,
+    /// Type nodes drawn / carried, when the canvas could not hold the whole
+    /// schema and the render kept the largest (P11 round 4). Absent when the
+    /// picture has every type on it, and absent for every non-meta source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    types_shown: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    types_total: Option<u32>,
+    /// Names the label grid drew, when it drew fewer than there are nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    names_shown: Option<u32>,
     /// True when a bound clipped this answer. The banners say what was clipped;
     /// they are also drawn into the image, because an image travels without its
     /// response (D5).
@@ -185,6 +195,9 @@ pub fn run(args: &RenderArgs) -> Result<(), Box<dyn std::error::Error>> {
         links: rendered.links,
         folded: rendered.folded,
         layout_ms: (rendered.layout_ms * 100.0).round() / 100.0,
+        types_shown: rendered.types_shown,
+        types_total: rendered.types_total,
+        names_shown: rendered.names_shown,
         truncated: rendered.truncated,
         banners: &rendered.banners,
         bytes: rendered.bytes.len(),

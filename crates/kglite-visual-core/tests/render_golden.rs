@@ -369,52 +369,72 @@ fn a_dense_render_draws_quieter_lines_than_a_sparse_one() {
     );
 }
 
-/// A canvas too small to name every type says how many names it dropped.
+/// A canvas too small for the schema draws the largest types and says so.
 ///
-/// The meta-graph's standing promise is that every type is named, and at
-/// 800x500 keeping it meant 98 chips in a canvas with room for about 24 — names
-/// on top of names, and no way to tell which belonged to which circle. Dropping
-/// the ones that will not fit is right; dropping them silently would make the
-/// picture claim the graph has fewer types than it does, which is the same
-/// failure D5 names for a clipped result.
+/// The meta-graph arrives at one of the engine's tiers — a question about the
+/// *graph* — and a canvas is a second bound the engine knows nothing about. At
+/// 800x500 sodir's `compact` 98 types are 98 circles and 98 names in a canvas
+/// with room for 24: round 3's verdict on that image was "honest and useless".
+/// Keeping the largest is right; keeping them silently would make the picture
+/// claim the graph has fewer types than it does, which is the failure D5 names
+/// for a clipped result.
 #[test]
-fn a_canvas_that_cannot_name_every_type_says_so_in_the_image() {
-    let small = render_to_string(&RenderRequest {
+fn a_canvas_too_small_for_the_schema_draws_the_largest_and_says_so() {
+    let request = RenderRequest {
         width: 300,
         height: 250,
         ..meta_request(Theme::Dark)
-    });
-    assert!(
-        small.contains("of 5 names shown"),
-        "a thinned meta-graph has to say so: {}",
-        small
-            .lines()
-            .filter(|line| line.starts_with("<text"))
-            .take(6)
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    // …and the full-size render says nothing, because it dropped nothing. A
-    // status line that appeared unconditionally would be noise nobody reads.
-    assert!(!render_to_string(&meta_request(Theme::Dark)).contains("names shown"));
+    };
+    let rendered = render_meta(&request);
+    let svg = String::from_utf8(rendered.bytes.clone()).expect("the emitter writes UTF-8");
 
-    // The number is the count of chips actually on the picture. Round 2 printed
-    // the canvas's *capacity*, and once the grid also thins a contested region
-    // the two stop agreeing: the picture would then contradict its own status
-    // block, which is the failure this line exists to prevent.
-    for (width, height) in [(300, 250), (400, 250)] {
-        let svg = render_to_string(&RenderRequest {
-            width,
-            height,
-            ..meta_request(Theme::Dark)
-        });
-        let shown = names_shown(&svg).expect("a thinned render says how many names it shows");
-        assert_eq!(
-            shown,
-            chip_count(&svg),
-            "{width}x{height}: the status line must count the chips the emitter drew"
-        );
-    }
+    assert_eq!(rendered.types_total, Some(5));
+    assert_eq!(rendered.types_shown, Some(2), "the canvas holds two chips");
+    assert_eq!(
+        svg.matches("<circle").count(),
+        2,
+        "the types it cannot name are not drawn either — an unlabelled circle \
+         in a meta-graph is a dot standing for nothing"
+    );
+    assert!(
+        svg.contains("top 2 of 5 types shown — render larger for all"),
+        "the drop has to be in the picture, with the way out beside it"
+    );
+    // The two it kept are the largest, and the fixture's smallest is gone. A
+    // "top N" that took an arbitrary N would pass every assertion above.
+    assert!(svg.contains(">Person<"), "the largest type: {svg}");
+    assert!(
+        !svg.contains(">City<"),
+        "a small type survived the clip: {svg}"
+    );
+
+    // …and every name on the picture is drawn, so the picture owes no second
+    // count. The two lines answer different questions and only one applies.
+    assert_eq!(rendered.names_shown, None);
+    assert_eq!(chip_count(&svg), 2);
+    assert!(!svg.contains("names shown"));
+}
+
+/// The same graph on a canvas that fits it says nothing at all.
+///
+/// The pairing is the point: a tier line that appeared unconditionally would be
+/// noise, and one that never appeared would be the silent clip.
+#[test]
+fn a_canvas_that_fits_the_schema_reports_no_tier() {
+    let rendered = render_meta(&meta_request(Theme::Dark));
+    let svg = String::from_utf8(rendered.bytes.clone()).expect("the emitter writes UTF-8");
+    assert_eq!(rendered.types_total, None);
+    assert_eq!(rendered.types_shown, None);
+    assert_eq!(rendered.names_shown, None);
+    assert_eq!(svg.matches("<circle").count(), 5, "every type is drawn");
+    assert!(!svg.contains("types shown"));
+    assert!(!svg.contains("names shown"));
+}
+
+fn render_meta(request: &RenderRequest) -> render::Rendered {
+    let graph = fixture_graph();
+    render::render(&graph, "meta.kgl", QueryConfig::default(), request)
+        .expect("the fixture renders")
 }
 
 /// Label chips in an emitted document — the `rx="5"` rounded rect the label
@@ -423,17 +443,6 @@ fn chip_count(svg: &str) -> usize {
     svg.lines()
         .filter(|line| line.starts_with("<rect") && line.contains("rx=\"5\""))
         .count()
-}
-
-/// The `N` of `N of M names shown`, if the picture drew that line.
-fn names_shown(svg: &str) -> Option<usize> {
-    let line = svg.lines().find(|line| line.contains(" names shown"))?;
-    let text = line.rsplit_once('>')?.0.rsplit_once('>')?.1;
-    text.split_whitespace()
-        .next()?
-        .replace(',', "")
-        .parse()
-        .ok()
 }
 
 /// A render request that cannot produce a picture fails with a message naming
