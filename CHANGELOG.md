@@ -48,6 +48,25 @@ here. The first release promotes this block whole.
 - **A source distribution that carries a prebuilt frontend.** Installing from
   source on a platform with no matching wheel needs a Rust toolchain — and
   deliberately not Node, npm or a network round trip to a JavaScript registry.
+- **`kglite-visual render <graph.kgl>` — an image of a graph, without a
+  browser.** Draw the type-level meta-graph (`--meta`), the graph a Cypher
+  query returns (`--cypher "…"`), or a bounded neighbourhood expansion
+  (`--expand type=T rel=R dir=out`), as SVG or PNG. The picture uses the same
+  visual encoding as the interactive viewer — the same size ramp, link widths,
+  capability badges, colours and label placement — so the exported image and
+  the app show the same graph. The layout is seeded and deterministic: the same
+  request produces the same bytes every time, and `--seed` picks a different
+  arrangement of the same data. `--theme light` renders for a white page.
+  The command writes the file and prints one JSON line describing it.
+- **`POST /api/render` on the running server** answers with the image bytes and
+  the right content type, so an agent attached to a live session can ask for a
+  picture without a browser in the loop. It renders against a private view of
+  the same graph, so asking for an image never moves what the user is looking
+  at.
+- **A truncated image says so, in the image.** The same banner the viewer
+  shows — "showing 400 of 11,292 nodes and 748 of up to 25,160 links" — is
+  drawn into the picture, because an image travels without the response that
+  produced it.
 
 ### Changed
 
