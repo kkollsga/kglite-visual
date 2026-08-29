@@ -2,19 +2,32 @@
    top of it, so every overlay is pointer-events:none unless it needs clicks —
    an overlay that swallows a drag makes the graph feel broken. */
 
+:root {
+  /* Owned here, read by the canvas inset and by the panel itself, so the two
+     cannot drift apart into a graph drawn under an opaque panel. */
+  --kglv-panel-width: 340px;
+}
+
 .kglv-root {
   position: absolute;
   inset: 0;
 }
 
-.kglv-canvas {
+/* The panel is opaque and 340px wide, so a canvas that ran under it drew a
+   quarter of the graph where nothing could be seen, clicked or labelled — and
+   the renderer's own fitView framed the graph into that hidden strip as if it
+   were visible. Both the canvas and its label overlay therefore stop at the
+   panel's edge; --kglv-panel-width is the single source of that number. */
+.kglv-canvas,
+.kglv-labels {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: var(--kglv-panel-width);
 }
 
 .kglv-labels {
-  position: absolute;
-  inset: 0;
   pointer-events: none;
   overflow: hidden;
 }
@@ -135,16 +148,16 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Panels. The canvas fills the window; these sit over its right edge and are
-   the only overlay that takes pointer events — everything else must let a drag
-   through to the graph. */
+/* Panels. They own the right edge of the window and the canvas stops short of
+   it; they are also the only overlay that takes pointer events — everything
+   else must let a drag through to the graph. */
 
 .kglv-panels {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 340px;
+  width: var(--kglv-panel-width);
   overflow-y: auto;
   padding: 12px;
   display: flex;
