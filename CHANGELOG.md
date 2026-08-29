@@ -78,6 +78,24 @@ here. The first release promotes this block whole.
   fan it belongs to; the image's status block says how many nodes were folded
   this way. On a canvas too small to name every node, the picture keeps the
   names a reader can use and says how many it dropped.
+- **A canvas too small for the whole schema draws the largest types and says
+  so.** A meta-graph render sized for a chat message cannot hold a hundred type
+  names legibly, and the honest answer is not a hundred unreadable ones: the
+  picture draws the types the canvas can hold, largest first, and its status
+  block reads `top 24 of 98 types shown — render larger for all`. The CLI's
+  JSON line and the MCP render result carry the same two numbers, because an
+  image travels without its response. A canvas that fits the schema is
+  unaffected and says nothing.
+- **Names that would land on top of each other are dropped, and counted.** A
+  label whose own cell and every cell around it is taken keeps its circle and
+  loses its name, and the status block says `56 of 98 names shown`. Which names
+  go is decided by size and connectedness, so a hub type keeps its name and the
+  small fry thin out. A folded fan's count and the node a picture is centred on
+  are never thinned.
+- **`kglite-visual` stops cleanly on SIGTERM and Ctrl-C**, which means the
+  temporary working copy the engine spills for a large graph — 370 MB for a
+  half-million-node file — is removed instead of left on disk. A `kill -9`
+  still leaks it; nothing in a process can prevent that.
 - **`POST /api/render` on the running server** answers with the image bytes and
   the right content type, so an agent attached to a live session can ask for a
   picture without a browser in the loop. It renders against a private view of
