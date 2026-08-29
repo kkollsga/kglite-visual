@@ -5,23 +5,25 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29 (P5 landed): the wheel exists, and it proves
-> itself.** Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend
-> that renders the type-level meta-graph through cosmos.gl and drills into
-> it, a versioned binary protocol (v2) with an exact framing baseline, an
-> axum server on localhost with the frontend embedded, **a Python wheel
-> whose `show()` runs that same server lib-linked into the extension**, and
-> a gate that builds, lints, tests and **drives** all of it — in a headless
-> browser, and for the built wheel in a fresh virtualenv outside the repo.
-> What does **not** exist yet: CI, a remote, a CHANGELOG, and any published
-> artifact. Every command below that
-> does not exist yet is marked **(planned)**. **A planned command is not a
-> passing gate** — if you run a step and it is absent, say so and fall back;
-> never report green for a check that could not run (`R10` corollary). And
-> when a planned thing becomes real, delete its caveat *in the same change*:
-> an honesty label nobody retires becomes a lie, which is how one estate repo
-> still described itself as "brand-new, no code yet" two weeks after shipping
-> a gate and 17 test files.
+> **Status, 2026-08-29 (P6 landed — the buildout plan is complete): the
+> artifact exists, and it proves itself.** Three crates (`core`, `cli`,
+> `py`), a Vite/TypeScript frontend that renders the type-level meta-graph
+> through cosmos.gl and drills into it, a versioned binary protocol (v2)
+> with an exact framing baseline, an axum server on localhost with the
+> frontend embedded, **a Python wheel whose `show()` runs that same server
+> lib-linked into the extension**, a source distribution that installs
+> without Node, a CHANGELOG, and a gate that builds, lints, tests and
+> **drives** all of it — in a headless browser, and for the built wheel in a
+> fresh virtualenv outside the repo. **CI is AUTHORED AND HAS NEVER RUN**
+> (`.github/workflows/{ci,build_wheels}.yml`): there is no remote, no
+> Actions run, no PyPI project and no published artifact, and the publish
+> job is inert until a human sets a repository variable that does not exist.
+> A committed workflow is not a passing workflow — treat the first run as
+> the validation step it is, and never report a green check that never ran
+> (`R10` corollary). And when a planned thing becomes real, delete its
+> caveat *in the same change*: an honesty label nobody retires becomes a
+> lie, which is how one estate repo still described itself as "brand-new, no
+> code yet" two weeks after shipping a gate and 17 test files.
 
 The rules cited by ID (`R4`, `R11`, `R16`, …) are the estate's numbered
 invariants in `../doctrine/rules/RULES.md`. Cite them; don't paraphrase them
@@ -146,6 +148,8 @@ make pytest         # the wheel's suite; builds the extension into .venv first
 make wheel          # a wheel into target/wheels (WHEEL_PROFILE=--release for the artifact)
 make check-packaged-consumer   # install the built wheel elsewhere and drive it
 make py-venv        # create/reuse the project-local venv (py-venv-refresh re-installs)
+make prune          # purge the disposable tiers by age (dev-docs' temp/, bench/out/,
+                    # bin/, and stale Playwright artifacts). --dry-run to look first.
 cargo test --workspace
 cd frontend && npm ci && npm run typecheck && npm run build
 ```
@@ -171,6 +175,25 @@ registry, so it goes red on a plane and whenever the advisory database is
 briefly unreachable — neither of which is a fact about the diff. A gate that
 fails for reasons unrelated to the change is a gate people learn to bypass. CI
 owns the failing version of that check; here it reports and moves on.
+
+**CI exists as a file and has never executed.** `.github/workflows/ci.yml`
+runs fourteen of the gate's sixteen checks across five jobs plus a
+`ci-success` aggregate that `build_wheels.yml` waits on — an aggregate, never
+a list of check names, because an allowlist is how a red job ships a release
+by not being on it. The two gate checks with no CI job are local-only *by
+construction*: `check-dev-docs` bounds a gitignored directory that never
+reaches a checkout, and `check-skill-mirrors` compares against an untracked
+generated adapter. CI owns the **failing** half of `npm audit --omit=dev`.
+The concurrency group cancels a superseded `pull_request` run and never a
+push to `main`, where the run *is* the record of whether that commit was
+good. `build_wheels.yml` is the maturin matrix: native windows/macOS,
+manylinux2014 + musllinux_1_2 containers for x86_64, best-effort aarch64,
+and an sdist carrying a prebuilt `frontend/dist`; `if-no-files-found: error`
+on every upload, `scripts/check_wheel.py` against every wheel, and an
+artifact-**set** check before publish (`R9`). **None of it has run.** Both
+files pass `actionlint` locally and every inner command was exercised on a
+developer machine; that is the whole of the evidence, and it is not a green
+CI.
 
 **The packaged-consumer check is the one thing a source-tree test
 structurally cannot do.** `scripts/check_wheel.py` opens the built `.whl`,
@@ -427,8 +450,20 @@ human; bound: `make check-build-dirs` in the gate, which reports each against
 an advisory ceiling (`TARGET_WARN_MB`, `NODE_MODULES_WARN_MB`,
 `VENV_WARN_MB` in the Makefile). **That step warns and never fails** — a legitimately large
 `target/` mid-refactor is not a reason to block a commit, and a gate that
-blocks on it is a gate people bypass. An automatic purge is P6 work; until
-then the enforcement is a human reading the warning.
+blocks on it is a gate people bypass. These three stay human-owned through
+`make clean-build`, and deliberately so: they hold no age-tiered content,
+only caches whose whole value is being warm.
+
+**The automatic purge landed in P6, for the tiers that declare a lifetime.**
+`make prune` deletes inside `dev-docs/temp/` (>1d), `dev-docs/bench/out/`
+(>14d), `dev-docs/bin/` (>7d) and the Playwright artifact directories (>7d) —
+and nowhere else. It imports the lifetime table from
+`scripts/check_dev_docs.py` rather than copying it, prints every deletion,
+and refuses to invent a tier for an unclassified path, because an age-only
+sweep destroys whatever was placed in the wrong tier. **Tier assignment
+remains the `dev-docs-cleanup` skill's judgement** — what belongs where, and
+what must be rescued out of a disposable tier before its clock runs down.
+`scripts/prune.py --self-test` proves both directions (`R1`).
 
 Wheel builds land in `target/wheels/`, inside `target/`'s existing bound;
 the wheel's tooling lives in `.venv/` under `VENV_WARN_MB`, owned by
@@ -529,9 +564,9 @@ attempted-and-failed reproduction, not source reading.
 
 Commit format: `type: short description` (`feat`, `fix`, `docs`, `refactor`,
 `test`, `chore`). Update `CHANGELOG.md` `[Unreleased]` for user-visible
-changes; skip for internal refactors, CI, test-only, formatting. *(Planned —
-there is no CHANGELOG yet; nothing user-visible has shipped. The first
-release-shaped change creates it.)*
+changes; skip for internal refactors, CI, test-only, formatting. `CHANGELOG.md`
+exists as of P6 and its `[Unreleased]` block holds the whole P0–P6 surface —
+the app, the wheel, the CLI — which the first release promotes whole.
 
 **Commit messages are public — keep sensitive intent out of them.** Describe
 the *mechanical* change in neutral terms, not the strategy behind it.
@@ -605,13 +640,26 @@ rewrites every site and verifies with a **resolving** `cargo metadata`
 above and run the resolving `cargo metadata` by hand.)*
 
 **The `kglite` floor is a second version surface, enumerated separately**
-(`R16`). It has **one declaration**: the `kglite = { version = "=X.Y.Z", path =
-… }` line in `crates/kglite-visual-core/Cargo.toml`, exact-pinned because
-kglite is pre-1.0 and ships documented breaking changes in patch releases
-(plan D11). The path component is a development convenience, not a necessity —
-*kglite was verified present on crates.io on 2026-08-29: 99 versions, newest
-and default `0.16.13`, crate not yanked* — so a publish drops `path` and keeps
-the requirement string.
+(`R16`). It has **two declarations, counted by grepping on 2026-08-29 (P6),
+not assumed**:
+
+1. `crates/kglite-visual-core/Cargo.toml` — the `kglite = "=X.Y.Z"` line,
+   exact-pinned because kglite is pre-1.0 and ships documented breaking
+   changes in patch releases (plan D11).
+2. `tests/test_handover.py` — the `importorskip` reason string, which tells
+   the reader to `pip install kglite==X.Y.Z` into the venv. An install hint
+   naming a version is a declaration, and this one is one file away from the
+   paragraph that says so — exactly the shape codingest shipped a skewed
+   wheel through.
+
+The `path` component was **removed in P6** and its removal fixed a shipped
+defect, not a preference: the sibling checkout sits outside this workspace,
+maturin vendors an out-of-workspace path dependency, and `maturin sdist` was
+emitting 435 files / 2.5 MB carrying 391 files of KGLite's source under this
+project's name. *kglite was verified present on crates.io on 2026-08-29: 99
+versions, newest and default `0.16.13`, crate not yanked*, and the workspace
+now builds and tests against that published crate. `build_wheels.yml`'s sdist
+job asserts no foreign crate reappears.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the

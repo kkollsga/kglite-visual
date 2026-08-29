@@ -5,10 +5,13 @@ description: Cut a kglite-visual release — goal-check against the phased plan,
 
 # Release
 
-> **Nothing has ever been released from this repo, and most of the pipeline
-> this skill describes does not exist yet (2026-08-29).** Manifests and git
-> history now exist (P1); there is still no remote, no CI, no CHANGELOG and no
-> registry presence. **Do not run this skill to "see what happens".** The first release
+> **Nothing has ever been released from this repo (2026-08-29), but the
+> pipeline this skill describes now exists in file form.** P6 landed the two
+> workflows, the sdist, the CHANGELOG and the wheel matrix. What is still
+> missing is everything only a human can create: a remote, a single executed
+> CI run, a PyPI project and a trusted publisher. **The workflows have never
+> run**, so every step below that reads a CI result is authored-but-unproven
+> — report it that way, never as a pass. **Do not run this skill to "see what happens".** The first release
 > is preceded by a `phased-plan` that *builds* the pipeline; this file is the
 > procedure that pipeline must satisfy, written down first so the pipeline is
 > built to fit a known-good shape rather than discovered afterwards.
@@ -79,7 +82,7 @@ A deferred PR is named in the final report with the user's decision recorded,
 not just "deferred". *(The prior rule elsewhere in this estate silently
 skipped drafts, and a release shipped past a draft fix branch the user learned
 about only from the final report. Skipping is a scope decision, so it belongs
-to the user, up front.)* **(ABSENT — no remote, no PRs.)**
+to the user, up front.)* **(ABSENT — no remote, so no PRs. Real the moment the remote exists.)**
 
 ## Preconditions
 
@@ -141,7 +144,11 @@ to the user, up front.)* **(ABSENT — no remote, no PRs.)**
    not. Read `.outcome`, not `.conclusion`, on anything carrying
    `continue-on-error`; and check for a **job-level** flag, which makes the
    whole job unable to fail and every gate inside it decorative (`R1`).
-   **(ABSENT — no CI.)**
+   **(AUTHORED, NEVER RUN.** `.github/workflows/ci.yml` exists and its
+   `ci-success` job is the single aggregate to poll. No Actions run has ever
+   happened here, so the first poll is also the first validation — a failure
+   at this step is as likely to be a workflow bug as a code bug, and the
+   fix-and-push loop below is the right response to either.**)**
 
 5. **Bump version — always patch, unless the invocation said otherwise.**
    `x.y.Z` → `x.y.Z+1`, no clarification prompt and no judgement call. A minor
@@ -153,9 +160,9 @@ to the user, up front.)* **(ABSENT — no remote, no PRs.)**
 
    **Then apply it with the bump target — never hand-edit a manifest.**
    **(ABSENT — no bump target.)** Manifests exist as of P1 and the count has
-   been established: **three** sites, enumerated in CLAUDE.md →
-   "Commits & releases". Until the target exists, edit those three and verify
-   with a resolving `cargo metadata`.
+   been re-established by grepping in P6: **four** sites, enumerated in
+   CLAUDE.md → "Commits & releases". Until the target exists, edit those four
+   and verify with a resolving `cargo metadata`.
    The count is *established by counting*, not assumed: KGLite
    believed "the version is one line", and the internal dependency
    requirements that `cargo publish` demands turned it into five files and
@@ -173,8 +180,11 @@ to the user, up front.)* **(ABSENT — no remote, no PRs.)**
    0.15.13 engine that way, having checked the six sites documented for its
    *own* version while the floor lived in 15 places across 8 files.
 
-6. **Refresh captured constants and baselines. (ABSENT.)** When this project
-   has exact committed baselines — the protocol shape, a public API surface,
+6. **Refresh captured constants and baselines.** This project HAS exact
+   committed baselines — the protocol framing baseline (P2,
+   `crates/kglite-visual-core/tests/baselines/`) and the perf record (P4,
+   `dev-docs/bench/results/results.csv`) — so every rule below is live, not
+   prospective. When this project has exact committed baselines — the protocol shape, a public API surface,
    the type stubs, the perf baseline — refreshing them is
    **artifact/data generation, not another test gate**. Rules that will apply
    the day they exist:
@@ -198,14 +208,17 @@ to the user, up front.)* **(ABSENT — no remote, no PRs.)**
      not clear the anchor check — only recovering the performance does.
 
 7. **Promote CHANGELOG** `[Unreleased]` → `[x.y.z]`, leaving an empty
-   `## [Unreleased]` on top. **(ABSENT — no CHANGELOG.)**
+   `## [Unreleased]` on top. `CHANGELOG.md` exists as of P6 and its
+   `[Unreleased]` block is what this step promotes.
 
 8. **Preflight, then commit.** A preflight is a **checker, not a driver**: it
    reports whether the tree is ready and refuses if not, prints the command
    for each unmet precondition, and has no `--fix`. It must assert at minimum:
    every version site agrees, the workspace *resolves*, the workspace version
    and the top CHANGELOG section agree, the tree is formatted, and
-   `origin/main` is an ancestor of HEAD. **(ABSENT.)** Do not grow it into a
+   `origin/main` is an ancestor of HEAD. **(ABSENT.)** Its first assertion is
+   now checkable by hand: four version sites, a resolving `cargo metadata`,
+   and the top CHANGELOG section. Do not grow it into a
    driver — a tool that quietly performs the steps it checks is how gates stop
    gating. When green, commit as the final phase: `release(x.y.z): …` (version
    bump + CHANGELOG promotion + refreshed constants in **one** commit).
@@ -235,7 +248,10 @@ to the user, up front.)* **(ABSENT — no remote, no PRs.)**
     green on that SHA); **require the expected run count to be present** before
     concluding anything (a zero-incomplete loop exits instantly green on an
     empty array); and report **`conclusion`, not `status`**. A timeout is a
-    non-zero exit, never a pass. **(ABSENT.)**
+    non-zero exit, never a pass. **(The workflow exists as of P6 and has
+    never run; the poller does not exist. Write it against `ci.yml`'s
+    `ci-success` aggregate, and poll the PUSH-triggered run — the same commit
+    can carry a `pull_request` run with identical check names.)**
     - **CI fix-and-push loop — authorized, and it is a loop.** Diagnose, push
       `fix(...)` / `ci(...)`, poll again, repeat. Green means **continue to
       the next step in the same run**, not report and stop. Stop and surface
@@ -244,7 +260,13 @@ to the user, up front.)* **(ABSENT — no remote, no PRs.)**
       code-fixed** — never change code to route around a flake.
 
 11. **Verify the published artifact SET, and verify the release was
-    *recorded*** (`R9`). **(ABSENT.)**
+    *recorded*** (`R9`). **(The workflow does this itself as of P6:
+    `build_wheels.yml`'s publish job asserts the artifact SET — one sdist and
+    five must-pass platform tags, the two best-effort aarch64 legs
+    deliberately uncounted — before uploading, and creates the tag AFTER the
+    upload so a failed publish leaves no tag claiming a release that does not
+    exist. Verify it independently anyway; a check that has never run is not
+    a check.)**
     - **A version check answers "did something publish", never "did everything
       publish".** Cross-compiled legs are often best-effort, and an upload step
       without a fail-on-empty setting uploads an *empty* artifact from a green
@@ -318,9 +340,11 @@ to the user, up front.)* **(ABSENT — no remote, no PRs.)**
 16. **Prune the dev environment.** Every file accumulation needs a gate
     (`R4`): the cargo target dir (cargo never garbage-collects it — a 503 GB
     one was found in this estate), `node_modules`, the frontend build output,
-    wheel builds, and tool caches. `make clean-build` deletes the first three;
-    `make gate` reports them against advisory ceilings. **(ABSENT — no wheel
-    build or tool cache exists yet to prune.)** Then leave
+    wheel builds, and tool caches. `make prune` ages out the tiers that
+    declare a lifetime (dev-docs' `temp/`, `bench/out/`, `bin/`, and the
+    Playwright artifacts); `make clean-build` deletes `target/` — wheel
+    builds included — `node_modules`, `frontend/dist` and `.venv`;
+    `make gate` reports them against advisory ceilings. Then leave
     the working tree in the canonical debug/dev state, not with the release
     build installed.
 

@@ -186,13 +186,17 @@ go-ahead.** If they decline, proceed without it.
 - Put the phased plan into the **PR description as a checklist** (one box per
   phase).
 
-> **ABSENT until the bootstrap lands.** This repo has no git history, no
-> remote and no CI (2026-08-29). Until Phase 0 of the architecture plan
-> creates them, this entire phase is **not applicable, and saying so is the
-> correct output** — never report a green PR check that does not exist
-> (`R10` corollary). Work on `main` locally, keep the phase commits
+> **PARTIALLY ABSENT: CI exists as a file and has never run, and there is
+> still no remote (2026-08-29, after P6).** `.github/workflows/ci.yml` and
+> `build_wheels.yml` are committed and pass `actionlint`, but no Actions run
+> has ever happened and no PR has ever existed. Until the user creates the
+> remote and the first run goes green, this phase is **not applicable, and
+> saying so is the correct output** — never report a green PR check that does
+> not exist (`R10` corollary). Work on `main` locally, keep the phase commits
 > bisectable anyway, and note in the report-out that CI confirmation is
-> outstanding. Delete this block in the same change that creates the remote.
+> outstanding. Delete this block in the same change that lands the first green
+> CI run — not in the one that creates the remote, because a remote with a
+> never-executed workflow is exactly the state this block describes.
 
 ## Phase 3 — Execute each phase (the autonomous loop)
 
@@ -239,7 +243,7 @@ For every phase, in order:
      opinion here is input to the next plan, not a reason to rework this
      phase.
 3. Update `CHANGELOG.md` `[Unreleased]` for user-visible changes (not the
-   version block). *(ABSENT until the first release infrastructure exists.)*
+   version block).
 4. **Commit** the phase (`feat(...)` / `refactor(...)` / `fix(...)`), one
    commit per phase.
 5. **Push at checkpoints, not per commit.** Every branch push starts a full CI
