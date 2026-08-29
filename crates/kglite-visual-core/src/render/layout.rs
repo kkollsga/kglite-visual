@@ -714,10 +714,8 @@ pub fn radial(
         .map(|i| {
             if i == seed {
                 LabelSide::Below
-            } else if xy[i].0 < 0.0 {
-                LabelSide::Left
             } else {
-                LabelSide::Right
+                outward(xy[i])
             }
         })
         .collect();
@@ -745,6 +743,213 @@ const QUARTER_TURN_BACK: f64 = -std::f64::consts::FRAC_PI_2;
 fn unit(angle: f64) -> (f64, f64) {
     let quantise = |v: f64| (v * 4_096.0).round() / 4_096.0;
     (quantise(angle.cos()), quantise(angle.sin()))
+}
+
+/// Clear space between the inner shell's circles and the outer shell's, in
+/// pixels.
+///
+/// Wide enough that the two shells read as two rings rather than as one thick
+/// band — this gap is the entire visual claim "these are two kinds of thing".
+const SHELL_GAP_PX: f64 = 66.0;
+
+/// Where a two-shell arrangement's circles land, before any of them is placed.
+///
+/// Solved once and read twice: [`shells`] lays out against it, and [`islands`]
+/// sizes the box it hands [`shells`] from it. A ring needs the room a ring
+/// needs, and `fit` cannot give it any — the same reason the radial branch
+/// there sizes its box from a circumference rather than from a node count.
+struct ShellGeometry {
+    inner_radius: f64,
+    /// Radius of the innermost sub-ring of the outer shell.
+    base: f64,
+    /// Distance between two of the outer shell's sub-rings.
+    step: f64,
+    rings: usize,
+    /// Half-width of the whole arrangement, outermost circle included.
+    extent: f64,
+}
+
+fn shell_geometry(nodes: &[LayoutNode], inner: &[usize], outer: &[usize]) -> ShellGeometry {
+    let widest = |members: &[usize]| {
+        members
+            .iter()
+            .map(|i| nodes[*i].radius)
+            .fold(0.0f64, f64::max)
+    };
+    let slots = |members: &[usize]| -> f64 {
+        members
+            .iter()
+            .map(|i| 2.0 * nodes[*i].radius + RING_SLOT_PAD_PX)
+            .sum()
+    };
+    let inner_widest = widest(inner);
+    let outer_widest = widest(outer);
+    let inner_radius = (slots(inner) / TAU).max(FIRST_RING_PX);
+    let needed = slots(outer);
+    let mut base = inner_radius + inner_widest + SHELL_GAP_PX + outer_widest;
+    let step = 2.0 * outer_widest + SUBRING_GAP_PX;
+    // The outer shell splits into concentric sub-rings for the same reason a hop
+    // does (see MAX_SUBRINGS): one circle holding `n` nodes has radius `n·slot/2π`
+    // and an area that grows with `n²`, all of it the empty middle.
+    let capacity = |rings: usize, base: f64| -> f64 {
+        (0..rings).map(|j| TAU * (base + j as f64 * step)).sum()
+    };
+    let mut rings = 1usize;
+    while rings < MAX_SUBRINGS && capacity(rings, base) < needed {
+        rings += 1;
+    }
+    if capacity(rings, base) < needed {
+        // Past the sub-ring cap the shell simply grows, and the picture is
+        // honest about being full. Solved rather than searched: capacity is
+        // `TAU * (rings * base + step * (0 + 1 + … + rings-1))`.
+        let triangle = (rings * (rings - 1)) as f64 / 2.0;
+        base = (needed / TAU - step * triangle) / rings as f64;
+    }
+    let extent = base + (rings - 1) as f64 * step + outer_widest;
+    ShellGeometry {
+        inner_radius,
+        base,
+        step,
+        rings,
+        extent,
+    }
+}
+
+/// Lay a bipartite scene out as two concentric shells (P11 round 3).
+///
+/// **What a blob loses and this keeps.** A force layout over a dense community
+/// settles into a disc whose only readable property is "many"; the two classes
+/// are interleaved, so the one fact the data is *made of* — that these are two
+/// kinds of thing joined only to each other — is the fact the picture destroys.
+/// Two rings put the classes in different places, and the spokes between them
+/// are then radial rather than a mesh.
+///
+/// The inner shell is the smaller class, evenly spaced. Each outer member is
+/// placed next to its **principal hub** — the inner neighbour with the highest
+/// degree, ties to the lowest index — so an outer run under one hub is
+/// contiguous and its spokes converge instead of crossing the picture. That
+/// ordering is the whole difference between a readable double ring and a
+/// spirograph.
+///
+/// No force pass follows, which is what licenses the trigonometry here under
+/// this module's no-libm rule; [`unit`] quantises besides. Same argument as
+/// [`radial`].
+fn shells(
+    nodes: &[LayoutNode],
+    links: &[(usize, usize)],
+    part: &structure::Bipartition,
+    canvas: Canvas,
+) -> Result<Positions, CoreError> {
+    let Canvas {
+        width,
+        height,
+        reserved_top,
+    } = canvas;
+    let count = nodes.len();
+    if count > MAX_LAYOUT_NODES {
+        return Err(over_bound(count));
+    }
+    let geometry = shell_geometry(nodes, &part.inner, &part.outer);
+    let degree = structure::degrees(count, links);
+    let neighbours = structure::adjacency(count, links);
+
+    let mut xy = vec![(0.0f64, 0.0f64); count];
+    let mut angle_of = vec![0.0f64; count];
+    for (position, member) in part.inner.iter().enumerate() {
+        let angle = QUARTER_TURN_BACK + TAU * position as f64 / part.inner.len() as f64;
+        let (ux, uy) = unit(angle);
+        xy[*member] = (geometry.inner_radius * ux, geometry.inner_radius * uy);
+        angle_of[*member] = angle;
+    }
+
+    let mut is_inner = vec![false; count];
+    for member in &part.inner {
+        is_inner[*member] = true;
+    }
+    // Each outer member's principal hub: the inner neighbour it is most likely
+    // to be read as belonging to.
+    let hub_of: Vec<usize> = part
+        .outer
+        .iter()
+        .map(|member| {
+            let mut best = usize::MAX;
+            for peer in &neighbours[*member] {
+                if !is_inner[*peer] {
+                    continue;
+                }
+                // Strictly greater, so an exact tie keeps the lower index.
+                if best == usize::MAX || degree[*peer] > degree[best] {
+                    best = *peer;
+                }
+            }
+            best
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..part.outer.len()).collect();
+    order.sort_by(|a, b| {
+        let key = |i: usize| {
+            let hub = hub_of[i];
+            let angle = if hub == usize::MAX {
+                f64::MAX
+            } else {
+                angle_of[hub]
+            };
+            (angle, part.outer[i])
+        };
+        let (ka, kb) = (key(*a), key(*b));
+        ka.0.total_cmp(&kb.0).then_with(|| ka.1.cmp(&kb.1))
+    });
+
+    // The sub-rings take the share of the members their own circumference is,
+    // so the inner circles are not packed tighter than the outer.
+    let slot = |member: usize| 2.0 * nodes[member].radius + RING_SLOT_PAD_PX;
+    let needed: f64 = part.outer.iter().map(|m| slot(*m)).sum();
+    let capacity: f64 = (0..geometry.rings)
+        .map(|j| TAU * (geometry.base + j as f64 * geometry.step))
+        .sum();
+    let mut cut = 0usize;
+    for sub in 0..geometry.rings {
+        let radius = geometry.base + sub as f64 * geometry.step;
+        let share = needed * (TAU * radius) / capacity;
+        let start = cut;
+        let mut arc = 0.0f64;
+        while cut < order.len() && (arc < share || sub + 1 == geometry.rings) {
+            arc += slot(part.outer[order[cut]]);
+            cut += 1;
+        }
+        if start >= cut {
+            continue;
+        }
+        // Spread whatever this sub-ring did not need, so a sparse one is a
+        // circle and not an arc with a hole in it.
+        let scale = TAU * radius / arc.max(1.0);
+        let mut cursor = 0.0f64;
+        for slotted in &order[start..cut] {
+            let member = part.outer[*slotted];
+            let angle = QUARTER_TURN_BACK + (cursor + slot(member) * scale / 2.0) / radius;
+            cursor += slot(member) * scale;
+            let (ux, uy) = unit(angle);
+            xy[member] = (radius * ux, radius * uy);
+            angle_of[member] = angle;
+        }
+    }
+
+    let label_side = (0..count).map(|i| outward(xy[i])).collect();
+    Ok(Positions {
+        xy: fit(&xy, nodes, width, height, reserved_top, 0.0).0,
+        label_side,
+        islands: Vec::new(),
+    })
+}
+
+/// Which side of a node its name belongs on, given the node's offset from the
+/// centre it radiates from.
+fn outward((x, _y): (f64, f64)) -> LabelSide {
+    if x < 0.0 {
+        LabelSide::Left
+    } else {
+        LabelSide::Right
+    }
 }
 
 /// Padding between two packed islands, as a multiple of one node's spacing —
@@ -1034,14 +1239,29 @@ fn pack_at_spacing(
         // size are not two copies of one picture.
         let island_seed = seed ^ ((island_index as u64 + 1).wrapping_mul(0x9E37_79B9));
         let plan = structure::plan(local_nodes.len(), &local_links, &[]);
+        // **Two kinds of thing joined only to each other, drawn as two shells**
+        // (P11 round 3). Tested only where the island is not already a star,
+        // because a star is bipartite too and `radial` is the better picture of
+        // one. `structure::bipartition` refuses everything else — a single odd
+        // cycle, a class of two, a forest — and the force layout stays the
+        // honest answer for a genuinely shapeless interior.
+        let shell_part = match plan {
+            structure::Plan::Radial { .. } => None,
+            _ => structure::bipartition(local_nodes.len(), &local_links),
+        };
         // A ring needs the room a ring needs, and `fit` cannot give it any:
         // that step scales *positions* and deliberately leaves radii alone, so
         // a ring squeezed into a box that is too short arrives as a solid arc
         // of overlapping circles rather than as a ring of readable ones. The
-        // box for a radial island is therefore sized from the ring's own
-        // circumference, and is square, because a ring is.
-        let (box_width, box_height) = match plan {
-            structure::Plan::Radial { .. } => {
+        // box for a radial or shelled island is therefore sized from the ring's
+        // own circumference, and is square, because a ring is.
+        let (box_width, box_height) = match (&plan, &shell_part) {
+            (_, Some(part)) => {
+                let extent = shell_geometry(&local_nodes, &part.inner, &part.outer).extent;
+                let square = (2.0 * extent).max(side);
+                (square, square)
+            }
+            (structure::Plan::Radial { .. }, _) => {
                 let widest = local_nodes.iter().map(|n| n.radius).fold(0.0f64, f64::max);
                 let circumference = local_nodes.len() as f64 * (2.0 * widest + RING_SLOT_PAD_PX);
                 let ring = (circumference / std::f64::consts::PI + 4.0 * widest).max(side);
@@ -1049,28 +1269,29 @@ fn pack_at_spacing(
             }
             _ => (box_width, box_height),
         };
+        let island_canvas = Canvas {
+            width: box_width,
+            height: box_height,
+            reserved_top: 0.0,
+        };
+        if let Some(part) = shell_part {
+            let solved = shells(&local_nodes, &local_links, &part, island_canvas)?;
+            for (member, side) in members.iter().zip(solved.label_side.iter()) {
+                label_side[*member] = *side;
+            }
+            boxes.push((box_width, box_height));
+            placements.push(solved.xy);
+            continue;
+        }
         let solved = match plan {
             structure::Plan::Radial { seed: centre } => radial(
                 &local_nodes,
                 &local_links,
                 centre,
                 &local_group,
-                Canvas {
-                    width: box_width,
-                    height: box_height,
-                    reserved_top: 0.0,
-                },
+                island_canvas,
             )?,
-            _ => run(
-                &local_nodes,
-                &local_links,
-                Canvas {
-                    width: box_width,
-                    height: box_height,
-                    reserved_top: 0.0,
-                },
-                island_seed,
-            )?,
+            _ => run(&local_nodes, &local_links, island_canvas, island_seed)?,
         };
         for (member, side) in members.iter().zip(solved.label_side.iter()) {
             label_side[*member] = *side;
@@ -1783,6 +2004,52 @@ mod tests {
             }
         }
         links
+    }
+
+    #[test]
+    fn a_bipartite_island_comes_out_as_two_separated_shells() {
+        // The blob this replaces: a force layout over a dense two-sided
+        // community interleaves the classes, which destroys the one fact the
+        // data is made of. Measured as radius from the arrangement's centre,
+        // because that is what a reader sees — every hub nearer the middle than
+        // every leaf, with a gap between the two bands.
+        const HUBS: usize = 6;
+        const LEAVES: usize = 42;
+        let count = HUBS + LEAVES;
+        let nodes = vec![LayoutNode { radius: 6.0 }; count];
+        let links: Vec<(usize, usize)> = (0..HUBS)
+            .flat_map(|h| (0..LEAVES).map(move |l| (h, HUBS + l)))
+            .collect();
+        let part = structure::bipartition(count, &links).expect("the fixture is bipartite");
+        let placed = shells(
+            &nodes,
+            &links,
+            &part,
+            Canvas {
+                width: 1000.0,
+                height: 1000.0,
+                reserved_top: 0.0,
+            },
+        )
+        .expect("two shells lay out");
+
+        let centre = (500.0f64, 500.0f64);
+        let radius_of = |i: usize| {
+            let (dx, dy) = (placed.xy[i].0 - centre.0, placed.xy[i].1 - centre.1);
+            (dx * dx + dy * dy).sqrt()
+        };
+        let inner_max = (0..HUBS).map(radius_of).fold(0.0f64, f64::max);
+        let outer_min = (HUBS..count).map(radius_of).fold(f64::MAX, f64::min);
+        assert!(
+            outer_min > inner_max,
+            "the shells overlap: hubs reach {inner_max:.1}, leaves start at {outer_min:.1}"
+        );
+        assert!(
+            outer_min - inner_max > 2.0 * 6.0,
+            "the two shells must read as two rings, not one band: \
+             {:.1} px of clear space",
+            outer_min - inner_max
+        );
     }
 
     #[test]

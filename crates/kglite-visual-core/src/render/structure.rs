@@ -169,6 +169,109 @@ fn ego_centre(count: usize, links: &[(usize, usize)]) -> Option<usize> {
     Some(best)
 }
 
+/// Smallest island a two-shell arrangement says anything about.
+///
+/// Under this a shell is a circle of eight dots with a circle of two inside it,
+/// which is a worse picture than the force layout it replaced.
+const MIN_NODES_FOR_SHELLS: usize = 10;
+
+/// Smallest either side of a two-shell arrangement may be.
+///
+/// Two nodes on the inner shell is a pair with a halo, not a shell — and the
+/// star it usually means is [`Plan::Radial`]'s job, which is tested first.
+const MIN_SHELL_CLASS: usize = 3;
+
+/// The two sides of a bipartite island, smaller side first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Bipartition {
+    /// The inner shell — the smaller class, which is the hub side in every
+    /// real case here (companies to discoveries, fields to wellbores).
+    pub inner: Vec<usize>,
+    pub outer: Vec<usize>,
+}
+
+/// Two classes with every edge between them, if the scene has exactly that
+/// shape (P11 round 3).
+///
+/// **The blob this answers has a name.** A Louvain community that is not a star
+/// falls through to the force layout, and a force layout over a *dense* community
+/// is a disc of dots: the coordinator's round-2 verdict on the discovery /
+/// licensee render's left island, and on the meta-graph's two densest families.
+/// A reader can count the dots and learn nothing else. But most of those blobs
+/// are not shapeless — they are two kinds of thing joined only to each other,
+/// which is the commonest shape in this data set (a discovery has licensees, a
+/// wellbore has a field, a licence has areas), and two kinds of thing drawn as
+/// two concentric shells reads as two kinds of thing at a glance.
+///
+/// **Exact, not approximate.** A single odd cycle refuses the whole partition
+/// rather than being tolerated as noise: "these are the two sides" is a claim
+/// about the data, and a near-bipartite graph drawn as bipartite puts some
+/// members on the shell they do not belong to with nothing in the picture saying
+/// which. The force fallback is the honest answer for anything that fails here.
+///
+/// Three further refusals, each because the picture would be worse than the one
+/// it replaces: a scene under [`MIN_NODES_FOR_SHELLS`]; a class under
+/// [`MIN_SHELL_CLASS`]; and a scene with fewer edges than nodes, which is a
+/// forest — every forest is bipartite, and a forest's shape is its branching,
+/// not its two sides.
+pub fn bipartition(count: usize, links: &[(usize, usize)]) -> Option<Bipartition> {
+    if count < MIN_NODES_FOR_SHELLS {
+        return None;
+    }
+    let neighbours = adjacency(count, links);
+    let edges: usize = neighbours.iter().map(|list| list.len()).sum::<usize>() / 2;
+    if edges < count {
+        return None;
+    }
+    // An unattached node has no side, and colouring it 0 would file it under a
+    // class it has no relationship to.
+    if neighbours.iter().any(|list| list.is_empty()) {
+        return None;
+    }
+
+    const UNCOLOURED: u8 = u8::MAX;
+    let mut colour = vec![UNCOLOURED; count];
+    for start in 0..count {
+        if colour[start] != UNCOLOURED {
+            continue;
+        }
+        colour[start] = 0;
+        let mut frontier = vec![start];
+        while !frontier.is_empty() {
+            let mut next = Vec::new();
+            for node in frontier {
+                for peer in &neighbours[node] {
+                    if colour[*peer] == UNCOLOURED {
+                        colour[*peer] = 1 - colour[node];
+                        next.push(*peer);
+                    } else if colour[*peer] == colour[node] {
+                        return None;
+                    }
+                }
+            }
+            // Ascending, so the walk visits in index order and the colouring is
+            // a function of the input rather than of a frontier's push order.
+            next.sort_unstable();
+            frontier = next;
+        }
+    }
+
+    let first: Vec<usize> = (0..count).filter(|i| colour[*i] == 0).collect();
+    let second: Vec<usize> = (0..count).filter(|i| colour[*i] == 1).collect();
+    if first.len() < MIN_SHELL_CLASS || second.len() < MIN_SHELL_CLASS {
+        return None;
+    }
+    // The smaller class goes inside: it is the one whose members are shared, so
+    // the spokes fan outward from it, and an exact tie keeps the class holding
+    // node 0 so the choice stays a function of the input.
+    let (inner, outer) = if second.len() < first.len() {
+        (second, first)
+    } else {
+        (first, second)
+    };
+    Some(Bipartition { inner, outer })
+}
+
 /// Hop distance from `seed`, over undirected links.
 ///
 /// A node the walk cannot reach — a query result carrying an unconnected
@@ -445,6 +548,45 @@ mod tests {
         assert_eq!(count, 4);
         assert_eq!(community[0], community[4]);
         assert_ne!(community[0], community[5]);
+    }
+
+    /// `hubs` inner nodes, `leaves` outer ones, every outer joined to every
+    /// inner — the discovery / licensee shape.
+    fn complete_bipartite(hubs: usize, leaves: usize) -> Vec<(usize, usize)> {
+        (0..hubs)
+            .flat_map(|h| (0..leaves).map(move |l| (h, hubs + l)))
+            .collect()
+    }
+
+    #[test]
+    fn a_two_sided_scene_is_found_and_the_smaller_side_goes_inside() {
+        let part = bipartition(4 + 20, &complete_bipartite(4, 20))
+            .expect("a complete bipartite graph is bipartite");
+        assert_eq!(part.inner, vec![0, 1, 2, 3], "the four hubs go inside");
+        assert_eq!(part.outer.len(), 20);
+    }
+
+    #[test]
+    fn one_odd_cycle_refuses_the_whole_partition() {
+        // The refusal is the point: "these are the two sides" is a claim about
+        // the data, and a near-bipartite graph drawn as bipartite puts members
+        // on the wrong shell with nothing in the picture saying which.
+        let mut links = complete_bipartite(4, 20);
+        links.push((0, 1));
+        assert_eq!(bipartition(24, &links), None);
+    }
+
+    #[test]
+    fn a_forest_and_a_lopsided_split_are_both_refused() {
+        // Every forest is bipartite, and a forest's shape is its branching.
+        let path: Vec<(usize, usize)> = (0..19).map(|i| (i, i + 1)).collect();
+        assert_eq!(bipartition(20, &path), None, "a path is a forest");
+        // Two hubs is a pair with a halo, not a shell.
+        assert_eq!(
+            bipartition(2 + 20, &complete_bipartite(2, 20)),
+            None,
+            "a class of two is not a shell"
+        );
     }
 
     #[test]
