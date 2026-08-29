@@ -5,14 +5,14 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29 (P2 landed): the vertical slice works end to end.**
-> Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend that renders
-> the type-level meta-graph through cosmos.gl, a versioned binary protocol
-> with an exact framing baseline, an axum server on localhost with the
-> frontend embedded, and a gate that builds, lints, tests and **drives** all
-> of it in a headless browser. What does **not** exist yet: Cypher and
-> expansion (P3), the perf harness (P4), the wheel (P5), CI, a remote, a
-> CHANGELOG, and any published artifact. Every command below that
+> **Status, 2026-08-29 (P3 landed): Cypher, bounded expansion and
+> interaction work end to end.** Three crates (`core`, `cli`, `py`), a
+> Vite/TypeScript frontend that renders the type-level meta-graph through
+> cosmos.gl and drills into it, a versioned binary protocol (v2) with an
+> exact framing baseline, an axum server on localhost with the frontend
+> embedded, and a gate that builds, lints, tests and **drives** all of it in
+> a headless browser. What does **not** exist yet: the perf harness (P4),
+> the wheel (P5), CI, a remote, a CHANGELOG, and any published artifact. Every command below that
 > does not exist yet is marked **(planned)**. **A planned command is not a
 > passing gate** — if you run a step and it is absent, say so and fall back;
 > never report green for a check that could not run (`R10` corollary). And
@@ -122,7 +122,9 @@ mode reaches 100M+ nodes and no browser renders that. The entry screen is the
 small, whatever the graph underneath. Drill-down happens through Cypher and
 bounded neighborhood expansion. **The server decides what crosses the wire**,
 and the bound is enforced in core, not in the UI: a guarantee the client
-implements is not a guarantee. A change that lets an unbounded result reach
+implements is not a guarantee. The choke point is
+`core::expand::effective_bound`, and no input reaches the renderer around
+it. A change that lets an unbounded result reach
 the renderer is a defect, not a feature request.
 
 ## Build & test

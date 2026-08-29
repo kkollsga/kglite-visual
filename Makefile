@@ -116,7 +116,10 @@ rust-test:  ## Workspace tests, including the kglite path-dep round trip
 # The generated TypeScript is written by ts-rs from the Rust message types
 # during `cargo test`, so this regenerates and then asserts nothing moved. That
 # catches both halves of the drift: a Rust type edited without regenerating the
-# .ts, and a .ts hand-edited despite the "do not edit" header ts-rs writes.
+# .ts, and a CHANGED generated type — whether from an unregenerated Rust
+# edit or a hand-edit that was staged. (An *unstaged* hand-edit is
+# overwritten by the regeneration above rather than reported, which is the
+# right outcome and not a catch.)
 #
 # Three assertions, because each misses what the others catch:
 #   1. the directory is non-empty     — an export that silently wrote nothing

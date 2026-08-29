@@ -39,14 +39,36 @@ exactly like a backend bug (CLAUDE.md → "Two toolchains, one gate").
 ## 3. Inspect without a browser — the JSON twin
 
 ```bash
-curl -s http://127.0.0.1:$PORT/api/session     # protocol_version, tier, counts
+curl -s http://127.0.0.1:$PORT/api/session     # protocol_version, tier, counts, bounds
 curl -s http://127.0.0.1:$PORT/api/meta-graph  # slots, edges, positions, bounds
 curl -s http://127.0.0.1:$PORT/api/describe    # schema tiers, per-type detail
 ```
 
+The request vocabulary is POST with a JSON body — the same structs the
+WebSocket carries, one named route each so a `curl` line says what it asks for.
+POST rather than GET because several of them mutate the slot space, and a GET
+that appends slots would be re-run by any cache in the path.
+
+```bash
+C='content-type: application/json'
+curl -s -XPOST $B/api/preview        -H "$C" -d '{"slot":0}'
+curl -s -XPOST $B/api/expand         -H "$C" -d '{"slot":0,"relationship":"KNOWS","direction":"out","limit":40}'
+curl -s -XPOST $B/api/collapse       -H "$C" -d '{"slot":0}'
+curl -s -XPOST $B/api/node           -H "$C" -d '{"slot":5}'
+curl -s -XPOST $B/api/cypher         -H "$C" -d '{"query":"MATCH (n) RETURN n LIMIT 3","params":{},"as_graph":false}'
+curl -s -XPOST $B/api/search         -H "$C" -d '{"query":"ada","node_type":"Person","property":"title"}'
+curl -s -XPOST $B/api/property-stats -H "$C" -d '{"node_type":"Person"}'
+```
+
 Same structs as the binary WebSocket protocol — divergence between the twin
-and the wire is a bug, not a nuance. Truncated responses carry
-`{returned, total, truncated}`; report those numbers, don't hide them.
+and the wire is a bug, not a nuance. Every bounded response carries
+`{returned, total, truncated}`; report those numbers, don't hide them. A bad
+request is **400** and names what it refused; a query the engine rejected is
+**422** and carries kglite's own diagnostic verbatim — quote it, don't
+summarise it.
+
+`--query-timeout-secs N` (default 30) raises the wall-clock ceiling for one
+Cypher query. Leave it alone unless a deliberate analytical query needs it.
 
 ## 4. Drive the real frontend
 
@@ -56,9 +78,15 @@ and the wire is a bug, not a nuance. Truncated responses carry
   (cosmos.gl v3 is async-init and draws zero frames when static).
 - Interactive (Claude in Chrome / a headed browser): open the reported URL,
   then read `window.__kglv` — `{protocolVersion, tier, pointCount,
-  linkCount, ready, simRunning, lastMessageSeq, positionsHash,
-  deviceFeatures, error}`. Assert on state; screenshots are artifacts.
-  `error` non-null explains any `ready:false`.
+  linkCount, slotCount, tombstoneCount, ready, simRunning, lastMessageSeq,
+  positionsHash, deviceFeatures, lastSliceKind, compactions, truncation,
+  hoveredSlot, emphasizedCount, highlightedCount, selectedCount,
+  previewRows, queryRows, searchHits, appearanceCandidates,
+  approximateStats, error}`. `pointCount` is *live* points; `slotCount`
+  includes tombstones. `truncation` carries the banner text the user is
+  actually reading, so an assertion checks the words rather than a boolean
+  beside them. Assert on state; screenshots are artifacts. `error` non-null
+  explains any `ready:false`.
 
 ## 5. Stop
 
