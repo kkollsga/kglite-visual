@@ -6,11 +6,25 @@
 //! harness at once, which is why the rule is stated at the top of the file
 //! rather than at the one call site that currently obeys it.
 
+mod api;
+mod assets;
+mod server;
+mod ws;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use kglite_visual_core::{load_graph, GraphSource, LaunchInfo};
+use kglite_visual_core::{load_graph, GraphSource, Session};
+
+/// Stack size for the runtime's threads.
+///
+/// kglite's Cypher parser overflows tokio's 2 MiB default; upstream ships the
+/// number as `QUERY_THREAD_STACK_SIZE` and every embedder is expected to honour
+/// it. P2 runs no Cypher, but the runtime is built once and the failure mode is
+/// a stack overflow inside a blocking task — a crash with no useful message —
+/// so the size is set here rather than left for P3 to discover.
+const QUERY_THREAD_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -35,12 +49,8 @@ struct Cli {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-
     match run(&cli) {
-        Ok(info) => {
-            println!("{}", info.to_json_line());
-            ExitCode::SUCCESS
-        }
+        Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("kglite-visual: {err}");
             ExitCode::FAILURE
@@ -48,30 +58,56 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: &Cli) -> Result<LaunchInfo, kglite_visual_core::CoreError> {
-    // Load before reporting anything: a LaunchInfo for a graph that turned out
-    // to be unreadable would be a URL nothing serves.
+fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
+    // Load before binding: a LaunchInfo for a graph that turned out to be
+    // unreadable would be a URL nothing serves.
     let graph = load_graph(GraphSource::Path(&cli.file))?;
-    let type_count = kglite_visual_core::node_counts_by_type(&graph).len();
-
-    // No server yet — P2 lands axum, the embedded assets and the WebSocket.
-    // Until then the port the JSON reports is the port that was *asked for*,
-    // and that is stated here rather than left for a reader to discover: the
-    // field means "bound port" from P2 onward.
+    let session = Session::open(graph, cli.file.display().to_string());
+    let info = session.info();
     eprintln!(
-        "kglite-visual: loaded {} node type(s); no server yet (P2)",
-        type_count
+        "kglite-visual: {} node types, {} nodes, {} edges; detail tier {}",
+        info.stats.node_type_count,
+        info.stats.node_count,
+        info.stats.edge_count,
+        serde_json::to_string(&info.tier)?
     );
-    if !cli.no_open {
-        eprintln!("kglite-visual: --no-open not set, but there is nothing to open yet");
+
+    let embedded = assets::embedded_file_count();
+    if embedded == 0 {
+        // Not fatal — the JSON API still works, and saying so beats a browser
+        // tab that renders nothing for a reason the server knows and withheld.
+        eprintln!(
+            "kglite-visual: WARNING no frontend assets are embedded in this binary; \
+             only the /api endpoints will answer"
+        );
+    } else {
+        eprintln!("kglite-visual: {embedded} embedded frontend asset(s)");
     }
 
-    Ok(LaunchInfo {
-        url: format!("http://127.0.0.1:{}/", cli.port),
-        port: cli.port,
-        pid: std::process::id(),
-        graph: cli.file.display().to_string(),
-    })
+    let bound = server::bind(session, cli.port, cli.file.display().to_string())?;
+    let url = bound.info.url.clone();
+
+    // THE one stdout line. Printed after the port is resolved and the socket
+    // is listening, so a harness that reads it can connect immediately.
+    println!("{}", bound.info.to_json_line());
+    use std::io::Write as _;
+    std::io::stdout().flush()?;
+
+    if !cli.no_open {
+        // The `webbrowser` crate, not `open`: it knows about WSL, headless
+        // servers and BROWSER=, and it reports failure instead of spawning a
+        // process that silently does nothing.
+        if let Err(err) = webbrowser::open(&url) {
+            eprintln!("kglite-visual: could not open a browser ({err}); visit {url}");
+        }
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(QUERY_THREAD_STACK_BYTES)
+        .build()?
+        .block_on(bound.serve())?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -96,5 +132,18 @@ mod tests {
         let defaults = Cli::parse_from(["kglite-visual", "g.kgl"]);
         assert_eq!(defaults.port, 0, "0 means OS-assigned");
         assert!(!defaults.no_open);
+    }
+
+    #[test]
+    fn the_binary_carries_a_frontend_bundle() {
+        // The packaged-consumer question a source-tree test usually cannot
+        // ask: is the bundle actually *in* here? It can, because rust-embed's
+        // `debug-embed` makes the test binary carry the same assets the
+        // release binary does.
+        assert!(
+            assets::embedded_file_count() > 0,
+            "no embedded assets — build the frontend before the binary \
+             (`make frontend-build`)"
+        );
     }
 }

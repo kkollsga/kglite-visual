@@ -1,0 +1,11 @@
+{
+  "layout": "square-spiral-v1",
+  "note": "Generated from kglite_visual_core::layout. Regenerate with `make fixture`; a diff here is a layout change, and an unexplained one is a defect.",
+  "slots": [
+    {"slot": 0, "name": "Person", "x": -4.6328125, "y": 25.507813},
+    {"slot": 1, "name": "Project", "x": 153.60938, "y": -0.1484375},
+    {"slot": 2, "name": "Skill", "x": 129.57813, "y": 114.703125},
+    {"slot": 3, "name": "City", "x": -32.0, "y": 135.67969},
+    {"slot": 4, "name": "Company", "x": -127.578125, "y": 108.78125}
+  ]
+}

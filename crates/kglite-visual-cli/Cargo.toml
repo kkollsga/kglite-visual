@@ -19,3 +19,10 @@ path = "src/main.rs"
 kglite-visual-core = { version = "0.1.0", path = "../kglite-visual-core" }
 
 clap = { version = "4.6.6", features = ["derive"] }
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net"] }
+rust-embed = { version = "8", features = ["debug-embed", "interpolate-folder-path"] }
+mime_guess = "2.0.5"
+webbrowser = "1.2.4"
+serde_json.workspace = true
+futures-util = "0.3.34"

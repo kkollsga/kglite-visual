@@ -28,9 +28,9 @@ NPM ?= npm
 
 .PHONY: help gate lint self-test clean-build \
         check-dev-docs check-skill-mirrors check-bans check-build-dirs \
-        check-generated-ts sync-agents \
-        rust-fmt rust-clippy rust-test frontend-install frontend-typecheck \
-        frontend-build frontend-audit
+        check-generated-ts check-protocol-baseline check-bundle sync-agents \
+        rust-fmt rust-clippy rust-test cli-build fixture e2e \
+        frontend-install frontend-typecheck frontend-build frontend-audit
 
 help:  ## List the targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | \
@@ -44,16 +44,23 @@ help:  ## List the targets
 # Order is deliberate — the cheap doc/config checks and the two structural bans
 # run before anything that compiles, so a licence violation or a stray global
 # allocator is reported in under a second instead of after a cargo build.
+# The frontend half runs FIRST, and that is load-bearing rather than
+# aesthetic: `frontend/dist` is baked into the CLI binary by rust-embed, so
+# every cargo step downstream of it compiles against whatever bundle is on
+# disk. Building the bundle, checking it is newer than its sources, and only
+# then compiling the binary is the order that makes the stale-bundle trap
+# (CLAUDE.md → "Two toolchains, one gate") unreachable instead of merely
+# documented.
 gate: check-dev-docs check-skill-mirrors check-bans check-build-dirs \
-      rust-fmt rust-clippy rust-test check-generated-ts \
-      frontend-typecheck frontend-build frontend-audit  ## Local pre-push gate (runs what exists; reports the rest ABSENT)
+      frontend-typecheck frontend-build check-bundle \
+      rust-fmt rust-clippy rust-test check-generated-ts check-protocol-baseline \
+      e2e frontend-audit  ## Local pre-push gate (runs what exists; reports the rest ABSENT)
 	@echo ""
 	@echo "gate: the following steps do not exist yet and were NOT run."
 	@echo "gate: an absent step is not a pass (doctrine R10)."
 	@echo "  ABSENT  pytest                     (no wheel)"
 	@echo "  ABSENT  packaged-consumer check    (nothing is packaged)"
-	@echo "  ABSENT  browser e2e smoke          (nothing renders yet)"
-	@echo "gate: 11 checks ran, 3 absent."
+	@echo "gate: 14 checks ran, 2 absent."
 
 lint: check-dev-docs check-skill-mirrors check-bans rust-fmt rust-clippy frontend-typecheck  ## Static checks only — no test execution
 
@@ -120,7 +127,7 @@ rust-test:  ## Workspace tests, including the kglite path-dep round trip
 #      against the index rather than HEAD so a correctly-staged regeneration
 #      passes, including in a first commit.
 check-generated-ts:  ## FAIL if frontend/src/generated/ is stale or hand-edited
-	@$(CARGO) test -p kglite-visual-core --quiet >/dev/null
+	@$(CARGO) test -p kglite-visual-core --quiet
 	@if [ -z "$$(ls -A frontend/src/generated 2>/dev/null)" ]; then \
 	  echo "check-generated-ts: FAIL — frontend/src/generated/ is empty; ts-rs exported nothing" >&2; \
 	  exit 1; \
@@ -138,6 +145,63 @@ check-generated-ts:  ## FAIL if frontend/src/generated/ is stale or hand-edited
 	  exit 1; \
 	fi
 	@echo "check-generated-ts: OK"
+
+# The two-toolchain seam. `--freshness` fails when the embedded bundle is
+# older than the sources that produce it; the same script's --resolve-binary
+# mode is what the e2e harness uses to pick a binary, so neither half can
+# quietly settle for a stale artifact.
+check-bundle:  ## FAIL if frontend/dist is older than frontend/src
+	@$(PYTHON) scripts/check_bundle.py --freshness
+
+# The framing baseline is EXACT (test-plan L2). Same shape as
+# check-generated-ts: `cargo test` rewrites it, and this asserts nothing moved.
+# A red here after a deliberate protocol change is regenerated in the same
+# commit, with the version bumped and the reason stated — never to silence a
+# diff nobody can explain (CLAUDE.md → "Gate honesty").
+check-protocol-baseline:  ## FAIL if the committed protocol framing baseline moved
+	@$(CARGO) test -p kglite-visual-core --quiet
+	@if [ -z "$$(ls -A crates/kglite-visual-core/tests/baselines 2>/dev/null)" ]; then \
+	  echo "check-protocol-baseline: FAIL — the baseline directory is empty; the generator wrote nothing" >&2; \
+	  exit 1; \
+	fi
+	@untracked="$$(git ls-files --others --exclude-standard -- crates/kglite-visual-core/tests/baselines)"; \
+	if [ -n "$$untracked" ]; then \
+	  echo "check-protocol-baseline: FAIL — a baseline file is untracked, so drift is invisible:" >&2; \
+	  echo "$$untracked" >&2; \
+	  exit 1; \
+	fi
+	@if ! git diff --quiet -- crates/kglite-visual-core/tests/baselines; then \
+	  echo "check-protocol-baseline: FAIL — the wire format changed:" >&2; \
+	  git diff -- crates/kglite-visual-core/tests/baselines >&2; \
+	  echo "  If that was deliberate: bump PROTOCOL_VERSION, regenerate, and say why in the commit." >&2; \
+	  exit 1; \
+	fi
+	@echo "check-protocol-baseline: OK"
+
+cli-build:  ## Build the CLI binary the e2e harness drives
+	@$(CARGO) build -p kglite-visual-cli
+
+# L3. Launches the real binary, parses its stdout contract, drives headless
+# Chromium over SwiftShader and asserts on window.__kglv. Depends on cli-build
+# because a harness that silently tests last week's binary is worse than no
+# harness.
+e2e: cli-build  ## Browser end-to-end smoke (Playwright + SwiftShader)
+	@cd frontend && npx playwright test
+
+# Regenerate the committed fixture, then prove it is byte-stable. The second
+# half is the point: a fixture that changed on every regeneration could not be
+# an exact baseline, and nothing else in the tree would notice.
+fixture:  ## Regenerate crates/kglite-visual-core/tests/fixtures/ (seeded, byte-stable)
+	@$(CARGO) run -q -p kglite-visual-core --example make_fixture
+	@cp crates/kglite-visual-core/tests/fixtures/meta.kgl /tmp/kglv-fixture-once.kgl
+	@cp crates/kglite-visual-core/tests/fixtures/meta.positions.json /tmp/kglv-positions-once.json
+	@$(CARGO) run -q -p kglite-visual-core --example make_fixture
+	@cmp /tmp/kglv-fixture-once.kgl crates/kglite-visual-core/tests/fixtures/meta.kgl \
+	  || { echo "fixture: FAIL — regeneration is not byte-stable" >&2; exit 1; }
+	@cmp /tmp/kglv-positions-once.json crates/kglite-visual-core/tests/fixtures/meta.positions.json \
+	  || { echo "fixture: FAIL — the positions baseline is not byte-stable" >&2; exit 1; }
+	@rm -f /tmp/kglv-fixture-once.kgl /tmp/kglv-positions-once.json
+	@echo "fixture: OK — regenerated twice, byte-identical"
 
 frontend-install:  ## Install frontend deps from the committed lockfile
 	@cd frontend && $(NPM) ci
@@ -169,3 +233,4 @@ self-test:  ## Prove the gate's checks can actually fail
 	@$(PYTHON) scripts/check_dev_docs.py --self-test
 	@$(PYTHON) scripts/check_skill_mirrors.py --self-test
 	@$(PYTHON) scripts/check_bans.py --self-test
+	@$(PYTHON) scripts/check_bundle.py --self-test

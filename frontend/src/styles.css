@@ -1,0 +1,132 @@
+/* Layout and chrome. The renderer owns the canvas; everything here sits on
+   top of it, so every overlay is pointer-events:none unless it needs clicks —
+   an overlay that swallows a drag makes the graph feel broken. */
+
+.kglv-root {
+  position: absolute;
+  inset: 0;
+}
+
+.kglv-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.kglv-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.kglv-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgb(13 17 23 / 78%);
+  border: 1px solid rgb(139 148 158 / 35%);
+  white-space: nowrap;
+  font: 12px/1.4 ui-sans-serif, system-ui, sans-serif;
+  color: #e6edf3;
+}
+
+.kglv-label-name {
+  font-weight: 600;
+}
+
+.kglv-label-count {
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+}
+
+.kglv-badge {
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #1f6feb;
+  color: #fff;
+}
+
+.kglv-badge-geo,
+.kglv-badge-loc {
+  background: #2ea043;
+}
+
+.kglv-badge-ts {
+  background: #9e6a03;
+}
+
+.kglv-badge-vec {
+  background: #8957e5;
+}
+
+.kglv-status {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgb(13 17 23 / 85%);
+  border: 1px solid rgb(139 148 158 / 30%);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, monospace;
+  color: #c9d1d9;
+  pointer-events: none;
+  max-width: 42ch;
+}
+
+.kglv-status strong {
+  color: #e6edf3;
+}
+
+.kglv-warn {
+  color: #f0883e;
+}
+
+.kglv-error {
+  color: #ff7b72;
+}
+
+.kglv-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kglv-panel-inner {
+  min-width: 320px;
+  padding: 24px 28px;
+  border-radius: 8px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  font: 13px/1.8 ui-sans-serif, system-ui, sans-serif;
+  color: #c9d1d9;
+}
+
+.kglv-panel-inner h1 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: #e6edf3;
+}
+
+.kglv-panel-inner dl {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 24px;
+  margin: 0;
+}
+
+.kglv-panel-inner dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
