@@ -67,6 +67,24 @@ here. The first release promotes this block whole.
   shows — "showing 400 of 11,292 nodes and 748 of up to 25,160 links" — is
   drawn into the picture, because an image travels without the response that
   produced it.
+- **An agent can drive the window you are looking at.** The running server now
+  speaks the Model Context Protocol at `/mcp` — the URL is printed on the same
+  stdout line as everything else, so attaching an agent is pointing it at a
+  URL, with no second process to start and nothing to install. Nine tools: read
+  what is on screen, put a Cypher result into it, expand or collapse a
+  selection, highlight things, zoom to them, change how they are coloured and
+  sized, reset, and draw a picture of the current view. The tools are for
+  *navigating* a graph together; querying one is still the graph's own MCP
+  server's job.
+- **The picture follows, live.** Whoever changes the view — you, an agent, a
+  `curl` — every connected window sees the change immediately. Watching an
+  agent expand a type and zoom to what it found is the point of the feature,
+  not a side effect of it.
+- **An agent knows what it cannot see.** The layout runs on your GPU and the
+  server never learns where the points ended up, so a rendered image of your
+  view has the same nodes and links in a different arrangement. That caveat is
+  written into the tool descriptions and returned beside every render, so an
+  agent describes what is in your view rather than where it is on your screen.
 
 ### Changed
 
@@ -86,6 +104,14 @@ here. The first release promotes this block whole.
   those that won their patch of screen.
 - **The graph no longer draws underneath the side panels**, where it could not
   be seen, clicked or labelled.
+- **The launch line carries one more key.** The single JSON line on stdout —
+  and the dict `show()` returns — now includes `mcp`, the MCP endpoint's URL,
+  alongside `url`, `port`, `pid` and `graph`. Anything reading the four
+  existing keys by name is unaffected.
+- **A `curl` against the JSON API no longer moves the view in secret.** Those
+  endpoints have always changed what the server is showing; the browser was
+  never told, and drew a stale picture until something else happened to
+  refresh it.
 
 - **The engine is `kglite` 0.16.14**, exactly pinned. That release fixes two
   defects this project found and reported while building against 0.16.13, and
@@ -103,5 +129,13 @@ here. The first release promotes this block whole.
   quietly, with no repair note to explain them. This project shipped a
   load-time repair for it first; that repair is gone, because the file no
   longer arrives broken.
+- **An expansion that matched nothing said the wrong thing.** Expanding a type
+  over a relationship none of its nodes has reported "showing 0 of 144 nodes" —
+  the wording of a size limit being hit — when in truth the walk found nothing
+  at all. The two have opposite remedies: one asks you to raise a limit, the
+  other to fix a relationship name. It now reports an empty answer as empty.
+- **Collapsing a selection clears it.** Nodes removed from the view stayed in
+  its highlight and selection sets, so the counts the viewer reports described
+  nodes that were no longer on screen.
 
 [Unreleased]: https://github.com/kkollsga/kglite-visual/commits/main
