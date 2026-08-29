@@ -163,6 +163,11 @@ const NUDGES: [(i64, i64); 10] = [
     (1, 1),
 ];
 
+/// Height of a drawn chip, in pixels. Mirrors `CHIP_HEIGHT` in [`super::svg`]
+/// and `.kglv-label`'s box in `frontend/src/styles.css`. It is *smaller* than
+/// [`CELL_HEIGHT`], which is the whole reason [`rows_for`] exists.
+const CHIP_HEIGHT: f64 = 20.0;
+
 fn columns_for(x: f64, width: f64) -> (i64, i64) {
     (
         ((x - width / 2.0) / CELL_WIDTH).floor() as i64,
@@ -170,13 +175,41 @@ fn columns_for(x: f64, width: f64) -> (i64, i64) {
     )
 }
 
-fn is_free(taken: &std::collections::HashSet<(i64, i64)>, from: i64, to: i64, row: i64) -> bool {
-    (from..=to).all(|column| !taken.contains(&(column, row)))
+/// Rows a chip drawn at `y` covers.
+///
+/// **The P4b fix's other axis, and the same defect** (P11 round 4). A chip is
+/// 20 px tall and a row is 30, so two chips 15 px apart in y land in *different*
+/// rows: the grid seats both, and the emitter draws them on top of each other.
+/// Measured on round 3's portfolio, that is where nearly all the overlap came
+/// from — 26 of 53 chips in the bipartite render and 28 of 92 in the licensee
+/// render overlapped another chip, in a mode with no stacking policy anywhere
+/// near it, and every such pair was in an adjacent row. A chip now reserves
+/// every row it covers, exactly as [`columns_for`] already makes it reserve
+/// every column.
+///
+/// The epsilon keeps a chip whose bottom edge lands exactly on a row boundary
+/// out of the row below, which it touches with zero area.
+fn rows_for(y: f64) -> (i64, i64) {
+    (
+        (y / CELL_HEIGHT).floor() as i64,
+        ((y + CHIP_HEIGHT - 1e-9) / CELL_HEIGHT).floor() as i64,
+    )
 }
 
-fn claim(taken: &mut std::collections::HashSet<(i64, i64)>, from: i64, to: i64, row: i64) {
+fn is_free(
+    taken: &std::collections::HashSet<(i64, i64)>,
+    from: i64,
+    to: i64,
+    rows: (i64, i64),
+) -> bool {
+    (from..=to).all(|column| (rows.0..=rows.1).all(|row| !taken.contains(&(column, row))))
+}
+
+fn claim(taken: &mut std::collections::HashSet<(i64, i64)>, from: i64, to: i64, rows: (i64, i64)) {
     for column in from..=to {
-        taken.insert((column, row));
+        for row in rows.0..=rows.1 {
+            taken.insert((column, row));
+        }
     }
 }
 
@@ -224,9 +257,9 @@ pub fn choose(specs: &[LabelSpec], place_all: bool, budget: usize) -> Vec<Placed
             break;
         }
         let (from, to) = columns_for(spec.x, estimate_width(spec));
-        let row = (spec.y / CELL_HEIGHT).floor() as i64;
-        if is_free(&taken, from, to, row) {
-            claim(&mut taken, from, to, row);
+        let rows = rows_for(spec.y);
+        if is_free(&taken, from, to, rows) {
+            claim(&mut taken, from, to, rows);
             placed.push(PlacedLabel {
                 slot: spec.slot,
                 x: spec.x,
@@ -244,7 +277,7 @@ pub fn choose(specs: &[LabelSpec], place_all: bool, budget: usize) -> Vec<Placed
         }
         let nudge = NUDGES
             .iter()
-            .find(|(dx, dy)| is_free(&taken, from + dx, to + dx, row + dy));
+            .find(|(dx, dy)| is_free(&taken, from + dx, to + dx, (rows.0 + dy, rows.1 + dy)));
         let Some((dx, dy)) = nudge else {
             // Every neighbour is spoken for. Drawing it anyway is the
             // deliberate choice: an unnamed type node carries no information at
@@ -256,7 +289,7 @@ pub fn choose(specs: &[LabelSpec], place_all: bool, budget: usize) -> Vec<Placed
             });
             continue;
         };
-        claim(&mut taken, from + dx, to + dx, row + dy);
+        claim(&mut taken, from + dx, to + dx, (rows.0 + dy, rows.1 + dy));
         placed.push(PlacedLabel {
             slot: spec.slot,
             x: spec.x + *dx as f64 * CELL_WIDTH,
@@ -329,9 +362,35 @@ mod tests {
         let loser = placed.iter().find(|p| p.slot == 0).expect("slot 0 placed");
         assert_eq!(
             (loser.x, loser.y),
-            (60.0, 15.0 - CELL_HEIGHT),
-            "the first nudge is one row up"
+            (60.0, 15.0 - 2.0 * CELL_HEIGHT),
+            "the first nudge with room for a whole chip is two rows up"
         );
+    }
+
+    #[test]
+    fn a_tall_label_reserves_every_row_it_covers() {
+        // The P4b fix's other axis. Two chips 15 px apart in y are in different
+        // 30 px rows and 20 px tall, so before `rows_for` the grid seated both
+        // and the emitter drew them on top of each other — which is where round
+        // 3's overlap count came from, in every mode, meta-graph or not.
+        let low = spec(0, 1_000, 60.0, 29.0);
+        let high = spec(1, 1, 60.0, 44.0);
+        assert_ne!(
+            (low.y / CELL_HEIGHT).floor(),
+            (high.y / CELL_HEIGHT).floor(),
+            "the two must be in different rows, or this tests nothing"
+        );
+        assert!(
+            high.y < low.y + CHIP_HEIGHT,
+            "…and they must genuinely overlap on the canvas"
+        );
+        let placed = choose(&[low, high], false, usize::MAX);
+        assert_eq!(
+            placed.len(),
+            1,
+            "the second chip would have been drawn on the first"
+        );
+        assert_eq!(placed[0].slot, 0);
     }
 
     #[test]

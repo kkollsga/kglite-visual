@@ -93,20 +93,57 @@ function estimateWidth(spec: LabelSpec): number {
   return 14 + spec.text.length * 6.9 + count + spec.badges.length * 34
 }
 
+/**
+ * A chip's own height, in pixels — `.kglv-label`'s box in `styles.css`, and
+ * **smaller than `CELL_HEIGHT`**, which is what makes `rowsFor` necessary.
+ *
+ * **Ported to Rust** as `CHIP_HEIGHT` in
+ * `crates/kglite-visual-core/src/render/labels.rs`.
+ */
+const CHIP_HEIGHT = 20
+
 /** The column range a label centred on `x` covers, inclusive. */
 function columnsFor(x: number, width: number): [number, number] {
   return [Math.floor((x - width / 2) / CELL_WIDTH), Math.floor((x + width / 2) / CELL_WIDTH)]
 }
 
-function isFree(taken: ReadonlySet<string>, from: number, to: number, row: number): boolean {
+/**
+ * The row range a chip whose top is at `y` covers, inclusive.
+ *
+ * **Ported to Rust** as `rowsFor` in
+ * `crates/kglite-visual-core/src/render/labels.rs`, where the defect was
+ * measured: a chip is 20 px tall and a row is 30, so two chips 15 px apart in y
+ * are in *different* rows and the grid seats both — on top of each other. The
+ * headless renderer's round-3 portfolio had 26 of 53 chips overlapping another
+ * chip for exactly this reason, and the overlay resolves collisions with the
+ * same arithmetic. A chip reserves every row it covers, as `columnsFor`
+ * already makes it reserve every column.
+ *
+ * The epsilon keeps a chip whose bottom edge lands exactly on a row boundary
+ * out of the row below, which it touches with zero area.
+ */
+function rowsFor(y: number): [number, number] {
+  return [Math.floor(y / CELL_HEIGHT), Math.floor((y + CHIP_HEIGHT - 1e-9) / CELL_HEIGHT)]
+}
+
+function isFree(
+  taken: ReadonlySet<string>,
+  from: number,
+  to: number,
+  rows: readonly [number, number],
+): boolean {
   for (let column = from; column <= to; column += 1) {
-    if (taken.has(`${column}:${row}`)) return false
+    for (let row = rows[0]; row <= rows[1]; row += 1) {
+      if (taken.has(`${column}:${row}`)) return false
+    }
   }
   return true
 }
 
-function claim(taken: Set<string>, from: number, to: number, row: number): void {
-  for (let column = from; column <= to; column += 1) taken.add(`${column}:${row}`)
+function claim(taken: Set<string>, from: number, to: number, rows: readonly [number, number]): void {
+  for (let column = from; column <= to; column += 1) {
+    for (let row = rows[0]; row <= rows[1]; row += 1) taken.add(`${column}:${row}`)
+  }
 }
 
 /**
@@ -188,14 +225,16 @@ export function chooseLabels(
   const placed: Placed[] = []
   for (const candidate of ordered) {
     const [from, to] = columnsFor(candidate.x, candidate.width ?? CELL_WIDTH)
-    const row = Math.floor(candidate.y / CELL_HEIGHT)
-    if (isFree(taken, from, to, row)) {
-      claim(taken, from, to, row)
+    const rows = rowsFor(candidate.y)
+    if (isFree(taken, from, to, rows)) {
+      claim(taken, from, to, rows)
       placed.push({ slot: candidate.slot, x: candidate.x, y: candidate.y })
       continue
     }
     if (!placeAll && candidate.pinned !== true) continue
-    const nudge = NUDGES.find(([dx, dy]) => isFree(taken, from + dx, to + dx, row + dy))
+    const nudge = NUDGES.find(([dx, dy]) =>
+      isFree(taken, from + dx, to + dx, [rows[0] + dy, rows[1] + dy]),
+    )
     if (nudge === undefined) {
       // Every neighbour is spoken for. Drawing it anyway is the deliberate
       // choice: an unnamed type node carries no information at all.
@@ -203,7 +242,7 @@ export function chooseLabels(
       continue
     }
     const [dx, dy] = nudge
-    claim(taken, from + dx, to + dx, row + dy)
+    claim(taken, from + dx, to + dx, [rows[0] + dy, rows[1] + dy])
     placed.push({
       slot: candidate.slot,
       x: candidate.x + dx * CELL_WIDTH,
