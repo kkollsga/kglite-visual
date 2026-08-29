@@ -148,7 +148,7 @@ def test_the_console_script_is_the_cli(fixture_path):
     try:
         line = process.stdout.readline()
         info = json.loads(line)
-        assert sorted(info) == ["graph", "pid", "port", "url"]
+        assert sorted(info) == ["graph", "mcp", "pid", "port", "url"]
         assert info["port"] > 0
         assert port_is_listening(info["port"])
     finally:

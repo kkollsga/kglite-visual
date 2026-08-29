@@ -14,13 +14,21 @@
 //! agent handed a picture has no status bar to read, so a truncated render that
 //! did not say so would be the D5 failure in its purest form.
 //!
-//! **A render never touches the live view.** It opens a private session over
-//! the same `Arc<DirGraph>` — the graph is `Send + Sync` and read-only, so this
-//! costs a meta-graph computation and no I/O. The alternative, running the
-//! request against the caller's session, would make `POST /api/render` mutate
-//! the slot space of whatever browser tab happens to be attached: an image
-//! request is a question, and a question that moves the user's screen is a bug.
-//! (P10's "render the live view" is a *different* request, and it will say so.)
+//! **A render of a *request* never touches the live view.** It opens a private
+//! session over the same `Arc<DirGraph>` — the graph is `Send + Sync` and
+//! read-only, so this costs a meta-graph computation and no I/O. The
+//! alternative, running the request against the caller's session, would make
+//! `POST /api/render` mutate the slot space of whatever browser tab happens to
+//! be attached: an image request is a question, and a question that moves the
+//! user's screen is a bug.
+//!
+//! **[`RenderSource::LiveView`] is the one that reads that session** (P10), and
+//! it still does not move it: it draws the slots that are already there. Same
+//! content as the user's screen, different geometry — the layout below is a
+//! seeded Fruchterman-Reingold and the user's is cosmos.gl's GPU simulation, so
+//! the two will never coincide by accident. [`crate::session::GEOMETRY_CAVEAT`]
+//! is the sentence every face repeats about that, and it is one constant so it
+//! cannot be repeated differently.
 
 pub mod encoding;
 pub mod labels;
@@ -38,7 +46,7 @@ use crate::meta_graph::MetaGraphResponse;
 use crate::query::QueryConfig;
 use crate::request::{CypherRequest, EdgeDirection, ExpandRequest, Request};
 use crate::session::{GraphSlice, Response, Session};
-use crate::view::SliceKind;
+use crate::view::{SliceKind, SlotEntry};
 
 pub use encoding::Theme;
 
@@ -88,6 +96,14 @@ pub enum RenderSource {
     /// learned a slot from. The name is resolved against the private session's
     /// own meta-graph.
     Expand(ExpandSource),
+    /// **The live view itself** — whatever is on the shared screen right now,
+    /// laid out server-side (P10).
+    ///
+    /// The only source that reads the caller's session rather than a private
+    /// one, and the only one whose answer changes without the request changing.
+    /// It draws; it never mutates. Reachable only through
+    /// [`render_for`] — [`render`] has no session and says so.
+    LiveView,
 }
 
 /// The expansion half of a render request.
@@ -243,14 +259,45 @@ pub fn render(
     config: QueryConfig,
     request: &RenderRequest,
 ) -> Result<Rendered, CoreError> {
-    let width = check_dimension(request.width, "width")?;
-    let height = check_dimension(request.height, "height")?;
-
+    if matches!(request.source, RenderSource::LiveView) {
+        return Err(CoreError::Request(
+            "`live-view` draws the view of a RUNNING session, and this entry point \
+             opens a private one that has no live view to draw. Ask the running \
+             server instead: `POST /api/render` on its URL, or the MCP `render` tool."
+                .to_string(),
+        ));
+    }
     // The private session: see the module doc. `Session::open_with` computes the
     // meta-graph once, which is O(#types) plus a read of the connectivity cache
     // the `.kgl` already carries.
     let session = Session::open_with(Arc::clone(graph), source_name.to_string(), config);
-    let scene = build_scene(&session, request)?;
+    draw(&session, request)
+}
+
+/// Draw a request against a running server's session.
+///
+/// **The one place the privacy rule is decided.** `live-view` reads that
+/// session; every other source gets a private one, so a `POST /api/render` for
+/// a Cypher result cannot append slots to the screen a human is watching. A
+/// second call site making this choice again would eventually make it
+/// differently.
+pub fn render_for(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreError> {
+    match request.source {
+        RenderSource::LiveView => draw(session, request),
+        RenderSource::Meta | RenderSource::Cypher(_) | RenderSource::Expand(_) => render(
+            session.graph(),
+            &session.info().graph,
+            session.config(),
+            request,
+        ),
+    }
+}
+
+fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreError> {
+    let width = check_dimension(request.width, "width")?;
+    let height = check_dimension(request.height, "height")?;
+
+    let scene = build_scene(session, request)?;
     if scene.nodes.is_empty() {
         // An empty canvas is the worst possible answer here: it is
         // indistinguishable from a rendering failure, and an agent handed one
@@ -342,7 +389,175 @@ fn build_scene(session: &Session, request: &RenderRequest) -> Result<Scene, Core
             };
             Ok(slice_scene(session, &slice))
         }
+        RenderSource::LiveView => Ok(live_scene(session)),
     }
+}
+
+/// Everything currently in a running session's slot space, as a scene (P10).
+///
+/// Unlike [`slice_scene`], this keeps the **type nodes**: they are on the
+/// user's screen, and an image of the live view that dropped them would not be
+/// a picture of what the user is looking at, which is the entire request. That
+/// is also why it is a third builder rather than a flag on the second — the two
+/// answer different questions, and the "drop the meta-graph" decision is right
+/// for exactly one of them.
+///
+/// **Content, not geometry.** The positions here come from this module's own
+/// seeded layout, never from the client. See
+/// [`crate::session::GEOMETRY_CAVEAT`].
+fn live_scene(session: &Session) -> Scene {
+    let view = session.view_read();
+    let meta_by_name: std::collections::HashMap<&str, &crate::meta_graph::MetaTypeNode> = session
+        .meta_graph()
+        .meta
+        .nodes
+        .iter()
+        .map(|node| (node.name.as_str(), node))
+        .collect();
+
+    // The size ramp is relative to the largest type ON SCREEN, mirroring
+    // `maxTypeCount` in `frontend/src/main.ts`: a view drilled into one small
+    // type must not draw it as a dot because some other type it is no longer
+    // showing is larger.
+    let largest = view
+        .live_entries()
+        .filter_map(|(_, entry)| match entry {
+            SlotEntry::Type { name } => meta_by_name.get(name.as_str()).map(|node| node.count),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let mut nodes: Vec<SceneNode> = Vec::new();
+    let mut index_of: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut instance_count = 0usize;
+    for (slot, entry) in view.live_entries() {
+        let node = match entry {
+            SlotEntry::Type { name } => {
+                let meta = meta_by_name.get(name.as_str());
+                let count = meta.map(|m| m.count).unwrap_or(0);
+                let capabilities = meta.map(|m| m.capabilities.clone()).unwrap_or_default();
+                let supporting = meta.is_some_and(|m| m.supporting);
+                SceneNode {
+                    slot,
+                    text: name.clone(),
+                    weight: u64::from(count),
+                    radius: encoding::type_radius(count, largest, supporting),
+                    color: encoding::base_color(true, !capabilities.is_empty(), supporting),
+                    badges: capabilities,
+                    dimmed: supporting,
+                }
+            }
+            SlotEntry::Node {
+                node_id,
+                node_type,
+                title,
+            } => {
+                instance_count += 1;
+                SceneNode {
+                    slot,
+                    // The same display fallback the client uses
+                    // (`View.applySlice` in `frontend/src/view.ts`): the stored
+                    // title is the empty string the graph actually held, and
+                    // the substitute is made here rather than persisted.
+                    text: if title.is_empty() {
+                        format!("{node_type} {node_id}")
+                    } else {
+                        title.clone()
+                    },
+                    weight: 1,
+                    radius: encoding::INSTANCE_RADIUS_PX,
+                    color: encoding::base_color(false, false, false),
+                    badges: Vec::new(),
+                    dimmed: false,
+                }
+            }
+            SlotEntry::Tombstone => unreachable!("live_entries skips tombstones"),
+        };
+        index_of.insert(slot, nodes.len());
+        nodes.push(node);
+    }
+
+    // Meta links carry a count and take the width ramp; instance links stand
+    // for one edge each and take the floor. Same two rules as `linkWidths` in
+    // `frontend/src/main.ts`, applied to one mixed list because the live view
+    // is the one place both kinds are on screen together.
+    let mut pair_edges: std::collections::HashMap<(u32, u32), u64> =
+        std::collections::HashMap::new();
+    for edge in view.edges().iter().filter(|e| e.meta) {
+        *pair_edges
+            .entry(pair_key(edge.source_slot, edge.target_slot))
+            .or_insert(0) += u64::from(meta_edge_count(session, edge));
+    }
+    let heaviest = pair_edges.values().copied().max().unwrap_or(1).max(1);
+
+    let links: Vec<SceneLink> = view
+        .edges()
+        .iter()
+        .filter_map(|edge| {
+            let width = if edge.meta {
+                let count = pair_edges
+                    .get(&pair_key(edge.source_slot, edge.target_slot))
+                    .copied()
+                    .unwrap_or(0);
+                encoding::link_width(clamp_u32(count), clamp_u32(heaviest))
+            } else {
+                encoding::LINK_MIN_PX
+            };
+            Some(SceneLink {
+                source: *index_of.get(&edge.source_slot)?,
+                target: *index_of.get(&edge.target_slot)?,
+                width,
+            })
+        })
+        .collect();
+
+    let state = session.view_state();
+    let mut status = status_lines(session, nodes.len(), links.len(), "slots drawn");
+    if state.tombstone_count > 0 {
+        status.push(format!(
+            "{} collapsed",
+            encoding::group_thousands(u64::from(state.tombstone_count))
+        ));
+    }
+
+    Scene {
+        status,
+        nodes,
+        links,
+        // The banner the app is showing right now, verbatim — not one recomputed
+        // here. An image of the live view that disagreed with the status bar
+        // beside it would be worse than one with no banner at all.
+        banners: state
+            .last_slice
+            .and_then(|last| last.banner)
+            .into_iter()
+            .collect(),
+        // The same condition `isMetaGraphOnly` tests in `frontend/src/main.ts`:
+        // a view that is nothing but type nodes is a picture OF its labels.
+        place_all_labels: instance_count == 0,
+    }
+}
+
+/// The edge count a meta link stands for, from the meta-graph it came out of.
+///
+/// The view's own `ViewEdge` does not carry it — the count is meta-graph
+/// metadata, and the slot space deliberately holds identity rather than
+/// weight.
+fn meta_edge_count(session: &Session, edge: &crate::view::ViewEdge) -> u32 {
+    session
+        .meta_graph()
+        .meta
+        .edges
+        .iter()
+        .find(|e| {
+            e.source_slot == edge.source_slot
+                && e.target_slot == edge.target_slot
+                && e.name == edge.name
+        })
+        .map(|e| e.count)
+        .unwrap_or(0)
 }
 
 /// The entry screen, as a scene.

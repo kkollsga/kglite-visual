@@ -8,6 +8,7 @@ use axum::Router;
 use kglite_visual_core::{LaunchInfo, Session};
 
 use crate::broadcast::AppState;
+use crate::mcp::{self, MCP_PATH};
 use crate::{api, assets, ws};
 
 /// A bound-but-not-yet-serving server.
@@ -41,6 +42,7 @@ pub fn bind(session: Session, requested_port: u16, graph: String) -> std::io::Re
             port,
             pid: std::process::id(),
             graph,
+            mcp: format!("http://127.0.0.1:{port}{MCP_PATH}"),
         },
     })
 }
@@ -80,6 +82,7 @@ fn router(state: AppState) -> Router {
         .route("/api/meta-graph", get(api::meta_graph))
         .route("/api/session", get(api::session_info))
         .route("/api/describe", get(api::describe))
+        .route("/api/view-state", get(api::view_state))
         // The request vocabulary, one named route each so a `curl` line says
         // what it is asking for. POST rather than GET because every one of
         // them carries a body and several of them mutate the slot space —
@@ -95,6 +98,7 @@ fn router(state: AppState) -> Router {
         // The three steering commands (D14). They mutate nothing and answer
         // with the size of the audience that heard them, so a caller learns
         // whether anybody is actually watching.
+        .route("/api/reset", post(api::reset))
         .route("/api/focus", post(api::focus))
         .route("/api/highlight", post(api::highlight))
         .route("/api/appearance", post(api::appearance))
@@ -107,6 +111,15 @@ fn router(state: AppState) -> Router {
         // through `any` keeps the 405 for a mistaken POST out of the upgrade
         // path, where it would surface as an opaque handshake failure.
         .route("/ws", any(ws::upgrade))
+        // MCP, served by this server rather than beside it (D14). A
+        // `route_service` rather than a nest: the path is exact, and
+        // `StreamableHttpService` dispatches on HTTP method alone, so a nested
+        // prefix would accept `/mcp/anything` and answer identically.
+        //
+        // Registered before `with_state` because the service carries its own
+        // clone of the state and is state-independent as far as the router is
+        // concerned.
+        .route_service(MCP_PATH, mcp::service(state.clone()))
         .with_state(state)
         // Everything else is the embedded frontend. Registered as a fallback,
         // not a nested route, so the API paths above cannot be shadowed by an

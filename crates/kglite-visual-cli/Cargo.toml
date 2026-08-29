@@ -20,13 +20,43 @@ kglite-visual-core = { version = "0.1.0", path = "../kglite-visual-core" }
 
 clap = { version = "4.6.6", features = ["derive"] }
 axum = { version = "0.8", features = ["ws"] }
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net"] }
+# `sync` and `time` for the broadcast bus and rmcp's session bookkeeping; rmcp
+# spawns onto whatever runtime it finds, so the multi-thread flavour is the
+# server's, not its.
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
 rust-embed = { version = "8", features = ["debug-embed", "interpolate-folder-path"] }
 mime_guess = "2.0.5"
 webbrowser = "1.2.4"
 serde.workspace = true
 serde_json.workspace = true
 futures-util = "0.3.34"
+
+# The MCP face (D14). `transport-streamable-http-server` is the one that
+# matters and it EXISTS in this version — verified against the vendored source,
+# not the README: it pulls `server-side-http` -> `tower`, and
+# `StreamableHttpService` implements `tower_service::Service` with
+# `Error = Infallible`, which is exactly what axum's `route_service` takes. So
+# MCP is a route on the server that is already running, not a second process.
+#
+# 3.1.1 is the estate's own floor — `KGLite/crates/kglite-mcp-server` declares
+# the same string — so the two servers move together. That server serves stdio;
+# nothing in the estate had mounted this transport before, which is why the
+# feature list was read out of the crate rather than copied.
+#
+# `transport-io` is deliberately absent: there is no stdio mode here. This MCP
+# server exists to steer a RUNNING view, and a stdio process has no view.
+rmcp = { version = "3.1.1", features = [
+    "server",
+    "macros",
+    "schemars",
+    "transport-streamable-http-server",
+] }
+# rmcp derives every tool's input schema through this. One requirement, matching
+# the estate's, so a tool schema means the same thing on both servers.
+schemars = "1"
+# Images ride in an MCP reply as base64. 0.22 is already in this tree through
+# rmcp; a second major would be a second copy of one encoder.
+base64 = "0.22"
 
 [dev-dependencies]
 # The render subcommand's tests drive the real binary and need somewhere to

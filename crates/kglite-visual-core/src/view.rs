@@ -56,7 +56,17 @@ pub enum SlotEntry {
     /// A meta-graph type node.
     Type { name: String },
     /// An instance node, identified by kglite's own node index.
-    Node { node_id: u32, node_type: String },
+    ///
+    /// The title is carried here, not only in the slice that added it. A view
+    /// that cannot name what is in it can be counted but not described, and
+    /// P10 gave it two consumers that need the names: `view_state`, which is
+    /// what an agent reads instead of the screen, and the live-view render,
+    /// which draws the labels.
+    Node {
+        node_id: u32,
+        node_type: String,
+        title: String,
+    },
     /// Collapsed. Rendered as a NaN position; never reused without a
     /// [`Compaction`].
     Tombstone,
@@ -222,7 +232,7 @@ impl View {
     /// Returns `(slot, is_new)` — the caller needs to know whether to send a
     /// position for it, and "already present" is the common case once two
     /// expansions overlap.
-    pub fn intern_node(&mut self, node_id: u32, node_type: &str) -> (u32, bool) {
+    pub fn intern_node(&mut self, node_id: u32, node_type: &str, title: &str) -> (u32, bool) {
         if let Some(slot) = self.node_slot.get(&node_id) {
             return (*slot, false);
         }
@@ -230,6 +240,7 @@ impl View {
         self.entries.push(SlotEntry::Node {
             node_id,
             node_type: node_type.to_string(),
+            title: title.to_string(),
         });
         self.node_slot.insert(node_id, slot);
         (slot, true)
@@ -245,6 +256,37 @@ impl View {
             return;
         }
         self.edges.push(edge);
+    }
+
+    /// Every occupied slot and what is in it, in slot order.
+    ///
+    /// Tombstones are skipped: a caller iterating this is describing what is on
+    /// screen, and a hole is not on screen.
+    pub fn live_entries(&self) -> impl Iterator<Item = (u32, &SlotEntry)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| !matches!(entry, SlotEntry::Tombstone))
+            .map(|(slot, entry)| (slot as u32, entry))
+    }
+
+    /// Tombstone every instance slot, whatever its type — the entry screen,
+    /// restored.
+    ///
+    /// The type nodes stay. Collapsing those too would leave the user with a
+    /// blank canvas and nothing to navigate from, which is not "reset" but
+    /// "close".
+    pub fn tombstone_all_instances(&mut self) -> Vec<u32> {
+        let doomed: Vec<u32> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, entry)| match entry {
+                SlotEntry::Node { .. } => Some(slot as u32),
+                _ => None,
+            })
+            .collect();
+        self.tombstone(&doomed)
     }
 
     /// Tombstone every instance slot of `node_type`, and drop the links that
@@ -370,7 +412,7 @@ mod tests {
         let mut view = View::new();
         view.intern_type("Person");
         for node_id in 100..105 {
-            view.intern_node(node_id, "Person");
+            view.intern_node(node_id, "Person", "");
         }
         view
     }
@@ -388,7 +430,7 @@ mod tests {
     fn interning_is_idempotent() {
         let mut view = seeded();
         assert_eq!(view.intern_type("Person"), 0);
-        assert_eq!(view.intern_node(102, "Person"), (3, false));
+        assert_eq!(view.intern_node(102, "Person", ""), (3, false));
         assert_eq!(view.slot_count(), 6, "no slot was burned on a repeat");
     }
 
@@ -427,7 +469,7 @@ mod tests {
         // here and wrong the moment the re-expansion found a different node.
         let mut view = seeded();
         view.collapse_type("Person");
-        let (slot, is_new) = view.intern_node(100, "Person");
+        let (slot, is_new) = view.intern_node(100, "Person", "");
         assert!(is_new);
         assert_eq!(slot, 6);
     }
@@ -437,7 +479,7 @@ mod tests {
         let mut view = View::new();
         view.intern_type("Person");
         for node_id in 0..5 {
-            view.intern_node(node_id, "Person");
+            view.intern_node(node_id, "Person", "");
         }
         view.add_edge(edge(0, 5)); // type → last instance
         view.add_edge(edge(4, 5));
@@ -470,14 +512,14 @@ mod tests {
 
         // The allocator must hand out 3 next, not 6: a stale counter would
         // leave a hole the position array has no entry for.
-        assert_eq!(view.intern_node(99, "Person"), (3, true));
+        assert_eq!(view.intern_node(99, "Person", ""), (3, true));
     }
 
     #[test]
     fn compaction_fires_on_ratio_and_size_together() {
         let mut small = View::new();
         for node_id in 0..10 {
-            small.intern_node(node_id, "Person");
+            small.intern_node(node_id, "Person", "");
         }
         small.tombstone(&[0, 1, 2, 3, 4, 5, 6, 7, 8]);
         assert!(
@@ -487,7 +529,7 @@ mod tests {
 
         let mut big = View::new();
         for node_id in 0..100 {
-            big.intern_node(node_id, "Person");
+            big.intern_node(node_id, "Person", "");
         }
         let doomed: Vec<u32> = (0..29).collect();
         big.tombstone(&doomed);

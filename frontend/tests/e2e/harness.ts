@@ -19,7 +19,14 @@ import path from 'node:path'
 export const REPO = path.resolve(process.cwd(), '..')
 export const FIXTURE = 'crates/kglite-visual-core/tests/fixtures/meta.kgl'
 
-export type LaunchInfo = { url: string; port: number; pid: number; graph: string }
+export type LaunchInfo = {
+  url: string
+  port: number
+  pid: number
+  graph: string
+  /** Streamable-HTTP MCP, on the same port (plan D14). */
+  mcp: string
+}
 
 export type Launched = {
   process: ChildProcessWithoutNullStreams

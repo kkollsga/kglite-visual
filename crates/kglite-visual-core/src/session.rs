@@ -90,6 +90,85 @@ pub struct DescribeResponse {
     pub schema: serde_json::Value,
 }
 
+/// The caveat every agent-facing surface has to repeat.
+///
+/// One constant, because it is asserted by the MCP tool descriptions, returned
+/// inside [`ViewState`], and true of every `render` this server can produce.
+/// Three copies of a caveat is three places for it to stop being true.
+pub const GEOMETRY_CAVEAT: &str = "The live layout runs on the viewer's GPU and the server does \
+     not know where the points ended up. A render of this view is \
+     content-identical and geometry-different: same nodes, same links, same \
+     truncation, a different arrangement. Describe what is in the view, never \
+     where it is on the user's screen.";
+
+/// What the last view-mutating response did, kept so an agent can ask.
+///
+/// The bound metadata rides out with the slice and is then gone; the browser
+/// keeps it in its status bar, and an MCP client has no status bar. Without
+/// this, `view_state` could say how many nodes are on screen but not whether
+/// that number is the whole answer — which is the D5 failure exactly.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LastSlice {
+    pub kind: SliceKind,
+    /// What the bound did to the nodes.
+    pub bound: BoundInfo,
+    /// What the bound did to the links.
+    pub link_bound: BoundInfo,
+    /// The banner the app is showing for it, verbatim — the same words, from
+    /// the same function the headless render draws into an image.
+    pub banner: Option<String>,
+}
+
+/// One type node currently on the meta-graph, and what has been drilled into.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ViewTypeNode {
+    pub slot: u32,
+    pub name: String,
+    /// Members in the graph, not on screen.
+    pub count: u32,
+    pub capabilities: Vec<String>,
+    pub supporting: bool,
+    /// Instances of this type currently in the view.
+    pub instances_on_screen: u32,
+}
+
+/// The response bounds this build enforces, so an agent can predict a refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ViewBounds {
+    pub max_expansion_nodes: u32,
+    pub max_query_rows: u32,
+    pub query_timeout_secs: u32,
+}
+
+/// What is on the shared screen, as structured truth.
+///
+/// The server-side equivalent of the browser's `window.__kglv`, and the answer
+/// to "what is the user looking at" for a peer that cannot look. It is
+/// deliberately *not* a `ts-rs` type: the frontend has its own, richer view of
+/// this — it is the thing being described — and generating a TypeScript mirror
+/// would be this file claiming ownership of a shape the client already owns.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ViewState {
+    pub protocol_version: u32,
+    pub graph: String,
+    pub tier: DetailTier,
+    /// Slots handed out, tombstones included.
+    pub slot_count: u32,
+    /// Slots that currently draw something.
+    pub live_count: u32,
+    pub tombstone_count: u32,
+    pub link_count: u32,
+    pub types: Vec<ViewTypeNode>,
+    /// Instance nodes on screen, by type, descending — the drill-in state in
+    /// one field.
+    pub instances_by_type: Vec<(String, u32)>,
+    pub last_slice: Option<LastSlice>,
+    pub bounds: ViewBounds,
+    /// [`GEOMETRY_CAVEAT`], carried in the payload so a client that only ever
+    /// reads tool *results* still meets it.
+    pub geometry_caveat: &'static str,
+}
+
 /// A change to what is on screen: metadata plus the two float arrays.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
@@ -137,6 +216,11 @@ pub struct Session {
     view: RwLock<View>,
     meta_graph: MetaGraphResponse,
     config: QueryConfig,
+    /// Separate from the view's own lock: it is written on the way out of
+    /// `finish_slice`, which already holds the view mutably, and a reader
+    /// asking "what did the bound last do" must not be blocked by an expansion
+    /// that is still walking the graph.
+    last_slice: RwLock<Option<LastSlice>>,
 }
 
 impl Session {
@@ -158,6 +242,7 @@ impl Session {
             view: RwLock::new(view),
             meta_graph,
             config,
+            last_slice: RwLock::new(None),
         }
     }
 
@@ -176,6 +261,14 @@ impl Session {
     /// Slot of a type node, for a caller that has a name rather than a slot.
     pub fn slot_of_type(&self, name: &str) -> Option<u32> {
         self.read().slot_of_type(name)
+    }
+
+    /// Read access to the slot space, for a caller inside this crate that has
+    /// to walk it — the live-view render, and nothing else. `pub(crate)`
+    /// deliberately: handing a lock guard across the crate boundary would let a
+    /// transport hold the view locked for the length of a socket write.
+    pub(crate) fn view_read(&self) -> std::sync::RwLockReadGuard<'_, View> {
+        self.read()
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, View> {
@@ -281,13 +374,12 @@ impl Session {
                 let previews = expand::preview_for_type(&self.graph, &name);
                 (PreviewScope::Type, name, String::new(), previews)
             }
-            SlotEntry::Node { node_id, node_type } => {
+            SlotEntry::Node {
+                node_id,
+                node_type,
+                title,
+            } => {
                 let index = NodeIndex::new(node_id as usize);
-                let title = self
-                    .graph
-                    .node_view(index)
-                    .map(|v| value_to_display(&v.title()))
-                    .unwrap_or_default();
                 let previews = expand::preview_for_node(&self.graph, index, &node_type, deadline);
                 (PreviewScope::Node, node_type, title, previews)
             }
@@ -386,7 +478,7 @@ impl Session {
                 None => continue,
             };
             let node_id = index.index() as u32;
-            let (slot, is_new) = view.intern_node(node_id, &node_type);
+            let (slot, is_new) = view.intern_node(node_id, &node_type, &title);
             if is_new {
                 added.push(SliceNode {
                     slot,
@@ -511,6 +603,33 @@ impl Session {
             .flat_map(|e| [e.source_slot as f32, e.target_slot as f32])
             .collect();
 
+        // The bound metadata rides out with the slice and is then gone. An MCP
+        // client has no status bar to keep it in, so the session keeps it: see
+        // `LastSlice`.
+        *self
+            .last_slice
+            .write()
+            .expect("the last-slice lock was poisoned by a panicking request") = Some(LastSlice {
+            kind,
+            bound: bounds.nodes,
+            link_bound: bounds.links,
+            banner: crate::render::encoding::truncation_banner(
+                bounds.nodes.truncated,
+                bounds.nodes.returned,
+                bounds.nodes.total,
+                if kind == SliceKind::Collapse {
+                    "collapsed"
+                } else {
+                    "nodes"
+                },
+                Some((
+                    bounds.links.truncated,
+                    bounds.links.returned,
+                    bounds.links.total,
+                )),
+            ),
+        });
+
         GraphSlice {
             meta: GraphSliceMeta {
                 protocol_version: PROTOCOL_VERSION,
@@ -527,6 +646,98 @@ impl Session {
             compaction,
             points,
             links,
+        }
+    }
+
+    /// Collapse everything back to the entry screen.
+    ///
+    /// Not `collapse` in a loop: one slice, one compaction decision, one
+    /// message to every client. A reset that arrived as forty collapses would
+    /// make forty round trips and forty renders of intermediate states nobody
+    /// asked to see.
+    ///
+    /// The type nodes stay. "Reset" restores the screen a session opens with,
+    /// which is the meta-graph — a blank canvas would be "close".
+    pub fn reset(&self) -> GraphSlice {
+        let mut view = self.write();
+        let tombstones = view.tombstone_all_instances();
+        let count = tombstones.len();
+        let first_slot = view.slot_count();
+        self.finish_slice(
+            &mut view,
+            SliceKind::Collapse,
+            first_slot,
+            Vec::new(),
+            tombstones,
+            SliceBounds {
+                nodes: BoundInfo::new(count, count),
+                links: BoundInfo::new(0, 0),
+            },
+        )
+    }
+
+    /// What is on the shared screen, as structured truth (D14).
+    ///
+    /// The answer to "what is the user looking at" for a peer that cannot look.
+    /// Everything here is a fact about *content*; nothing here is a fact about
+    /// geometry, and [`GEOMETRY_CAVEAT`] rides along saying so.
+    pub fn view_state(&self) -> ViewState {
+        let view = self.read();
+
+        let mut instances: std::collections::BTreeMap<&str, u32> =
+            std::collections::BTreeMap::new();
+        for (_, entry) in view.live_entries() {
+            if let SlotEntry::Node { node_type, .. } = entry {
+                *instances.entry(node_type.as_str()).or_insert(0) += 1;
+            }
+        }
+
+        let types: Vec<ViewTypeNode> = self
+            .meta_graph
+            .meta
+            .nodes
+            .iter()
+            .filter(|node| view.entry(node.slot).is_some())
+            .map(|node| ViewTypeNode {
+                slot: node.slot,
+                name: node.name.clone(),
+                count: node.count,
+                capabilities: node.capabilities.clone(),
+                supporting: node.supporting,
+                instances_on_screen: instances.get(node.name.as_str()).copied().unwrap_or(0),
+            })
+            .collect();
+
+        // Descending, so the first rows are the drill-in a reader cares about;
+        // the name breaks ties so the answer is stable between two identical
+        // views.
+        let mut instances_by_type: Vec<(String, u32)> = instances
+            .into_iter()
+            .map(|(name, count)| (name.to_string(), count))
+            .collect();
+        instances_by_type.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+        ViewState {
+            protocol_version: PROTOCOL_VERSION,
+            graph: self.source.clone(),
+            tier: self.meta_graph.meta.tier,
+            slot_count: view.slot_count(),
+            live_count: view.slot_count() - view.tombstone_count(),
+            tombstone_count: view.tombstone_count(),
+            link_count: view.edges().len() as u32,
+            types,
+            instances_by_type,
+            last_slice: self
+                .last_slice
+                .read()
+                .expect("the last-slice lock was poisoned by a panicking request")
+                .clone(),
+            bounds: ViewBounds {
+                max_expansion_nodes: expand::MAX_EXPANSION_NODES as u32,
+                max_query_rows: query::MAX_QUERY_ROWS as u32,
+                query_timeout_secs: self.config.timeout.as_secs().min(u64::from(u32::MAX)) as u32,
+            },
+            geometry_caveat: GEOMETRY_CAVEAT,
         }
     }
 

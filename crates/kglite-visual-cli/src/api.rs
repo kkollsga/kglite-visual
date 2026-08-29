@@ -104,21 +104,19 @@ pub async fn node_detail(state: State<AppState>, Json(body): Json<SlotRequest>) 
 /// (D5's banner) and in the response headers, so a caller that only reads
 /// headers still learns the answer was clipped.
 ///
-/// **It does not touch this session's view.** `core::render` opens a private
-/// session over the same read-only graph, so a `POST /api/render` cannot move
-/// the slot space of whatever browser tab is attached. (Rendering the *live*
-/// view is a different request, and P10 is where it lands.)
+/// **It does not touch this session's view.** For every source but one,
+/// `core::render_for` opens a private session over the same read-only graph, so
+/// a `POST /api/render` cannot move the slot space of whatever browser tab is
+/// attached. `{"source": {"type": "live-view"}}` is the exception and the P10
+/// addition: it *reads* this session and draws what is on the shared screen —
+/// still without moving it. The geometry differs from the user's screen; core
+/// owns that caveat's wording (`session::GEOMETRY_CAVEAT`).
 pub async fn render(State(state): State<AppState>, Json(body): Json<RenderRequest>) -> Response {
-    let graph = Arc::clone(state.session.graph());
-    let name = state.session.info().graph;
-    let config = state.session.config();
+    let session = Arc::clone(&state.session);
     // A render lays out a bounded slice and, for PNG, rasterises it: tens of
     // milliseconds, and on the async runtime that is the WebSocket feeding the
     // renderer stalling for all of them.
-    match tokio::task::spawn_blocking(move || {
-        kglite_visual_core::render(&graph, &name, config, &body)
-    })
-    .await
+    match tokio::task::spawn_blocking(move || kglite_visual_core::render_for(&session, &body)).await
     {
         Ok(Ok(rendered)) => {
             let banners = rendered.banners.join("; ");
@@ -147,6 +145,30 @@ pub async fn render(State(state): State<AppState>, Json(body): Json<RenderReques
         Ok(Err(err)) => error_response(&err),
         Err(err) => task_failed("render", &err),
     }
+}
+
+/// `POST /api/reset` — collapse everything back to the entry screen.
+///
+/// One slice, not a collapse per type: forty round trips would put thirty-nine
+/// intermediate views on the user's screen that nobody asked to see.
+pub async fn reset(State(state): State<AppState>) -> Response {
+    let session = Arc::clone(&state.session);
+    match tokio::task::spawn_blocking(move || session.reset()).await {
+        Ok(slice) => {
+            let response = kglite_visual_core::Response::Slice(slice);
+            state.bus.publish_if_view_mutating(&response);
+            Json(response).into_response()
+        }
+        Err(err) => task_failed("reset", &err),
+    }
+}
+
+/// `GET /api/view-state` — what is on the shared screen, as structured truth.
+///
+/// The server-side equivalent of the browser's `window.__kglv` (D14). Cheap:
+/// it walks the slot space, never the graph.
+pub async fn view_state(State(state): State<AppState>) -> Response {
+    Json(state.session.view_state()).into_response()
 }
 
 /// `POST /api/focus` — `{"slots": [n, ...]}`. Zoom every attached client's

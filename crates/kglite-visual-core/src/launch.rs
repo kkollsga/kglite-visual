@@ -19,6 +19,16 @@ pub struct LaunchInfo {
     pub pid: u32,
     /// The graph being served, as the caller named it.
     pub graph: String,
+    /// The MCP endpoint, streamable HTTP (plan D14) — e.g.
+    /// `http://127.0.0.1:8731/mcp`.
+    ///
+    /// **Additive, and it is what "attach" means here.** There is no discovery
+    /// file and no second process: an agent reads this line, points its MCP
+    /// client at this URL, and is steering the view the human already has open.
+    /// A harness that parses the four original keys by name is unaffected;
+    /// one that asserted the key *count* is not, which is why the test below
+    /// asserts the set and names the addition.
+    pub mcp: String,
 }
 
 impl LaunchInfo {
@@ -45,6 +55,7 @@ mod tests {
             port: 8731,
             pid: 4242,
             graph: "demo.kgl".to_string(),
+            mcp: "http://127.0.0.1:8731/mcp".to_string(),
         };
         let line = info.to_json_line();
         assert!(!line.contains('\n'), "stdout contract is exactly one line");
@@ -54,10 +65,14 @@ mod tests {
         assert_eq!(parsed["port"], 8731);
         assert_eq!(parsed["pid"], 4242);
         assert_eq!(parsed["graph"], "demo.kgl");
-        assert_eq!(
-            parsed.as_object().unwrap().len(),
-            4,
-            "an extra key is a contract change, not an addition"
-        );
+        assert_eq!(parsed["mcp"], "http://127.0.0.1:8731/mcp");
+
+        // The key SET, not the count. A key that appears is a contract change
+        // an agent harness must be told about — `mcp` was one, added in P10 —
+        // and a key that DISAPPEARS breaks every harness silently. Listing them
+        // catches both; counting them caught only the first.
+        let mut keys: Vec<&String> = parsed.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["graph", "mcp", "pid", "port", "url"]);
     }
 }

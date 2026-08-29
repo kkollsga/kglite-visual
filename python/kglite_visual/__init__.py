@@ -2,7 +2,7 @@
 
     import kglite_visual as kv
     view = kv.show("graph.kgl")     # a browser tab, or an inline notebook frame
-    view.launch_info                # {"url", "port", "pid", "graph"}
+    view.launch_info                # {"url", "port", "pid", "graph", "mcp"}
     view.close()                    # stops the server, frees the port
 
 The same server the ``kglite-visual`` command runs, linked into this extension

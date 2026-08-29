@@ -1,8 +1,9 @@
 """L5 — the launch contract, from Python.
 
-`show()` returns the same four keys the CLI writes to stdout (plan D6). These
-tests hold that contract by name, because an agent parses it by name: a rename
-here is a breaking change to every harness, not a refactor.
+`show()` returns the same five keys the CLI writes to stdout (plan D6, plus
+D14's `mcp`). These tests hold that contract by name, because an agent parses
+it by name: a rename here is a breaking change to every harness, not a
+refactor.
 """
 
 from __future__ import annotations
@@ -19,13 +20,16 @@ def test_show_returns_the_launch_contract(fixture_path):
     view = kv.show(fixture_path, open_browser=False)
     try:
         info = view.launch_info
-        assert sorted(info) == ["graph", "pid", "port", "url"], (
+        assert sorted(info) == ["graph", "mcp", "pid", "port", "url"], (
             "an extra or missing key is a contract change, not an addition"
         )
         assert info["port"] > 0, "--port 0 must be resolved, never reported as 0"
         assert info["url"] == f"http://127.0.0.1:{info['port']}/"
         assert info["pid"] == os.getpid(), "the server runs in this process"
         assert info["graph"] == fixture_path
+        # D14: MCP is served BY this server, so "attach" is a URL off the same
+        # port — never a second process to start or a file to discover.
+        assert info["mcp"] == f"http://127.0.0.1:{info['port']}/mcp"
         # The accessors and the dict are two views of one struct.
         assert (view.url, view.port, view.pid, view.graph) == (
             info["url"],

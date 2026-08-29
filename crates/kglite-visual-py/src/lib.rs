@@ -79,10 +79,14 @@ impl PyServer {
         &self.info.graph
     }
 
-    /// The launch contract (D6) as a dict — the same four keys the CLI writes
+    /// The launch contract (D6) as a dict — the same five keys the CLI writes
     /// to stdout, built from the same struct so the two cannot drift. The
     /// wheel deliberately prints nothing: a library that writes to stdout
     /// corrupts whatever its caller was writing there.
+    ///
+    /// `mcp` joined the four in P10 (D14). The wheel's server is the CLI's
+    /// server, lib-linked, so `show()` serves MCP at that URL as well — a
+    /// notebook is a perfectly good place to hand an agent a view.
     #[getter]
     fn launch_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let dict = PyDict::new(py);
@@ -90,6 +94,7 @@ impl PyServer {
         dict.set_item("port", self.info.port)?;
         dict.set_item("pid", self.info.pid)?;
         dict.set_item("graph", &self.info.graph)?;
+        dict.set_item("mcp", &self.info.mcp)?;
         Ok(dict)
     }
 

@@ -44,8 +44,12 @@ class Server:
     # -- the launch contract (plan D6) ---------------------------------
     @property
     def launch_info(self) -> dict[str, Any]:
-        """`{"url", "port", "pid", "graph"}` — the same four keys the CLI
-        writes to stdout, from the same Rust struct.
+        """`{"url", "port", "pid", "graph", "mcp"}` — the same five keys the
+        CLI writes to stdout, from the same Rust struct.
+
+        `mcp` is the streamable-HTTP MCP endpoint this same server exposes
+        (plan D14): hand it to an agent and it can drive the view you are
+        looking at.
 
         The wheel returns them instead of printing them: a library that writes
         to stdout corrupts whatever its caller was writing there, and a
