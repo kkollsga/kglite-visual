@@ -42,6 +42,42 @@ const CELL_HEIGHT = 30
 type Placed = { slot: number; x: number; y: number }
 
 /**
+ * A label's width in pixels, estimated from its content.
+ *
+ * Estimated, not measured, because measuring means laying the element out —
+ * every candidate, on every camera event — and the overlay's whole design is
+ * that a camera event touches nothing O(view). The constants are the rendered
+ * chip's: 12px/600 ui-sans-serif averages just under 7px per character in the
+ * name and 6.3 in the tabular-nums count, plus 14px of padding, a 6px gap and
+ * a badge at 28px.
+ *
+ * The estimate only has to be good enough to keep a 200px name from claiming
+ * one 130px cell and then sitting on top of two neighbours' — which is what a
+ * fixed one-cell reservation did, and why the entry screen still read as
+ * overlapping text after every type got a label.
+ */
+function estimateWidth(spec: LabelSpec): number {
+  const count = spec.weight.toLocaleString('en-US').length
+  return 14 + spec.text.length * 6.9 + 6 + count * 6.3 + spec.badges.length * 34
+}
+
+/** The column range a label centred on `x` covers, inclusive. */
+function columnsFor(x: number, width: number): [number, number] {
+  return [Math.floor((x - width / 2) / CELL_WIDTH), Math.floor((x + width / 2) / CELL_WIDTH)]
+}
+
+function isFree(taken: ReadonlySet<string>, from: number, to: number, row: number): boolean {
+  for (let column = from; column <= to; column += 1) {
+    if (taken.has(`${column}:${row}`)) return false
+  }
+  return true
+}
+
+function claim(taken: Set<string>, from: number, to: number, row: number): void {
+  for (let column = from; column <= to; column += 1) taken.add(`${column}:${row}`)
+}
+
+/**
  * Cells a displaced label will try, in order, before it gives up and overlaps.
  *
  * Vertical first and only ±2 rows out, because a label has to stay recognisably
@@ -78,7 +114,7 @@ const NUDGES: readonly [number, number][] = [
  * not a picture at any density.
  */
 export function chooseLabels(
-  candidates: { slot: number; x: number; y: number; weight: number }[],
+  candidates: { slot: number; x: number; y: number; weight: number; width?: number }[],
   placeAll = false,
 ): Placed[] {
   // Sorted rather than compared in place: the winner of a cell must not depend
@@ -91,17 +127,15 @@ export function chooseLabels(
   const taken = new Set<string>()
   const placed: Placed[] = []
   for (const candidate of ordered) {
-    const column = Math.floor(candidate.x / CELL_WIDTH)
+    const [from, to] = columnsFor(candidate.x, candidate.width ?? CELL_WIDTH)
     const row = Math.floor(candidate.y / CELL_HEIGHT)
-    if (!taken.has(`${column}:${row}`)) {
-      taken.add(`${column}:${row}`)
+    if (isFree(taken, from, to, row)) {
+      claim(taken, from, to, row)
       placed.push({ slot: candidate.slot, x: candidate.x, y: candidate.y })
       continue
     }
     if (!placeAll) continue
-    const nudge = NUDGES.find(
-      ([dx, dy]) => !taken.has(`${column + dx}:${row + dy}`),
-    )
+    const nudge = NUDGES.find(([dx, dy]) => isFree(taken, from + dx, to + dx, row + dy))
     if (nudge === undefined) {
       // Every neighbour is spoken for. Drawing it anyway is the deliberate
       // choice: an unnamed type node carries no information at all.
@@ -109,7 +143,7 @@ export function chooseLabels(
       continue
     }
     const [dx, dy] = nudge
-    taken.add(`${column + dx}:${row + dy}`)
+    claim(taken, from + dx, to + dx, row + dy)
     placed.push({
       slot: candidate.slot,
       x: candidate.x + dx * CELL_WIDTH,
@@ -172,7 +206,7 @@ export class LabelOverlay {
    */
   update(source: ScreenSource, placeAll = false): void {
     const sampled = source.sampledPoints()
-    const candidates: { slot: number; x: number; y: number; weight: number }[] = []
+    const candidates: Parameters<typeof chooseLabels>[0] = []
     for (let i = 0; i < sampled.indices.length; i += 1) {
       const slot = sampled.indices[i]
       const spaceX = sampled.positions[i * 2]
@@ -183,7 +217,13 @@ export class LabelOverlay {
       const [x, y] = source.toScreen([spaceX, spaceY])
       // Below the circle, not on top of it: a label centred on its point hides
       // the size that encodes the type's count.
-      candidates.push({ slot, x, y: y + source.radius(slot) + 4, weight: spec.weight })
+      candidates.push({
+        slot,
+        x,
+        y: y + source.radius(slot) + 4,
+        weight: spec.weight,
+        width: estimateWidth(spec),
+      })
     }
 
     const placed = chooseLabels(candidates, placeAll)

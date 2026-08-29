@@ -87,3 +87,16 @@ test('the placement is a function of the input, not of its order', () => {
   const reversed = chooseLabels([...spread].reverse(), true)
   expect(forward).toEqual(reversed)
 })
+
+test('a wide label reserves the cells it actually covers', () => {
+  // Two names 140px apart. With a one-cell reservation both fit and then
+  // overlap on screen; the estimate is what stops that.
+  const wide = [
+    { slot: 0, x: 300, y: 100, weight: 10, width: 260 },
+    { slot: 1, x: 440, y: 100, weight: 5, width: 260 },
+  ]
+  expect(chooseLabels(wide)).toHaveLength(1)
+  // Narrow ones at the same two points do not collide.
+  const narrow = wide.map((c) => ({ ...c, width: 40 }))
+  expect(chooseLabels(narrow)).toHaveLength(2)
+})
