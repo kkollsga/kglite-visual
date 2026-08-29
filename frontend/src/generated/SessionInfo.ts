@@ -24,6 +24,23 @@ graph: string,
  */
 tier: DetailTier, 
 /**
- * Slots handed out so far. Meta-nodes today; P3's expansion appends.
+ * Slots handed out so far — meta-nodes plus whatever expansion appended.
  */
-slot_count: number, stats: MetaGraphStats, };
+slot_count: number, 
+/**
+ * Slots currently tombstoned.
+ */
+tombstone_count: number, 
+/**
+ * The nodes-per-expansion ceiling this build enforces (D5), so a client
+ * can say what a bound *would* do before it fires.
+ */
+max_expansion_nodes: number, 
+/**
+ * The rows-per-query ceiling.
+ */
+max_query_rows: number, 
+/**
+ * Query wall-clock ceiling, in seconds.
+ */
+query_timeout_secs: number, stats: MetaGraphStats, };

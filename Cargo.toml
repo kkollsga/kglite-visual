@@ -24,6 +24,12 @@ repository = "https://github.com/kkollsga/kglite-visual"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.20"
+# No `serde-json-impl`, deliberately: that feature makes ts-rs export its own
+# `JsonValue` into a `crates/**/bindings/` directory, outside the one tree
+# `make check-generated-ts` guards — a generated path with no gate is a
+# generated path that drifts (doctrine R4). The four fields that carry free-form
+# JSON are annotated `#[ts(type = "unknown")]` instead, which is also the honest
+# TypeScript for a Cypher cell: it forces the client to narrow before it reads.
 ts-rs = "12.0.1"
 
 [profile.release]

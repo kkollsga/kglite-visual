@@ -13,18 +13,10 @@ mod ws;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::Parser;
-use kglite_visual_core::{load_graph, GraphSource, Session};
-
-/// Stack size for the runtime's threads.
-///
-/// kglite's Cypher parser overflows tokio's 2 MiB default; upstream ships the
-/// number as `QUERY_THREAD_STACK_SIZE` and every embedder is expected to honour
-/// it. P2 runs no Cypher, but the runtime is built once and the failure mode is
-/// a stack overflow inside a blocking task — a crash with no useful message —
-/// so the size is set here rather than left for P3 to discover.
-const QUERY_THREAD_STACK_BYTES: usize = 8 * 1024 * 1024;
+use kglite_visual_core::{load_graph, GraphSource, QueryConfig, Session, QUERY_THREAD_STACK_BYTES};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -45,6 +37,14 @@ struct Cli {
     /// opening a browser is the interactive default, not the only mode.
     #[arg(long)]
     no_open: bool,
+
+    /// Wall-clock ceiling for one Cypher query, in seconds.
+    ///
+    /// A viewer is interactive, so an unbounded query is a hung tab; the
+    /// default is what an accidental cartesian product costs. Raise it for a
+    /// deliberate analytical query on a large graph.
+    #[arg(long, default_value_t = 30)]
+    query_timeout_secs: u64,
 }
 
 fn main() -> ExitCode {
@@ -62,7 +62,13 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     // Load before binding: a LaunchInfo for a graph that turned out to be
     // unreadable would be a URL nothing serves.
     let graph = load_graph(GraphSource::Path(&cli.file))?;
-    let session = Session::open(graph, cli.file.display().to_string());
+    let session = Session::open_with(
+        graph,
+        cli.file.display().to_string(),
+        QueryConfig {
+            timeout: Duration::from_secs(cli.query_timeout_secs),
+        },
+    );
     let info = session.info();
     eprintln!(
         "kglite-visual: {} node types, {} nodes, {} edges; detail tier {}",
@@ -70,6 +76,10 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         info.stats.node_count,
         info.stats.edge_count,
         serde_json::to_string(&info.tier)?
+    );
+    eprintln!(
+        "kglite-visual: response bound {} nodes/expansion, {} rows/query, {}s query timeout",
+        info.max_expansion_nodes, info.max_query_rows, info.query_timeout_secs
     );
 
     let embedded = assets::embedded_file_count();
@@ -102,6 +112,14 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // `thread_stack_size` reaches the **blocking** pool as well as the worker
+    // threads, and that is the half that matters: every Cypher execution runs
+    // in `spawn_blocking`, and kglite's parser overflows tokio's 2 MiB default.
+    // Verified against tokio 1.53.1 rather than assumed — `runtime/blocking/
+    // pool.rs` copies `builder.thread_stack_size` into the pool's `stack_size`
+    // and applies it to every thread it spawns. The failure mode if it did not
+    // is a stack overflow inside a blocking task: a process abort with no
+    // message naming the query.
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(QUERY_THREAD_STACK_BYTES)
@@ -132,6 +150,27 @@ mod tests {
         let defaults = Cli::parse_from(["kglite-visual", "g.kgl"]);
         assert_eq!(defaults.port, 0, "0 means OS-assigned");
         assert!(!defaults.no_open);
+        assert_eq!(defaults.query_timeout_secs, 30);
+
+        let slow = Cli::parse_from(["kglite-visual", "--query-timeout-secs", "300", "g.kgl"]);
+        assert_eq!(slow.query_timeout_secs, 300);
+    }
+
+    #[test]
+    fn the_runtime_stack_is_the_engines_number_not_a_local_literal() {
+        // The floor kglite documents. A second literal here is a copy that
+        // stops moving when the engine's does, and the failure it hides is a
+        // stack overflow inside a blocking task.
+        assert_eq!(
+            QUERY_THREAD_STACK_BYTES,
+            kglite_visual_core::query::QUERY_THREAD_STACK_BYTES
+        );
+        const {
+            assert!(
+                QUERY_THREAD_STACK_BYTES >= 8 * 1024 * 1024,
+                "kglite's Cypher parser overflows anything smaller"
+            )
+        };
     }
 
     #[test]

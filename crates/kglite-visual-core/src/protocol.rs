@@ -40,7 +40,17 @@ use std::fmt;
 /// Wire-format version. A change to any layout rule above changes this number,
 /// and the mismatch is a loud decode failure on both sides
 /// ([`ProtocolError::VersionMismatch`]) — never a best-effort parse.
-pub const PROTOCOL_VERSION: u32 = 1;
+///
+/// **v2 (P3)** added the request vocabulary and seven response message types
+/// (query, expansion preview, graph slice, node detail, search, compaction,
+/// property stats). The *layout* rules above did not move, so a v1 decoder
+/// would parse a v2 frame's header fine and then fail on the message type —
+/// mid-response, after it had already rendered part of a view. The version word
+/// is bumped precisely so that skew is diagnosed from the first word of the
+/// first frame instead: a v1 client meets a `VersionMismatch` before it draws
+/// anything. Growing the message vocabulary changes what a peer must
+/// understand, which is a wire-format change whether or not any byte moved.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Header size in bytes (6 × `u32`).
 pub const HEADER_BYTES: usize = 24;
@@ -83,6 +93,27 @@ pub enum MessageType {
     /// UTF-8 JSON: a server-side failure, reported in-band so a client shows
     /// the reason instead of a silent empty view.
     Error = 5,
+    /// UTF-8 JSON: a Cypher result in columnar form (`QueryTable`).
+    QueryTable = 6,
+    /// UTF-8 JSON: per-relationship counts for a selection, computed without
+    /// fetching a single node (`ExpansionPreview`, plan D12).
+    ExpansionPreview = 7,
+    /// UTF-8 JSON: the metadata half of a graph slice — appended slots,
+    /// tombstoned slots, the whole link list (`GraphSliceMeta`). The
+    /// accompanying [`MessageType::Points`] and [`MessageType::Links`] frames
+    /// carry the arrays.
+    GraphSlice = 8,
+    /// UTF-8 JSON: one node's stored properties (`NodeDetail`).
+    NodeDetail = 9,
+    /// UTF-8 JSON: server-side search hits (`SearchResponse`).
+    SearchResult = 10,
+    /// UTF-8 JSON: an old→new slot remap (`Compaction`). Sent when the
+    /// tombstone ratio crosses its threshold; the client rewrites its own
+    /// id↔slot map from it rather than guessing that slots moved.
+    Compaction = 11,
+    /// UTF-8 JSON: per-type property statistics driving color-by / size-by
+    /// (`PropertyStatsResponse`, plan D12).
+    PropertyStats = 12,
 }
 
 impl MessageType {
@@ -94,12 +125,19 @@ impl MessageType {
     /// Every variant, in wire order — the one list the TypeScript mirror and
     /// the decoder are both generated from, so a new variant cannot be added
     /// to one and forgotten in the other.
-    pub const ALL: [MessageType; 5] = [
+    pub const ALL: [MessageType; 12] = [
         MessageType::MetaGraphMeta,
         MessageType::Points,
         MessageType::Links,
         MessageType::SessionInfo,
         MessageType::Error,
+        MessageType::QueryTable,
+        MessageType::ExpansionPreview,
+        MessageType::GraphSlice,
+        MessageType::NodeDetail,
+        MessageType::SearchResult,
+        MessageType::Compaction,
+        MessageType::PropertyStats,
     ];
 
     /// The TypeScript constant name for this variant.
@@ -110,6 +148,13 @@ impl MessageType {
             MessageType::Links => "LINKS",
             MessageType::SessionInfo => "SESSION_INFO",
             MessageType::Error => "ERROR",
+            MessageType::QueryTable => "QUERY_TABLE",
+            MessageType::ExpansionPreview => "EXPANSION_PREVIEW",
+            MessageType::GraphSlice => "GRAPH_SLICE",
+            MessageType::NodeDetail => "NODE_DETAIL",
+            MessageType::SearchResult => "SEARCH_RESULT",
+            MessageType::Compaction => "COMPACTION",
+            MessageType::PropertyStats => "PROPERTY_STATS",
         }
     }
 
@@ -487,7 +532,33 @@ mod tests {
         assert_eq!(MessageType::Links.code(), 3);
         assert_eq!(MessageType::SessionInfo.code(), 4);
         assert_eq!(MessageType::Error.code(), 5);
-        assert_eq!(MessageType::ALL.len(), 5, "a new variant must join ALL");
+        // v2's additions. Appended, never renumbered: the five v1 codes above
+        // keep their values so a framing dump stays comparable across the bump.
+        assert_eq!(MessageType::QueryTable.code(), 6);
+        assert_eq!(MessageType::ExpansionPreview.code(), 7);
+        assert_eq!(MessageType::GraphSlice.code(), 8);
+        assert_eq!(MessageType::NodeDetail.code(), 9);
+        assert_eq!(MessageType::SearchResult.code(), 10);
+        assert_eq!(MessageType::Compaction.code(), 11);
+        assert_eq!(MessageType::PropertyStats.code(), 12);
+        assert_eq!(MessageType::ALL.len(), 12, "a new variant must join ALL");
+    }
+
+    #[test]
+    fn every_variant_is_in_all_exactly_once_and_round_trips_by_code() {
+        // `from_code` searches ALL, so a variant omitted from ALL would decode
+        // as UnknownMessageType — a wire message the encoder can send and the
+        // decoder refuses. `ts_name` is generated from the same list, so the
+        // TypeScript mirror would silently lose it too.
+        let mut codes: Vec<u32> = MessageType::ALL.iter().map(|m| m.code()).collect();
+        let before = codes.len();
+        codes.sort_unstable();
+        codes.dedup();
+        assert_eq!(before, codes.len(), "two variants share a wire code");
+        for msg in MessageType::ALL {
+            assert_eq!(MessageType::from_code(msg.code()), Some(msg));
+            assert!(!msg.ts_name().is_empty());
+        }
     }
 
     #[test]

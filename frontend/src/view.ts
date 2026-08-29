@@ -1,0 +1,191 @@
+/**
+ * The client's half of the slot space (plan D4).
+ *
+ * The server owns the indices; this holds what the renderer needs to draw them
+ * and what the UI needs to name them. Three rules it exists to keep:
+ *
+ * - **Positions are spliced, not rebuilt.** An expansion appends slots and
+ *   sends only their coordinates, so the array grows at `first_slot`. Rebuilding
+ *   would make every expansion an O(V) upload of data the GPU already has.
+ * - **A tombstone is a NaN.** cosmos.gl reads a NaN position as absence: the
+ *   point stops drawing and the links touching it are faded, with no
+ *   re-indexing of anything else. Splicing the array instead would silently
+ *   renumber every slot after the hole.
+ * - **A compaction is applied, never inferred.** The server sends an explicit
+ *   old→new remap; this rewrites its maps from that and nothing else. A client
+ *   that guessed slots had moved would re-label whatever the user has selected.
+ */
+
+import type { Compaction } from './generated/Compaction'
+import type { GraphSliceMeta } from './generated/GraphSliceMeta'
+import type { MetaGraphMeta } from './generated/MetaGraphMeta'
+
+/** What the UI knows about one occupied slot. */
+export type SlotLabel = {
+  /** Display text. */
+  text: string
+  /** Capability flags on a type node; empty for an instance. */
+  badges: string[]
+  /** Bigger wins a label cell. Member count for a type, 1 for an instance. */
+  weight: number
+  /** True for a meta-graph type node. */
+  isType: boolean
+  /** kglite node id, for an instance node. */
+  nodeId: number | null
+  /** Node type, for an instance node. */
+  nodeType: string | null
+}
+
+export class SlotView {
+  /** Server-space positions, `[x0, y0, …]`. NaN at a tombstone. */
+  positions = new Float32Array(0)
+  /** `[src0, tgt0, …]` slot indices, always the whole set (D4). */
+  links = new Float32Array(0)
+
+  private readonly labels = new Map<number, SlotLabel>()
+  private readonly slotOfNode = new Map<number, number>()
+  private readonly tombstones = new Set<number>()
+
+  /** Slots allocated, tombstones included. */
+  get slotCount(): number {
+    return this.positions.length / 2
+  }
+
+  get tombstoneCount(): number {
+    return this.tombstones.size
+  }
+
+  /** Slots that currently draw something. */
+  get liveCount(): number {
+    return this.slotCount - this.tombstones.size
+  }
+
+  get linkCount(): number {
+    return this.links.length / 2
+  }
+
+  label(slot: number): SlotLabel | undefined {
+    return this.labels.get(slot)
+  }
+
+  /** Every occupied slot, ascending. */
+  liveSlots(): number[] {
+    return [...this.labels.keys()].sort((a, b) => a - b)
+  }
+
+  slotForNode(nodeId: number): number | undefined {
+    return this.slotOfNode.get(nodeId)
+  }
+
+  /** Seed from the meta-graph: the entry screen owns slots 0..n. */
+  setMetaGraph(meta: MetaGraphMeta, points: Float32Array, links: Float32Array): void {
+    this.positions = new Float32Array(points)
+    this.links = new Float32Array(links)
+    this.labels.clear()
+    this.slotOfNode.clear()
+    this.tombstones.clear()
+    for (const node of meta.nodes) {
+      this.labels.set(node.slot, {
+        text: node.name,
+        badges: node.capabilities,
+        weight: node.count,
+        isType: true,
+        nodeId: null,
+        nodeType: node.name,
+      })
+    }
+  }
+
+  /**
+   * Apply one slice.
+   *
+   * Order is load-bearing: append, then tombstone, then remap. The tombstone
+   * list and the remap are both in the PRE-compaction index space, so applying
+   * the remap first would make the tombstone list point at the wrong slots.
+   */
+  applySlice(
+    meta: GraphSliceMeta,
+    compaction: Compaction | null,
+    points: Float32Array,
+    links: Float32Array,
+  ): void {
+    if (compaction === null) this.splicePositions(meta.first_slot, points)
+
+    for (const node of meta.nodes) {
+      this.labels.set(node.slot, {
+        // A node with no title gets its type and id rather than a blank label.
+        // That is a *display* fallback: the server sends the empty string it
+        // actually found, and inventing a title in the payload would make the
+        // absence unrecoverable.
+        text: node.title === '' ? `${node.node_type} ${node.node_id}` : node.title,
+        badges: [],
+        weight: 1,
+        isType: false,
+        nodeId: node.node_id,
+        nodeType: node.node_type,
+      })
+      this.slotOfNode.set(node.node_id, node.slot)
+      this.tombstones.delete(node.slot)
+    }
+
+    for (const slot of meta.tombstones) {
+      const label = this.labels.get(slot)
+      if (label?.nodeId !== null && label !== undefined) this.slotOfNode.delete(label.nodeId)
+      this.labels.delete(slot)
+      this.tombstones.add(slot)
+      if (compaction === null) {
+        // cosmos.gl's absence semantics. Not a splice: the array index IS the
+        // slot id, and closing the hole would renumber everything after it.
+        this.positions[slot * 2] = Number.NaN
+        this.positions[slot * 2 + 1] = Number.NaN
+      }
+    }
+
+    if (compaction !== null) {
+      // The server already reclaimed these slots, so there is no hole to mark:
+      // it sends the whole post-compaction array from slot zero. Writing the
+      // tombstone NaNs here as well would blank whatever moved INTO those
+      // indices — the bug this ordering exists to avoid, and the one the unit
+      // test caught.
+      this.positions = new Float32Array(points)
+      this.applyRemap(compaction.old_to_new)
+    }
+    this.links = new Float32Array(links)
+  }
+
+  /**
+   * Rewrite every slot-keyed map through an old→new remap.
+   *
+   * Exported behaviour rather than an internal detail because this is the one
+   * operation that can silently mislabel the whole view, and it has its own
+   * unit test for that reason.
+   */
+  applyRemap(oldToNew: (number | null)[]): void {
+    const labels = new Map<number, SlotLabel>()
+    const slotOfNode = new Map<number, number>()
+    for (const [oldSlot, label] of this.labels) {
+      const next = oldToNew[oldSlot]
+      // `undefined` (index past the remap) and `null` (a reclaimed tombstone)
+      // both mean "gone". Treating them differently would be a distinction the
+      // server does not make.
+      if (next === undefined || next === null) continue
+      labels.set(next, label)
+      if (label.nodeId !== null) slotOfNode.set(label.nodeId, next)
+    }
+    this.labels.clear()
+    for (const [slot, label] of labels) this.labels.set(slot, label)
+    this.slotOfNode.clear()
+    for (const [nodeId, slot] of slotOfNode) this.slotOfNode.set(nodeId, slot)
+    this.tombstones.clear()
+  }
+
+  private splicePositions(firstSlot: number, points: Float32Array): void {
+    const needed = firstSlot * 2 + points.length
+    if (needed > this.positions.length) {
+      const grown = new Float32Array(needed)
+      grown.set(this.positions)
+      this.positions = grown
+    }
+    this.positions.set(points, firstSlot * 2)
+  }
+}

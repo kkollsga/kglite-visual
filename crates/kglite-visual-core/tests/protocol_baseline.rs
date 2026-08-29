@@ -103,6 +103,49 @@ fn generate_framing_golden() {
             enc.push_json(MessageType::Error, r#"{"message":"nope"}"#);
             enc.finish()
         }),
+        // v2's messages. One canonical frame per new type, because the
+        // TypeScript constants pin the *numbers* and only a byte dump pins the
+        // layout a frame carrying that number actually has.
+        ("query-table", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::QueryTable, r#"{"columns":["n"]}"#);
+            enc.finish()
+        }),
+        ("expansion-preview", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::ExpansionPreview, r#"{"slot":0}"#);
+            enc.finish()
+        }),
+        ("graph-slice", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::GraphSlice, r#"{"kind":"expand"}"#);
+            enc.push_f32(MessageType::Points, &[4.0, -5.5]);
+            enc.push_f32(MessageType::Links, &[0.0, 1.0]);
+            enc.finish()
+        }),
+        ("compaction", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::GraphSlice, r#"{"kind":"collapse"}"#);
+            enc.push_json(MessageType::Compaction, r#"{"reclaimed":2}"#);
+            enc.push_f32(MessageType::Points, &[0.0, 0.0]);
+            enc.push_f32(MessageType::Links, &[]);
+            enc.finish()
+        }),
+        ("node-detail", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::NodeDetail, r#"{"node_id":7}"#);
+            enc.finish()
+        }),
+        ("search-result", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::SearchResult, r#"{"hits":[]}"#);
+            enc.finish()
+        }),
+        ("property-stats", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::PropertyStats, r#"{"sampled":false}"#);
+            enc.finish()
+        }),
     ];
 
     let mut out = String::new();

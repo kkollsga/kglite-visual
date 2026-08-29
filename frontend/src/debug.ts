@@ -7,6 +7,10 @@
  * at pixels, and it never sleeps — cosmos.gl v3 initialises asynchronously and
  * renders on demand, so a static scene draws zero frames and a fixed sleep
  * proves nothing either way.
+ *
+ * **Every field here exists because an assertion needs it.** A debug object
+ * that reports what was convenient to expose rather than what a test must check
+ * grows without bound and still fails to answer the question in front of it.
  */
 
 /** What the WebGL device actually supports, probed at startup. */
@@ -23,16 +27,49 @@ export type DeviceFeatures = {
   webgl2: boolean
 }
 
+/** The `{returned, total, truncated}` a bounded response carried (D5). */
+export type Truncation = {
+  returned: number
+  total: number
+  truncated: boolean
+  /** The banner text the UI is actually showing, asserted verbatim. */
+  banner: string | null
+}
+
 export type DebugState = {
   protocolVersion: number
   tier: string | null
+  /** Points that currently draw something — tombstones excluded. */
   pointCount: number
   linkCount: number
+  /** Slots allocated, tombstones included. */
+  slotCount: number
+  tombstoneCount: number
   ready: boolean
   simRunning: boolean
   lastMessageSeq: number
   positionsHash: string | null
   deviceFeatures: DeviceFeatures
+  /** `expand` / `collapse` / `query` / `search` — what last changed the view. */
+  lastSliceKind: string | null
+  /** Compaction remaps applied. A collapse that reclaimed nothing leaves it. */
+  compactions: number
+  /** The last bounded response's truncation metadata, banner included. */
+  truncation: Truncation | null
+  /** The four interaction concepts, as sizes (plan D7). */
+  hoveredSlot: number | null
+  emphasizedCount: number
+  highlightedCount: number
+  selectedCount: number
+  /** Rows in the expansion-preview panel. */
+  previewRows: number
+  /** Rows in the query results table. */
+  queryRows: number
+  /** Hits in the search panel. */
+  searchHits: number
+  /** Property-stat rows offered as appearance channels, and how many are approximate. */
+  appearanceCandidates: number
+  approximateStats: number
   /**
    * The reason the app is not ready, when it is not. Beyond the fields a
    * driving agent asserts on, because "ready is false" without a reason turns
@@ -52,11 +89,25 @@ export const debugState: DebugState = {
   tier: null,
   pointCount: 0,
   linkCount: 0,
+  slotCount: 0,
+  tombstoneCount: 0,
   ready: false,
   simRunning: false,
   lastMessageSeq: -1,
   positionsHash: null,
   deviceFeatures: { float32Renderable: false, textureBlendFloat: false, webgl2: false },
+  lastSliceKind: null,
+  compactions: 0,
+  truncation: null,
+  hoveredSlot: null,
+  emphasizedCount: 0,
+  highlightedCount: 0,
+  selectedCount: 0,
+  previewRows: 0,
+  queryRows: 0,
+  searchHits: 0,
+  appearanceCandidates: 0,
+  approximateStats: 0,
   error: null,
 }
 

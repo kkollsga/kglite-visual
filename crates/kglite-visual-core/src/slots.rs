@@ -24,6 +24,17 @@ impl SlotAllocator {
         Self::default()
     }
 
+    /// An allocator whose next slot is `next`.
+    ///
+    /// The one legitimate way to move the counter backwards: compaction
+    /// renumbers the live slots densely and the allocator has to resume at the
+    /// new end, or it would leave a hole no position array has an entry for.
+    /// Every other caller uses [`Self::new`] — a counter that could be set
+    /// arbitrarily is how a slot gets handed out twice.
+    pub fn starting_at(next: u32) -> Self {
+        Self { next }
+    }
+
     /// Allocate the next slot.
     ///
     /// `u32` is the counter, but the wire carries indices as `f32` (exact to

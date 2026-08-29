@@ -3,7 +3,7 @@
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::sync::Arc;
 
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use axum::Router;
 use kglite_visual_core::{LaunchInfo, Session};
 
@@ -57,6 +57,18 @@ fn router(session: Arc<Session>) -> Router {
         .route("/api/meta-graph", get(api::meta_graph))
         .route("/api/session", get(api::session_info))
         .route("/api/describe", get(api::describe))
+        // The request vocabulary, one named route each so a `curl` line says
+        // what it is asking for. POST rather than GET because every one of
+        // them carries a body and several of them mutate the slot space —
+        // an expansion is not idempotent, and a GET that appends slots would
+        // be re-run by any cache or prefetcher in the path.
+        .route("/api/cypher", post(api::cypher))
+        .route("/api/search", post(api::search))
+        .route("/api/preview", post(api::preview))
+        .route("/api/expand", post(api::expand))
+        .route("/api/collapse", post(api::collapse))
+        .route("/api/node", post(api::node_detail))
+        .route("/api/property-stats", post(api::property_stats))
         // `any` rather than `get`: a WebSocket upgrade is a GET, but routing it
         // through `any` keeps the 405 for a mistaken POST out of the upgrade
         // path, where it would surface as an opaque handshake failure.

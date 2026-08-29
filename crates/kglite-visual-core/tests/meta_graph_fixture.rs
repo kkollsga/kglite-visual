@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use kglite_visual_core::meta_graph::{self, DetailTier};
-use kglite_visual_core::{load_graph, GraphSource, Session, SlotAllocator};
+use kglite_visual_core::{load_graph, GraphSource, Session, View};
 
 fn fixture_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -241,8 +241,8 @@ fn a_graph_with_more_types_than_the_tier_allows_is_clipped_not_dropped() {
     let params = std::collections::HashMap::new();
     execute_mut(&mut graph, &script, &ExecuteOptions::eager(&params)).expect("build");
 
-    let mut slots = SlotAllocator::new();
-    let meta = meta_graph::compute(&graph, &mut slots);
+    let mut view = View::new();
+    let meta = meta_graph::compute(&graph, &mut view);
     assert_eq!(
         meta.meta.tier,
         DetailTier::Compact,

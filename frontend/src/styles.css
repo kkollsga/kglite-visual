@@ -19,7 +19,11 @@
   overflow: hidden;
 }
 
+/* The container stays transparent to drags; the labels themselves are the
+   app's addressable handle on a node, so they take clicks. */
 .kglv-label {
+  pointer-events: auto;
+  cursor: pointer;
   position: absolute;
   top: 0;
   left: 0;
@@ -129,4 +133,215 @@
   margin: 0;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* Panels. The canvas fills the window; these sit over its right edge and are
+   the only overlay that takes pointer events — everything else must let a drag
+   through to the graph. */
+
+.kglv-panels {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgb(13 17 23 / 92%);
+  border-left: 1px solid #30363d;
+  font: 12px/1.5 ui-sans-serif, system-ui, sans-serif;
+  color: #c9d1d9;
+}
+
+.kglv-section-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8b949e;
+}
+
+.kglv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 6px;
+  background: #161b22;
+  border: 1px solid #30363d;
+}
+
+.kglv-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.kglv-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kglv-field-label {
+  color: #8b949e;
+  white-space: nowrap;
+}
+
+.kglv-input,
+.kglv-select,
+.kglv-textarea {
+  min-width: 0;
+  flex: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  color: #e6edf3;
+  font: inherit;
+}
+
+.kglv-textarea {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  resize: vertical;
+}
+
+.kglv-button {
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #e6edf3;
+  font: inherit;
+  cursor: pointer;
+}
+
+.kglv-button:hover {
+  background: #30363d;
+}
+
+.kglv-button-small {
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+.kglv-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #8b949e;
+  cursor: pointer;
+}
+
+.kglv-hint {
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.kglv-selection-title {
+  font-weight: 700;
+  color: #e6edf3;
+}
+
+.kglv-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kglv-preview-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.kglv-preview-name {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kglv-preview-count {
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+}
+
+.kglv-props {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 10px;
+  margin: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 11px;
+}
+
+.kglv-props dt {
+  color: #8b949e;
+}
+
+.kglv-props dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kglv-results {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.kglv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.kglv-table th,
+.kglv-table td {
+  padding: 2px 6px;
+  text-align: left;
+  border-bottom: 1px solid #21262d;
+  white-space: nowrap;
+}
+
+.kglv-table th {
+  color: #8b949e;
+  font-weight: 600;
+}
+
+.kglv-hits {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kglv-hit {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #c9d1d9;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kglv-hit:hover:not(:disabled) {
+  background: #21262d;
+}
+
+.kglv-hit:disabled {
+  color: #6e7681;
+  cursor: default;
 }

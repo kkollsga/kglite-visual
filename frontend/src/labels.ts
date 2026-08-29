@@ -68,12 +68,29 @@ export function chooseLabels(
     .sort((a, b) => a.slot - b.slot)
 }
 
+/**
+ * What a label does when it is clicked or pointed at.
+ *
+ * Labels are the app's only *addressable* handle on a node: a canvas point can
+ * only be reached by guessing at pixels, which is what the test plan's
+ * agent-operability principle rules out. Making the label itself select and
+ * hover is therefore a product decision first — a name is a bigger target than
+ * a five-pixel circle — and the thing that makes the drill-in drivable second.
+ */
+export type LabelHandlers = {
+  onSelect(slot: number): void
+  onHover(slot: number | null): void
+}
+
 export class LabelOverlay {
   private readonly root: HTMLDivElement
   private specs = new Map<number, LabelSpec>()
   private readonly elements = new Map<number, HTMLDivElement>()
 
-  constructor(container: HTMLElement) {
+  constructor(
+    container: HTMLElement,
+    private readonly handlers: LabelHandlers | null = null,
+  ) {
     this.root = document.createElement('div')
     this.root.className = 'kglv-labels'
     container.appendChild(this.root)
@@ -142,6 +159,13 @@ export class LabelOverlay {
     count.className = 'kglv-label-count'
     count.textContent = spec.weight.toLocaleString('en-US')
     element.appendChild(count)
+
+    if (this.handlers !== null) {
+      const handlers = this.handlers
+      element.addEventListener('click', () => handlers.onSelect(spec.slot))
+      element.addEventListener('mouseenter', () => handlers.onHover(spec.slot))
+      element.addEventListener('mouseleave', () => handlers.onHover(null))
+    }
 
     for (const badge of spec.badges) {
       const chip = document.createElement('span')

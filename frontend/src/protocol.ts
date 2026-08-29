@@ -13,7 +13,14 @@ import {
   MessageType,
   PROTOCOL_VERSION,
 } from './generated/protocol-constants'
+import type { Compaction } from './generated/Compaction'
+import type { ExpansionPreview } from './generated/ExpansionPreview'
+import type { GraphSliceMeta } from './generated/GraphSliceMeta'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
+import type { NodeDetail } from './generated/NodeDetail'
+import type { PropertyStatsResponse } from './generated/PropertyStatsResponse'
+import type { QueryTable } from './generated/QueryTable'
+import type { SearchResponse } from './generated/SearchResponse'
 import type { SessionInfo } from './generated/SessionInfo'
 
 /** One decoded frame. `payload` is a view *into* the received buffer. */
@@ -112,6 +119,27 @@ export type MetaGraphMessage = {
   links: Float32Array
 }
 
+/** A fully-received graph slice: an expansion, a collapse, or query results. */
+export type GraphSliceMessage = {
+  meta: GraphSliceMeta
+  /** Present only when the server reclaimed tombstones this round. */
+  compaction: Compaction | null
+  points: Float32Array
+  links: Float32Array
+}
+
+/** Everything a completed response can be. */
+export type Completed =
+  | { kind: 'meta-graph'; value: MetaGraphMessage }
+  | { kind: 'session'; value: SessionInfo }
+  | { kind: 'slice'; value: GraphSliceMessage }
+  | { kind: 'query-table'; value: QueryTable }
+  | { kind: 'preview'; value: ExpansionPreview }
+  | { kind: 'node-detail'; value: NodeDetail }
+  | { kind: 'search'; value: SearchResponse }
+  | { kind: 'property-stats'; value: PropertyStatsResponse }
+  | { kind: 'error'; value: string }
+
 /**
  * Reassembles one response from its frames.
  *
@@ -123,15 +151,18 @@ export class ResponseAssembler {
   private meta: MetaGraphMeta | null = null
   private session: SessionInfo | null = null
   private error: string | null = null
+  private slice: GraphSliceMeta | null = null
+  private compaction: Compaction | null = null
+  private table: QueryTable | null = null
+  private preview: ExpansionPreview | null = null
+  private detail: NodeDetail | null = null
+  private search: SearchResponse | null = null
+  private stats: PropertyStatsResponse | null = null
   private readonly chunks = new Map<number, { offset: number; bytes: Uint8Array }[]>()
   lastSeq = -1
 
   /** Feed one frame. Returns the completed response, if this frame ended one. */
-  push(frame: Frame):
-    | { kind: 'meta-graph'; value: MetaGraphMessage }
-    | { kind: 'session'; value: SessionInfo }
-    | { kind: 'error'; value: string }
-    | null {
+  push(frame: Frame): Completed | null {
     this.lastSeq = frame.seq
 
     switch (frame.msgType) {
@@ -143,6 +174,27 @@ export class ResponseAssembler {
         break
       case MessageType.ERROR:
         this.error = asJson<{ message: string }>(frame).message
+        break
+      case MessageType.GRAPH_SLICE:
+        this.slice = asJson<GraphSliceMeta>(frame)
+        break
+      case MessageType.COMPACTION:
+        this.compaction = asJson<Compaction>(frame)
+        break
+      case MessageType.QUERY_TABLE:
+        this.table = asJson<QueryTable>(frame)
+        break
+      case MessageType.EXPANSION_PREVIEW:
+        this.preview = asJson<ExpansionPreview>(frame)
+        break
+      case MessageType.NODE_DETAIL:
+        this.detail = asJson<NodeDetail>(frame)
+        break
+      case MessageType.SEARCH_RESULT:
+        this.search = asJson<SearchResponse>(frame)
+        break
+      case MessageType.PROPERTY_STATS:
+        this.stats = asJson<PropertyStatsResponse>(frame)
         break
       case MessageType.POINTS:
       case MessageType.LINKS: {
@@ -162,32 +214,59 @@ export class ResponseAssembler {
     return this.complete()
   }
 
-  private complete() {
-    const finished = (() => {
-      if (this.error !== null) {
-        return { kind: 'error', value: this.error } as const
-      }
-      if (this.meta !== null) {
-        return {
-          kind: 'meta-graph',
-          value: {
-            meta: this.meta,
-            points: this.joinFloats(MessageType.POINTS),
-            links: this.joinFloats(MessageType.LINKS),
-          },
-        } as const
-      }
-      if (this.session !== null) {
-        return { kind: 'session', value: this.session } as const
-      }
-      throw new ProtocolError('a response ended without carrying anything')
-    })()
-
+  private complete(): Completed {
+    const finished = this.classify()
     this.meta = null
     this.session = null
     this.error = null
+    this.slice = null
+    this.compaction = null
+    this.table = null
+    this.preview = null
+    this.detail = null
+    this.search = null
+    this.stats = null
     this.chunks.clear()
     return finished
+  }
+
+  /**
+   * Decide what the frames that just arrived add up to.
+   *
+   * Error first, deliberately: a response that carries a failure *and* a
+   * partial payload is a failure, and rendering the payload would show the user
+   * a view built from an answer the server did not stand behind.
+   */
+  private classify(): Completed {
+    if (this.error !== null) return { kind: 'error', value: this.error }
+    if (this.meta !== null) {
+      return {
+        kind: 'meta-graph',
+        value: {
+          meta: this.meta,
+          points: this.joinFloats(MessageType.POINTS),
+          links: this.joinFloats(MessageType.LINKS),
+        },
+      }
+    }
+    if (this.slice !== null) {
+      return {
+        kind: 'slice',
+        value: {
+          meta: this.slice,
+          compaction: this.compaction,
+          points: this.joinFloats(MessageType.POINTS),
+          links: this.joinFloats(MessageType.LINKS),
+        },
+      }
+    }
+    if (this.table !== null) return { kind: 'query-table', value: this.table }
+    if (this.preview !== null) return { kind: 'preview', value: this.preview }
+    if (this.detail !== null) return { kind: 'node-detail', value: this.detail }
+    if (this.search !== null) return { kind: 'search', value: this.search }
+    if (this.stats !== null) return { kind: 'property-stats', value: this.stats }
+    if (this.session !== null) return { kind: 'session', value: this.session }
+    throw new ProtocolError('a response ended without carrying anything')
   }
 
   /**

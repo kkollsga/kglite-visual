@@ -25,6 +25,14 @@ pub enum CoreError {
     /// working at the call sites, so the box is invisible to callers.
     #[error("query failed: {0}")]
     Query(#[source] Box<kglite::api::KgError>),
+
+    /// The request itself was wrong: a slot that names nothing, a node type
+    /// this graph does not have, an identifier that is not one. Distinct from
+    /// [`Self::Query`] because the remedy is different — the caller fixes the
+    /// request, rather than the engine having failed at a well-formed one — and
+    /// because a consumer mapping this to an HTTP status wants 400, not 500.
+    #[error("{0}")]
+    Request(String),
 }
 
 impl From<kglite::api::KgError> for CoreError {

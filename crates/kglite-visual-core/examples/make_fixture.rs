@@ -22,7 +22,7 @@ use kglite::api::graphgen;
 use kglite::api::io::{load_file, prepare_kgl_write, write_kgl};
 use kglite::api::session::{execute_mut, ExecuteOptions};
 use kglite::api::{DirGraph, GraphGenConfig, SpatialConfig};
-use kglite_visual_core::{meta_graph, SlotAllocator};
+use kglite_visual_core::{meta_graph, View};
 
 /// Person count. Everything else scales off it inside graphgen.
 const PERSONS: u64 = 60;
@@ -89,8 +89,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read the positions back off the *saved* graph, not the in-memory one:
     // the baseline must describe what a consumer loading the fixture sees.
     let reloaded = load_file(kgl_path.to_str().expect("ASCII fixture path"))?;
-    let mut slots = SlotAllocator::new();
-    let meta = meta_graph::compute(&reloaded, &mut slots);
+    let mut view = View::new();
+    let meta = meta_graph::compute(&reloaded, &mut view);
     let positions_path = fixtures.join("meta.positions.json");
     std::fs::write(&positions_path, positions_document(&meta))?;
     eprintln!("wrote {}", positions_path.display());

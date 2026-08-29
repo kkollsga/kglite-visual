@@ -1,25 +1,41 @@
 /**
- * Entry point: connect, decode, render the meta-graph.
+ * Entry point: connect, decode, render, and drive the drill-in.
  *
  * No framework, and no graph data in observable state (plan D7). The
  * comparable-repo study found the same failure in every slow graph UI —
  * putting nodes and edges in framework state turns one click into an O(V+E)
  * re-render. Payloads go from the socket into typed arrays and straight to the
  * renderer; only the small scalars in `state.ts` are ever observed.
+ *
+ * The drill-in is the flagship flow and it reads in one line here: click a
+ * meta-graph type node → preview its relationship counts (no fetch) → expand
+ * one of them, bounded → collapse back to tombstones.
  */
 
 import './styles.css'
 
-import type { Graph } from '@cosmos.gl/graph'
-
+import {
+  compileCategoricalColor,
+  compileNumericSize,
+  fillColors,
+  UNSET_COLOR,
+  type Rgba,
+} from './appearance'
 import { debugState, probeDeviceFeatures, publishDebugState } from './debug'
+import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
+import type { NodeDetail } from './generated/NodeDetail'
+import type { PropertyStat } from './generated/PropertyStat'
+import type { Request } from './generated/Request'
+import { InteractionState } from './interaction'
 import { LabelOverlay } from './labels'
-import { assertLittleEndian, fnv1a, ResponseAssembler, type MetaGraphMessage } from './protocol'
-import { mountMetaGraph } from './render'
+import { Panels } from './panels'
+import { assertLittleEndian, fnv1a, ResponseAssembler, type Completed } from './protocol'
+import { mountGraph, type Appearance, type Surface } from './render'
 import { connectedAtom } from './state'
 import { rendersGraph } from './tiers'
 import { WebSocketTransport } from './transport'
+import { SlotView } from './view'
 
 const mount = document.querySelector<HTMLDivElement>('#app')
 if (!mount) throw new Error('#app is missing from index.html')
@@ -40,10 +56,103 @@ const status = document.createElement('div')
 status.className = 'kglv-status'
 root.appendChild(status)
 
-const labels = new LabelOverlay(root)
-
+const labels = new LabelOverlay(root, {
+  // A label is the addressable handle on a node: clicking the name selects it
+  // and pointing at it emphasises its neighbourhood, both without a single
+  // pixel guess. Same code path as a canvas click — `onPointClick` below.
+  onSelect: (slot) => {
+    interaction.setSelected([slot])
+    applyInteraction()
+    send({ type: 'preview', slot })
+  },
+  onHover: (slot) => {
+    if (surface === null) return
+    if (interaction.hover(surface.graph, slot)) applyInteraction()
+  },
+})
+const view = new SlotView()
+const interaction = new InteractionState()
 const assembler = new ResponseAssembler()
 const transport = new WebSocketTransport('ws')
+
+let surface: Surface | null = null
+let lastMeta: MetaGraphMeta | null = null
+let lastPreview: ExpansionPreview | null = null
+let lastDetail: NodeDetail | null = null
+/** The banner the last bounded response produced, or null when nothing was clipped. */
+let truncationBanner: string | null = null
+
+/** Appearance state: a compiled getter plus the values it reads. */
+let colorByStat: PropertyStat | null = null
+let sizeByName: string | null = null
+const appearanceValues = new Map<number, unknown>()
+/** Values for the size channel, keyed by slot. Separate array, separate query. */
+const sizeValues = new Map<number, number>()
+
+const panels = new Panels(root, {
+  runQuery: (query, asGraph) => {
+    if (query.trim() === '') return
+    send({ type: 'cypher', query, params: {}, limit: null, as_graph: asGraph })
+  },
+  expand: (slot, relationship, direction, limit) =>
+    send({ type: 'expand', slot, relationship, direction, limit }),
+  collapse: (slot) => send({ type: 'collapse', slot }),
+  search: (query, nodeType) => {
+    if (query.trim() === '') return
+    send({
+      type: 'search',
+      query,
+      node_type: nodeType,
+      // The fixture's instance nodes carry kglite's canonical `title`, which is
+      // also what the label overlay shows — so the box searches what the user
+      // can see. A different default would find things the screen cannot name.
+      property: 'title',
+      mode: 'contains',
+      limit: null,
+    })
+  },
+  loadHits: (nodeIds, nodeType) => {
+    // Bounded by construction: the id list is whatever the search returned,
+    // and the search was itself bounded in core (D5). The query's own row
+    // bound clamps it again on the way back.
+    const label = nodeType === null ? '' : `:${nodeType}`
+    send({
+      type: 'cypher',
+      query: `MATCH (n${label}) WHERE id(n) IN $ids RETURN n`,
+      params: { ids: nodeIds },
+      limit: null,
+      as_graph: true,
+    })
+  },
+  focusSlot: (slot) => {
+    interaction.setSelected([slot])
+    applyInteraction()
+    send({ type: 'preview', slot })
+  },
+  setColorBy: (property) => {
+    colorByStat = property === null ? null : (lastStats.get(property) ?? null)
+    appearanceValues.clear()
+    if (property === null) {
+      redraw()
+      return
+    }
+    requestAppearanceValues(property, 'color')
+  },
+  setSizeBy: (property) => {
+    sizeByName = property
+    sizeValues.clear()
+    if (property === null) {
+      redraw()
+      return
+    }
+    requestAppearanceValues(property, 'size')
+  },
+})
+
+/** The property statistics behind the two dropdowns, by property name. */
+const lastStats = new Map<string, PropertyStat>()
+/** Which channel the in-flight appearance query is filling. */
+let appearanceChannel: 'color' | 'size' | null = null
 
 transport.connect({
   onStatus: (connected) => {
@@ -61,78 +170,312 @@ transport.connect({
     }
     debugState.lastMessageSeq = assembler.lastSeq
     if (completed === null) return
-
-    switch (completed.kind) {
-      case 'session':
-        debugState.protocolVersion = completed.value.protocol_version
-        debugState.tier = completed.value.tier
-        renderStatus()
-        break
-      case 'meta-graph':
-        void showMetaGraph(completed.value)
-        break
-      case 'error':
-        fail(completed.value)
-        break
-    }
+    void handle(completed)
   },
 })
 
-let lastMeta: MetaGraphMeta | null = null
+function send(request: Request): void {
+  transport.send(JSON.stringify(request))
+}
 
-async function showMetaGraph(message: MetaGraphMessage): Promise<void> {
+async function handle(completed: Completed): Promise<void> {
+  switch (completed.kind) {
+    case 'session':
+      debugState.protocolVersion = completed.value.protocol_version
+      debugState.tier = completed.value.tier
+      renderStatus()
+      break
+    case 'meta-graph':
+      await showMetaGraph(completed.value)
+      break
+    case 'slice': {
+      const { meta, compaction, points, links } = completed.value
+      view.applySlice(meta, compaction, points, links)
+      if (compaction !== null) {
+        // The remap is inside `applySlice`, which needs it before it rebuilds
+        // its maps; this only counts it for the debug hook.
+        debugState.compactions += 1
+      }
+      debugState.lastSliceKind = meta.kind
+      noteTruncation(
+        meta.bound.truncated,
+        meta.bound.returned,
+        meta.bound.total,
+        meta.kind === 'collapse' ? 'collapsed' : 'nodes',
+      )
+      // A compaction renumbers every slot, so anything the user had selected or
+      // hovered now names something else. Dropping the sets is the only honest
+      // response — carrying them across would highlight arbitrary nodes.
+      if (compaction !== null) {
+        interaction.setSelected([])
+        interaction.setHighlighted([])
+        if (surface !== null) interaction.hover(surface.graph, null)
+        lastPreview = null
+        lastDetail = null
+        panels.clearSelection()
+      }
+      redraw()
+      break
+    }
+    case 'preview':
+      lastPreview = completed.value
+      // A type node has no stored properties; an instance does, and the panel
+      // shows both in one place, so the detail is fetched alongside.
+      if (completed.value.scope === 'node') {
+        send({ type: 'node-detail', slot: completed.value.slot })
+      } else {
+        lastDetail = null
+        send({ type: 'property-stats', node_type: completed.value.node_type })
+      }
+      debugState.previewRows = panels.showPreview(completed.value, lastDetail)
+      break
+    case 'node-detail':
+      lastDetail = completed.value
+      if (lastPreview !== null) {
+        debugState.previewRows = panels.showPreview(lastPreview, lastDetail)
+      }
+      send({ type: 'property-stats', node_type: completed.value.node_type })
+      break
+    case 'query-table': {
+      const table = completed.value
+      if (appearanceChannel !== null) {
+        absorbAppearanceValues(table.columns, table.data, appearanceChannel)
+        appearanceChannel = null
+        break
+      }
+      debugState.queryRows = panels.showQueryTable(table)
+      noteTruncation(table.bound.truncated, table.bound.returned, table.bound.total, 'rows')
+      renderStatus()
+      break
+    }
+    case 'search': {
+      debugState.searchHits = panels.showSearch(completed.value)
+      interaction.setHighlighted(panels.loadedHitSlots())
+      redraw()
+      break
+    }
+    case 'property-stats': {
+      lastStats.clear()
+      for (const stat of completed.value.properties) lastStats.set(stat.name, stat)
+      const [candidates, approximate] = panels.showPropertyStats(completed.value)
+      debugState.appearanceCandidates = candidates
+      debugState.approximateStats = approximate
+      break
+    }
+    case 'error':
+      // A query failure is the panel's business, not the whole app's: the graph
+      // on screen is still valid and blanking it would lose the user's place.
+      if (appearanceChannel !== null) appearanceChannel = null
+      panels.showQueryError(completed.value)
+      break
+  }
+}
+
+async function showMetaGraph(message: {
+  meta: MetaGraphMeta
+  points: Float32Array
+  links: Float32Array
+}): Promise<void> {
   lastMeta = message.meta
+  view.setMetaGraph(message.meta, message.points, message.links)
   debugState.tier = message.meta.tier
   debugState.protocolVersion = message.meta.protocol_version
-  debugState.pointCount = message.meta.nodes.length
-  debugState.linkCount = message.meta.edges.length
   debugState.positionsHash = fnv1a(message.points)
+  panels.setNodeTypes(message.meta.nodes.map((node) => node.name))
   renderStatus()
 
   if (!rendersGraph(message.meta.tier)) {
     // Tier 4: thousands of type nodes is not a picture of anything. The stats
-    // panel is the honest view, and search (P3) is the way in.
+    // panel is the honest view, and search is the way in.
     showSummaryPanel(message.meta)
+    syncCounts()
     debugState.ready = true
     return
   }
 
   try {
-    const view = await mountMetaGraph(canvasHost, message)
-    attachLabels(view.graph, message)
-    debugState.simRunning = view.graph.isSimulationRunning
+    surface = await mountGraph(canvasHost, view, appearance())
+    attachHandlers(surface)
+    debugState.simRunning = surface.graph.isSimulationRunning
+    redraw()
     debugState.ready = true
   } catch (err) {
     // A device with no WebGL2 lands here. D10: an honest error, never a
     // second renderer.
-    fail(
-      `the renderer could not start: ${err instanceof Error ? err.message : String(err)}`,
-    )
+    fail(`the renderer could not start: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
-function attachLabels(graph: Graph, message: MetaGraphMessage): void {
-  labels.setLabels(
-    message.meta.nodes.map((node) => ({
-      slot: node.slot,
-      text: node.name,
-      badges: node.capabilities,
-      weight: node.count,
-    })),
+/**
+ * One upload, one label pass, one interaction projection.
+ *
+ * Everything that changes the view funnels through here so there is exactly one
+ * place that talks to the GPU — and so the debug counts can never describe a
+ * frame that was not drawn.
+ */
+function redraw(): void {
+  if (surface === null) return
+  surface.upload(view, appearance())
+  interaction.apply(surface.graph)
+  updateLabels(surface)
+  syncCounts()
+  renderStatus()
+}
+
+function appearance(): Appearance {
+  const slots = view.slotCount
+  const sizes = new Float32Array(slots)
+  const sizeOf = compileNumericSize([...sizeValues.values()])
+  for (let slot = 0; slot < slots; slot += 1) {
+    const label = view.label(slot)
+    if (label === undefined) {
+      sizes[slot] = 0
+      continue
+    }
+    if (sizeByName !== null && sizeValues.has(slot)) {
+      sizes[slot] = sizeOf(sizeValues.get(slot))
+    } else if (label.isType) {
+      // Fourth root, not linear or square-root: a meta-graph routinely spans
+      // four orders of magnitude between its largest and smallest type, and
+      // both of the usual scales make the small ones invisible at that spread.
+      sizes[slot] = 8 + 26 * Math.pow(label.weight, 0.25) / Math.pow(maxTypeCount(), 0.25)
+    } else {
+      sizes[slot] = 6
+    }
+  }
+
+  const colorOf = colorByStat === null ? null : compileCategoricalColor(colorByStat)
+  const highlighted = new Set(interaction.highlightedSlots())
+  const colors = fillColors(
+    slots,
+    (slot) => baseColor(slot, colorOf),
+    highlighted,
   )
-  const source = {
+
+  const widths = new Float32Array(view.linkCount)
+  widths.fill(1)
+  return { colors, sizes, linkWidths: widths }
+}
+
+/**
+ * A slot's colour before highlighting.
+ *
+ * With no colour-by chosen, the one bit a type node carries is whether it
+ * declares any capability, and an instance node is drawn in its own muted hue
+ * so the meta-graph stays legible under an expansion.
+ */
+function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rgba {
+  const label = view.label(slot)
+  if (label === undefined) return UNSET_COLOR
+  if (colorOf !== null && appearanceValues.has(slot)) return colorOf(appearanceValues.get(slot))
+  if (!label.isType) return [0.55, 0.70, 0.90, 0.85]
+  const plain = label.badges.length === 0
+  // cosmos.gl takes 0..1 channels, not 0..255.
+  return plain ? [0.35, 0.65, 0.98, 0.92] : [0.98, 0.75, 0.32, 0.92]
+}
+
+function maxTypeCount(): number {
+  let max = 1
+  for (const slot of view.liveSlots()) {
+    const label = view.label(slot)
+    if (label?.isType === true) max = Math.max(max, label.weight)
+  }
+  return max
+}
+
+function attachHandlers(current: Surface): void {
+  current.graph.setConfigPartial({
+    // Index-addressed callbacks from the renderer, and the only ones: the four
+    // interaction concepts are index ARRAYS pushed back through
+    // `setConfigPartial`, never a per-item reducer (plan D7).
+    onPointMouseOver: (index: number) => {
+      if (interaction.hover(current.graph, index)) applyInteraction()
+    },
+    onPointMouseOut: () => {
+      if (interaction.hover(current.graph, null)) applyInteraction()
+    },
+    onPointClick: (index: number) => {
+      interaction.setSelected([index])
+      applyInteraction()
+      send({ type: 'preview', slot: index })
+    },
+    onClick: (index: number | undefined) => {
+      if (index !== undefined) return
+      interaction.setSelected([])
+      applyInteraction()
+      lastPreview = null
+      lastDetail = null
+      panels.clearSelection()
+    },
+    onZoom: () => updateLabels(current),
+    onZoomEnd: () => updateLabels(current),
+  })
+}
+
+/** One `setConfigPartial` for all four concepts, then one frame. */
+function applyInteraction(): void {
+  if (surface === null) return
+  interaction.apply(surface.graph)
+  surface.graph.render(undefined, 0)
+  syncCounts()
+}
+
+function updateLabels(current: Surface): void {
+  const graph = current.graph
+  labels.setLabels(
+    view.liveSlots().map((slot) => {
+      const label = view.label(slot)
+      return {
+        slot,
+        text: label?.text ?? '',
+        badges: label?.badges ?? [],
+        weight: label?.weight ?? 0,
+      }
+    }),
+  )
+  labels.update({
     sampledPoints: () => graph.getSampledPoints(),
     toScreen: (position: [number, number]) => graph.spaceToScreenPosition(position),
     radius: (index: number) => graph.getPointRadiusByIndex(index) ?? 0,
-  }
-  labels.update(source)
-  // Labels are screen-space, so they move on every zoom and pan. `onZoom`
-  // fires per frame of a zoom gesture; `onZoomEnd` catches the final resting
-  // transform, which is the one a screenshot sees.
-  graph.setConfigPartial({
-    onZoom: () => labels.update(source),
-    onZoomEnd: () => labels.update(source),
   })
+}
+
+function syncCounts(): void {
+  debugState.pointCount = view.liveCount
+  debugState.linkCount = view.linkCount
+  debugState.slotCount = view.slotCount
+  debugState.tombstoneCount = view.tombstoneCount
+  debugState.hoveredSlot = interaction.hoveredSlot()
+  debugState.emphasizedCount = interaction.emphasizedSlots().length
+  debugState.highlightedCount = interaction.highlightedSlots().length
+  debugState.selectedCount = interaction.selectedSlots().length
+  debugState.truncation =
+    truncation === null
+      ? null
+      : { ...truncation, banner: truncationBanner }
+}
+
+let truncation: { returned: number; total: number; truncated: boolean } | null = null
+
+/**
+ * Record what a bounded response did, and phrase the banner.
+ *
+ * D5: a truncated answer that does not say so reads as a complete one, so this
+ * runs on every bounded response — not only the truncated ones — and the banner
+ * text is what `window.__kglv` reports, so a test asserts the words the user
+ * actually sees rather than a boolean beside them.
+ */
+function noteTruncation(
+  truncated: boolean,
+  returned: number,
+  total: number,
+  unit: string,
+): void {
+  truncation = { returned, total, truncated }
+  truncationBanner = truncated
+    ? `showing ${returned.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ${unit}`
+    : null
+  syncCounts()
 }
 
 function showSummaryPanel(meta: MetaGraphMeta): void {
@@ -160,6 +503,55 @@ function showSummaryPanel(meta: MetaGraphMeta): void {
   inner.appendChild(list)
   panel.appendChild(inner)
   root.appendChild(panel)
+}
+
+/**
+ * Fetch the per-node values an appearance channel needs.
+ *
+ * Through the ordinary Cypher path, over the ids currently on screen — the
+ * statistics say what a property *looks like* across the type, and colouring
+ * needs each node's own value. Bounded because the id list is bounded: nothing
+ * on screen got there except through a bounded response.
+ */
+function requestAppearanceValues(property: string, channel: 'color' | 'size'): void {
+  const ids: number[] = []
+  for (const slot of view.liveSlots()) {
+    const label = view.label(slot)
+    if (label?.nodeId != null) ids.push(label.nodeId)
+  }
+  if (ids.length === 0) {
+    redraw()
+    return
+  }
+  appearanceChannel = channel
+  send({
+    type: 'cypher',
+    query: `MATCH (n) WHERE id(n) IN $ids RETURN id(n) AS id, n.${property} AS value`,
+    params: { ids },
+    limit: null,
+    as_graph: false,
+  })
+}
+
+function absorbAppearanceValues(
+  columns: string[],
+  data: unknown[][],
+  channel: 'color' | 'size',
+): void {
+  const idColumn = data[columns.indexOf('id')] ?? []
+  const valueColumn = data[columns.indexOf('value')] ?? []
+  for (const [row, rawId] of idColumn.entries()) {
+    const slot = view.slotForNode(Number(rawId))
+    if (slot === undefined) continue
+    const value = valueColumn[row]
+    if (channel === 'color') {
+      appearanceValues.set(slot, value)
+    } else {
+      const numeric = Number(value)
+      if (Number.isFinite(numeric)) sizeValues.set(slot, numeric)
+    }
+  }
+  redraw()
 }
 
 function fail(message: string): void {
@@ -190,6 +582,19 @@ function renderStatus(): void {
           `${lastMeta.edge_bound.total} relationships</span>`,
       )
     }
+  }
+  if (view.slotCount > 0) {
+    const drawn = `${view.liveCount.toLocaleString('en-US')} drawn`
+    const dead =
+      view.tombstoneCount > 0
+        ? ` / ${view.tombstoneCount.toLocaleString('en-US')} collapsed`
+        : ''
+    lines.push(`${drawn}${dead}`)
+  }
+  if (truncationBanner !== null) {
+    lines.push(
+      `<span class="kglv-warn" data-testid="truncation-banner">${escapeHtml(truncationBanner)}</span>`,
+    )
   }
   if (!debugState.deviceFeatures.webgl2) {
     lines.push('<span class="kglv-error">no WebGL2 on this device</span>')

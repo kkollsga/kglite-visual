@@ -11,23 +11,13 @@
  * either direction.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { createInterface } from 'node:readline'
-import path from 'node:path'
 import { expect, test } from '@playwright/test'
 
-// Playwright runs with the config's directory as cwd, so the repo root is one
-// level up. Derived rather than hard-coded, and verified below: a wrong root
-// would otherwise surface as "binary not found", which reads like a build
-// problem rather than a path problem.
-const REPO = path.resolve(process.cwd(), '..')
-const FIXTURE = 'crates/kglite-visual-core/tests/fixtures/meta.kgl'
+import { FIXTURE, launch } from './harness'
 
 /** The meta-graph of `meta.kgl`, asserted exactly (see the core L1 tests). */
 const EXPECTED = {
-  protocolVersion: 1,
+  protocolVersion: 2,
   tier: 'full',
   pointCount: 5,
   linkCount: 7,
@@ -36,57 +26,6 @@ const EXPECTED = {
   // A red here after a deliberate change is regenerated with a reason, in the
   // same commit — never to silence a diff (CLAUDE.md → "Gate honesty").
   positionsHash: 'ab2ea15b',
-}
-
-type LaunchInfo = { url: string; port: number; pid: number; graph: string }
-
-type Launched = { process: ChildProcessWithoutNullStreams; info: LaunchInfo; stderr: string[] }
-
-/**
- * Resolve the binary through the newest-of-profile check.
- *
- * Never `target/debug/...` hard-coded, and never "release if present": the
- * script refuses a binary older than the bundle it should embed, which is the
- * exact failure this suite would otherwise report as a frontend bug.
- */
-function resolveBinary(): string {
-  return execFileSync(
-    'python3',
-    [path.join(REPO, 'scripts/check_bundle.py'), '--resolve-binary', 'kglite-visual'],
-    { encoding: 'utf8', cwd: REPO },
-  ).trim()
-}
-
-async function launch(): Promise<Launched> {
-  if (!existsSync(path.join(REPO, FIXTURE))) {
-    throw new Error(`fixture ${FIXTURE} not found under ${REPO}`)
-  }
-  const child = spawn(resolveBinary(), [FIXTURE, '--no-open', '--port', '0'], {
-    cwd: REPO,
-  })
-  const stderr: string[] = []
-  createInterface({ input: child.stderr }).on('line', (line) => stderr.push(line))
-
-  const info = await new Promise<LaunchInfo>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`no stdout JSON line in 20s; stderr:\n${stderr.join('\n')}`)),
-      20_000,
-    )
-    const lines: string[] = []
-    createInterface({ input: child.stdout }).on('line', (line) => {
-      lines.push(line)
-      clearTimeout(timer)
-      // The launch contract: stdout carries exactly ONE line, and it parses.
-      // Scraping free-form logs or racing a hard-coded port is what this
-      // replaces.
-      resolve(JSON.parse(line) as LaunchInfo)
-    })
-    child.on('exit', (code) =>
-      reject(new Error(`binary exited with ${code}; stderr:\n${stderr.join('\n')}`)),
-    )
-  })
-
-  return { process: child, info, stderr }
 }
 
 test('the meta-graph renders and reports the fixture back through __kglv', async ({

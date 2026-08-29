@@ -27,10 +27,26 @@ const JITTER_STEPS: u64 = 8192;
 /// Positions for `count` slots, as the `[x0, y0, x1, y1, …]` pair array the
 /// wire and cosmos.gl's `setPointPositions` both take.
 pub fn positions_for(count: u32) -> Vec<f32> {
+    positions_range(0, count)
+}
+
+/// Positions for the `count` slots starting at `first`.
+///
+/// The spiral is walked from cell zero every time rather than resumed from
+/// saved state. That is what makes a slot's position a pure function of the
+/// slot *id*: P3's expansion appends slots to a space that already holds the
+/// meta-graph, and a resumed walker would put slot 7 somewhere different
+/// depending on how many requests preceded it. The walk is a handful of
+/// integer adds per slot, and the response bound (D5) caps how far it ever
+/// runs.
+pub fn positions_range(first: u32, count: u32) -> Vec<f32> {
     let mut out = Vec::with_capacity(count as usize * 2);
     let mut walker = SpiralWalker::default();
-    for slot in 0..count {
+    for slot in 0..first.saturating_add(count) {
         let (cx, cy) = walker.next_cell();
+        if slot < first {
+            continue;
+        }
         out.push(cx as f32 * SPACING + jitter(slot, 0));
         out.push(cy as f32 * SPACING + jitter(slot, 1));
     }
@@ -148,6 +164,23 @@ mod tests {
         let five = positions_for(5);
         let fifty = positions_for(50);
         assert_eq!(five, fifty[..10]);
+    }
+
+    #[test]
+    fn a_range_is_the_same_slice_the_whole_layout_would_have_given() {
+        // Expansion sends only the new slots' positions (D4: expand = append).
+        // If a range disagreed with the prefix, an expanded node would land in
+        // a different place than a reload of the same view puts it.
+        let whole = positions_for(200);
+        for (first, count) in [(0u32, 5u32), (5, 7), (7, 100), (199, 1), (200, 0)] {
+            let range = positions_range(first, count);
+            let at = first as usize * 2;
+            assert_eq!(
+                range,
+                whole[at..at + count as usize * 2],
+                "range({first}, {count}) is not the prefix's slice"
+            );
+        }
     }
 
     #[test]

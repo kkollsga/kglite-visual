@@ -22,7 +22,7 @@ use ts_rs::TS;
 use crate::bound::{self, Bound, BoundInfo};
 use crate::layout;
 use crate::protocol::PROTOCOL_VERSION;
-use crate::slots::SlotAllocator;
+use crate::view::{View, ViewEdge};
 
 /// How much of the schema the server decided to send.
 ///
@@ -217,12 +217,14 @@ fn capabilities_for(graph: &DirGraph, node_type: &str) -> Vec<String> {
     flags
 }
 
-/// Compute the meta-graph, allocating one slot per type node from `slots`.
+/// Compute the meta-graph, allocating one slot per type node from `view`.
 ///
-/// `slots` is threaded in rather than created here because P3's expansion
-/// draws instance slots from the same allocator; a meta-graph that owned a
-/// private counter would hand out slot 3 twice.
-pub fn compute(graph: &DirGraph, slots: &mut SlotAllocator) -> MetaGraphResponse {
+/// The view is threaded in rather than created here because expansion draws
+/// instance slots from the same allocator and re-sends the same link list; a
+/// meta-graph that owned a private counter would hand out slot 3 twice, and one
+/// that kept its links to itself would have them dropped by the first expansion
+/// (`setLinks` replaces the buffer whole).
+pub fn compute(graph: &DirGraph, view: &mut View) -> MetaGraphResponse {
     let mut types: Vec<(String, u32, bool)> = graph
         .type_indices
         .iter()
@@ -258,7 +260,7 @@ pub fn compute(graph: &DirGraph, slots: &mut SlotAllocator) -> MetaGraphResponse
     let mut slot_of: HashMap<&str, u32> = HashMap::with_capacity(kept.len());
     let mut nodes = Vec::with_capacity(kept.len());
     for (name, count, supporting) in &kept {
-        let slot = slots.alloc();
+        let slot = view.intern_type(name);
         slot_of.insert(name.as_str(), slot);
         nodes.push(MetaTypeNode {
             slot,
@@ -303,6 +305,18 @@ pub fn compute(graph: &DirGraph, slots: &mut SlotAllocator) -> MetaGraphResponse
         },
         |e| e.name.len() + 64,
     );
+
+    // The meta links join the view, so every later slice re-sends them whole
+    // (D4). Without this the first expansion's `setLinks` would silently erase
+    // the meta-graph's own edges.
+    for edge in &edges {
+        view.add_edge(ViewEdge {
+            source_slot: edge.source_slot,
+            target_slot: edge.target_slot,
+            name: edge.name.clone(),
+            meta: true,
+        });
+    }
 
     let points = layout::positions_for(nodes.len() as u32);
     let links: Vec<f32> = edges
