@@ -29,7 +29,7 @@ pub use control::{control_frames, Appearance, Command, Focus, Highlight, Highlig
 pub use error::CoreError;
 pub use expand::{ExpansionPreview, MAX_EXPANSION_NODES};
 pub use launch::LaunchInfo;
-pub use loader::{load_graph, node_counts_by_type, GraphSource};
+pub use loader::{load_graph, load_graph_with, node_counts_by_type, GraphSource, LoadLimits};
 pub use meta_graph::{DetailTier, MetaGraphResponse};
 pub use protocol::{
     decode_frame, DecodedFrame, MessageType, ProtocolError, ResponseEncoder, PROTOCOL_VERSION,

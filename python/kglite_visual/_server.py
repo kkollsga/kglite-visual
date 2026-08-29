@@ -166,6 +166,7 @@ def show(
     query_timeout_secs: int = 30,
     height: int = 640,
     name: str | None = None,
+    max_load_mb: int | None = None,
 ) -> Server:
     """Serve a knowledge graph and return the handle that stops it.
 
@@ -188,6 +189,15 @@ def show(
     name
         What to call this graph in the launch contract and the notebook
         caption. Defaults to the path, or to the source's type.
+    max_load_mb
+        Refuse the graph if kglite estimates the load will peak above this many
+        megabytes, raising `MemoryError` with the estimate, the ceiling and the
+        term breakdown in the message. Checked from the `.kgl`'s metadata head
+        before anything is decompressed, so a refusal costs one short read.
+        `None` (the default) leaves kglite's process-wide `KGLITE_MAX_LOAD_MB`
+        in charge, or applies no ceiling at all if that is unset. The estimate
+        is conservative and can refuse a graph that would have fitted, so set
+        it where a failure is what you want rather than as a tight budget.
 
     Memory
     ------
@@ -209,9 +219,9 @@ def show(
     """
     is_path, payload, display = _as_source(source, name)
     if is_path:
-        native = _serve_path(payload, port, query_timeout_secs)
+        native = _serve_path(payload, port, query_timeout_secs, max_load_mb)
     else:
-        native = _serve_bytes(payload, display, port, query_timeout_secs)
+        native = _serve_bytes(payload, display, port, query_timeout_secs, max_load_mb)
 
     server = Server(native, height=height)
 

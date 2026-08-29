@@ -21,7 +21,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
-use kglite_visual_core::{load_graph, GraphSource, QueryConfig, Session, QUERY_THREAD_STACK_BYTES};
+use kglite_visual_core::{
+    load_graph_with, GraphSource, LoadLimits, QueryConfig, Session, QUERY_THREAD_STACK_BYTES,
+};
 
 use crate::render_cmd::{self, RenderArgs};
 use crate::{assets, server};
@@ -64,6 +66,19 @@ struct Cli {
     /// deliberate analytical query on a large graph.
     #[arg(long, default_value_t = 30)]
     query_timeout_secs: u64,
+
+    /// Refuse a graph estimated to cost more than this many megabytes to load.
+    ///
+    /// Checked from the `.kgl`'s metadata head before a section is
+    /// decompressed, so a refusal costs one short read and the message names
+    /// the estimate, the ceiling and what to do about it. Unset, kglite's
+    /// process-wide `KGLITE_MAX_LOAD_MB` applies; this flag outranks it. The
+    /// estimate is conservative and can refuse a load that would have fitted,
+    /// so set it where a *failure* is what you want rather than as a tight
+    /// budget — the case it exists for is a 16 GB machine that would otherwise
+    /// spend twenty minutes in swap.
+    #[arg(long, value_name = "MB")]
+    max_load_mb: Option<u64>,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -124,7 +139,12 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("no .kgl file was given; run `kglite-visual --help`")?;
     // Load before binding: a LaunchInfo for a graph that turned out to be
     // unreadable would be a URL nothing serves.
-    let graph = load_graph(GraphSource::Path(file))?;
+    let graph = load_graph_with(
+        GraphSource::Path(file),
+        LoadLimits {
+            max_load_mb: cli.max_load_mb,
+        },
+    )?;
     let session = Session::open_with(
         graph,
         file.display().to_string(),

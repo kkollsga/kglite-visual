@@ -16,12 +16,15 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use pyo3::exceptions::{PyFileNotFoundError, PyOSError, PyRuntimeError, PyValueError};
+use pyo3::exceptions::{
+    PyFileNotFoundError, PyMemoryError, PyOSError, PyRuntimeError, PyValueError,
+};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
 use kglite_visual_core::{
-    load_graph, CoreError, GraphSource, LaunchInfo, QueryConfig, Session, QUERY_THREAD_STACK_BYTES,
+    load_graph_with, CoreError, GraphSource, LaunchInfo, LoadLimits, QueryConfig, Session,
+    QUERY_THREAD_STACK_BYTES,
 };
 
 /// Version of the Rust core this extension was built against.
@@ -173,20 +176,35 @@ enum Origin {
 /// summarising that would throw away the only sentence that says which version
 /// to install.
 ///
-/// **`Origin` is load-bearing, not decoration.** kglite reports every load
-/// failure through the `std::io::Error` family, including "these bytes do not
-/// start with the `.kgl` magic", which arrives with a kind that would
-/// otherwise map to `OSError`. For a buffer there is no file and no I/O: every
-/// way it can fail is a statement about its contents, so it is a `ValueError`.
-/// Classifying by kind alone made `show(bad_bytes)` raise `OSError` while
-/// `show(a_directory)` raised `ValueError` for the same underlying mistake —
-/// two exception types for one class of error, neither a subclass of the
-/// other, so a caller had to catch both to catch either.
+/// **`Origin` is a narrowing backstop now, not the classifier it was.** It was
+/// introduced against kglite 0.16.13, where "these bytes do not start with the
+/// `.kgl` magic" arrived as `ErrorKind::Other` and mapped to `OSError` while
+/// `show(a_directory)` raised `ValueError` for the same class of mistake —
+/// two exception types for one error, neither a subclass of the other, so a
+/// caller had to catch both to catch either. **kglite 0.16.15 fixed the kind**
+/// (this project's finding 9): every malformed-input path now reports
+/// `InvalidData`, verified against the engine on 2026-08-30 for a garbage
+/// buffer, an empty buffer, a garbage file, a truncated `.kgl` and a directory
+/// that is not a disk graph.
+///
+/// So the kind carries the classification and `Origin` decides only what an
+/// *unrecognised* kind means: for a buffer there is no file and no I/O, so any
+/// residual failure is still a statement about its contents. Keeping that
+/// branch costs one line and is what stops the next unclassified kind
+/// resurfacing the original split — but it no longer fires on any load failure
+/// this project can produce.
+///
+/// `OutOfMemory` is the load-ceiling refusal (`--max-load-mb` /
+/// `KGLITE_MAX_LOAD_MB`) and maps to `MemoryError` on both origins. It is the
+/// one load failure that says nothing about the file: nothing was
+/// decompressed, the graph is valid, and this process declined to pay for it.
+/// `ValueError` would send the reader to check their bytes.
 fn to_py_err(err: CoreError, origin: Origin) -> PyErr {
     let message = err.to_string();
     match err {
         CoreError::Load(io) => match io.kind() {
             std::io::ErrorKind::NotFound => PyFileNotFoundError::new_err(message),
+            std::io::ErrorKind::OutOfMemory => PyMemoryError::new_err(message),
             std::io::ErrorKind::InvalidData | std::io::ErrorKind::InvalidInput => {
                 PyValueError::new_err(message)
             }
@@ -272,8 +290,13 @@ fn start(py: Python<'_>, session: Session, graph: String, port: u16) -> PyResult
 /// `Python::detach`. Loading a `.kgl` is seconds of I/O and decode on a large
 /// graph, and computing the meta-graph is the rest of the startup cost;
 /// holding the GIL through either freezes every other thread in the notebook.
-fn open_session(source: GraphSource<'_>, name: &str, timeout: u64) -> Result<Session, CoreError> {
-    let graph = load_graph(source)?;
+fn open_session(
+    source: GraphSource<'_>,
+    name: &str,
+    timeout: u64,
+    max_load_mb: Option<u64>,
+) -> Result<Session, CoreError> {
+    let graph = load_graph_with(source, LoadLimits { max_load_mb })?;
     Ok(Session::open_with(
         graph,
         name.to_string(),
@@ -284,12 +307,13 @@ fn open_session(source: GraphSource<'_>, name: &str, timeout: u64) -> Result<Ses
 }
 
 #[pyfunction]
-#[pyo3(signature = (path, port = 0, query_timeout_secs = 30))]
+#[pyo3(signature = (path, port = 0, query_timeout_secs = 30, max_load_mb = None))]
 fn _serve_path(
     py: Python<'_>,
     path: &str,
     port: u16,
     query_timeout_secs: u64,
+    max_load_mb: Option<u64>,
 ) -> PyResult<PyServer> {
     let session = py
         .detach(|| {
@@ -297,6 +321,7 @@ fn _serve_path(
                 GraphSource::Path(std::path::Path::new(path)),
                 path,
                 query_timeout_secs,
+                max_load_mb,
             )
         })
         .map_err(|err| to_py_err(err, Origin::File))?;
@@ -304,13 +329,14 @@ fn _serve_path(
 }
 
 #[pyfunction]
-#[pyo3(signature = (data, name, port = 0, query_timeout_secs = 30))]
+#[pyo3(signature = (data, name, port = 0, query_timeout_secs = 30, max_load_mb = None))]
 fn _serve_bytes(
     py: Python<'_>,
     data: &Bound<'_, PyBytes>,
     name: &str,
     port: u16,
     query_timeout_secs: u64,
+    max_load_mb: Option<u64>,
 ) -> PyResult<PyServer> {
     // Borrowed, not copied: the caller already paid for one copy of the image
     // when `to_bytes()` produced it, and the decoded graph is a second. A copy
@@ -318,7 +344,14 @@ fn _serve_bytes(
     // across the GIL release.
     let bytes = data.as_bytes();
     let session = py
-        .detach(|| open_session(GraphSource::Bytes(bytes), name, query_timeout_secs))
+        .detach(|| {
+            open_session(
+                GraphSource::Bytes(bytes),
+                name,
+                query_timeout_secs,
+                max_load_mb,
+            )
+        })
         .map_err(|err| to_py_err(err, Origin::Buffer))?;
     start(py, session, name.to_string(), port)
 }

@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use kglite_visual_core::render::{ExpandSource, RenderFormat, RenderRequest, RenderSource, Theme};
 use kglite_visual_core::request::{CypherRequest, EdgeDirection};
-use kglite_visual_core::{load_graph, render, GraphSource, QueryConfig};
+use kglite_visual_core::{load_graph_with, render, GraphSource, LoadLimits, QueryConfig};
 use serde::Serialize;
 
 /// `--format`.
@@ -113,6 +113,15 @@ pub struct RenderArgs {
     /// Wall-clock ceiling for the query behind `--cypher`, in seconds.
     #[arg(long, default_value_t = 30)]
     pub query_timeout_secs: u64,
+
+    /// Refuse a graph estimated to cost more than this many megabytes to load.
+    ///
+    /// The same ceiling the serve form takes, and the render path is the one
+    /// that most needs it: rendering a large graph is a one-shot batch job a
+    /// script runs in a loop, and the failure it replaces is a machine in swap
+    /// rather than an error on stderr. Unset, `KGLITE_MAX_LOAD_MB` applies.
+    #[arg(long, value_name = "MB")]
+    pub max_load_mb: Option<u64>,
 }
 
 /// The single stdout line.
@@ -155,7 +164,12 @@ pub fn run(args: &RenderArgs) -> Result<(), Box<dyn std::error::Error>> {
     let source = parse_source(args)?;
     // Load before anything else: a summary line for a graph that turned out to
     // be unreadable would name a file nothing wrote.
-    let graph = load_graph(GraphSource::Path(&args.file))?;
+    let graph = load_graph_with(
+        GraphSource::Path(&args.file),
+        LoadLimits {
+            max_load_mb: args.max_load_mb,
+        },
+    )?;
     let request = RenderRequest {
         source,
         format: args.format.into(),
@@ -333,6 +347,7 @@ mod tests {
             theme: ThemeArg::Dark,
             limit: None,
             query_timeout_secs: 30,
+            max_load_mb: None,
         }
     }
 

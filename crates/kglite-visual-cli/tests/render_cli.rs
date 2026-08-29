@@ -217,3 +217,59 @@ fn the_bare_serve_form_and_the_render_subcommand_both_still_parse() {
     assert!(bare.stderr.contains("<FILE>"), "{}", bare.stderr);
     assert!(bare.stderr.contains("Usage:"), "{}", bare.stderr);
 }
+
+/// A load ceiling refuses with a number, and refuses *before* it costs
+/// anything.
+///
+/// The failure this replaces is a machine in swap: a 16 GB host asked to render
+/// a graph that will not fit spends twenty minutes paging and then dies without
+/// having said why. kglite 0.16.15 estimates the load's peak from the `.kgl`'s
+/// metadata head — no section decompressed — so a refusal costs one short read
+/// and can name the number it refused over.
+///
+/// `--max-load-mb 0` is the deterministic form of "too big": every graph
+/// exceeds it, including an 11 KB fixture, so the assertion is about the
+/// mechanism rather than about any particular file's size.
+#[test]
+fn a_load_over_the_ceiling_is_refused_with_the_estimate_and_writes_nothing() {
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let out = dir.path().join("refused.svg");
+    let refused = run(&[
+        "render",
+        &fixture().display().to_string(),
+        "--meta",
+        "--max-load-mb",
+        "0",
+        "--out",
+        &out.display().to_string(),
+    ]);
+    assert_eq!(refused.code, 1, "stderr: {}", refused.stderr);
+    assert!(
+        refused.stdout.is_empty(),
+        "the stdout contract is one line or none"
+    );
+    assert!(!out.exists(), "a refused load must not write an image");
+    // The engine's own message, forwarded whole. It names the ceiling, the
+    // estimate and the two ways out; a paraphrase would drop the numbers, which
+    // are the only actionable part.
+    assert!(
+        refused.stderr.contains("ceiling") && refused.stderr.contains("Nothing was decompressed"),
+        "the refusal must carry kglite's diagnostic: {}",
+        refused.stderr
+    );
+
+    // And the same render under a ceiling the graph fits inside still works,
+    // so the flag is a ceiling and not an off switch.
+    let ok_out = dir.path().join("allowed.svg");
+    let ok = run(&[
+        "render",
+        &fixture().display().to_string(),
+        "--meta",
+        "--max-load-mb",
+        "4096",
+        "--out",
+        &ok_out.display().to_string(),
+    ]);
+    assert_eq!(ok.code, 0, "stderr: {}", ok.stderr);
+    assert!(ok_out.exists());
+}

@@ -49,3 +49,32 @@ def test_a_source_that_is_neither_a_path_nor_a_graph_is_a_typeerror(bad):
     with pytest.raises(TypeError) as excinfo:
         kv.show(bad, open_browser=False)
     assert "to_bytes" in str(excinfo.value)
+
+
+def test_a_load_over_the_ceiling_is_a_memoryerror_naming_the_estimate(fixture_path):
+    """`MemoryError`, not `ValueError` — the file is fine and this process
+    declined to pay for it.
+
+    Getting the class wrong here sends the reader to check a graph that is not
+    broken. `max_load_mb=0` is the deterministic form of "too big": every
+    graph exceeds it, so the assertion is about the mechanism rather than about
+    any file's size. Nothing is decompressed before the refusal, which is what
+    makes the ceiling usable as a guard rather than as a post-mortem.
+    """
+    with pytest.raises(MemoryError) as excinfo:
+        kv.show(fixture_path, open_browser=False, max_load_mb=0)
+    message = str(excinfo.value)
+    assert "ceiling" in message, message
+    assert "Nothing was decompressed" in message, message
+
+
+def test_the_ceiling_is_a_ceiling_and_not_an_off_switch(fixture_path):
+    with kv.show(fixture_path, open_browser=False, max_load_mb=4096) as view:
+        assert view.port > 0
+
+
+def test_the_ceiling_reaches_the_bytes_handover_too(fixture_bytes):
+    # show(graph) crosses as a .kgl image, and an image large enough to matter
+    # is exactly where a caller wants the ceiling to apply.
+    with pytest.raises(MemoryError):
+        kv.show(fixture_bytes, open_browser=False, max_load_mb=0)
