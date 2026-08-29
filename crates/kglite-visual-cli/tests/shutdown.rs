@@ -19,13 +19,19 @@ fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_kglite-visual")
 }
 
+/// `spill.kgl`, not `meta.kgl`, and the choice is the whole non-vacuity of this
+/// test: kglite only mints a spill directory for a **column blob of 256 KiB or
+/// more**, and since 0.16.15 it does not create the directory until that first
+/// blob write, so the 11.7 KB meta fixture loads without touching `$TMPDIR` at
+/// all. `spill.kgl` carries a 320 KiB payload column in ~1 KB of committed
+/// bytes for exactly this reason (`examples/make_fixture.rs`).
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("kglite-visual-core")
         .join("tests")
         .join("fixtures")
-        .join("meta.kgl")
+        .join("spill.kgl")
 }
 
 /// A private `TMPDIR` for one test, so the spill this test is about cannot be
@@ -40,10 +46,11 @@ fn private_tmpdir() -> PathBuf {
     dir
 }
 
-/// kglite spills a portable graph into `$TMPDIR/kglite_portable_<pid>_<id>/`
-/// and removes it in `Drop`. Its presence is what makes this test non-vacuous:
-/// a fixture too small to spill would let a broken handler pass on an empty
-/// directory.
+/// kglite spills a large column into `$TMPDIR/kglite_portable_<pid>_<seq>/` and
+/// removes it in `Drop`. Its presence is what makes this test non-vacuous: a
+/// fixture too small to spill would let a broken handler pass on an empty
+/// directory — which is precisely what the 0.16.15 bump turned `meta.kgl` into,
+/// and what the guard below caught.
 fn spills(tmpdir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(tmpdir)
         .expect("the private TMPDIR is readable")

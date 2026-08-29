@@ -296,13 +296,16 @@ e2e: cli-build  ## Browser end-to-end smoke (Playwright + SwiftShader)
 fixture:  ## Regenerate crates/kglite-visual-core/tests/fixtures/ (seeded, byte-stable)
 	@$(CARGO) run -q -p kglite-visual-core --example make_fixture
 	@cp crates/kglite-visual-core/tests/fixtures/meta.kgl /tmp/kglv-fixture-once.kgl
+	@cp crates/kglite-visual-core/tests/fixtures/spill.kgl /tmp/kglv-spill-once.kgl
 	@cp crates/kglite-visual-core/tests/fixtures/meta.positions.json /tmp/kglv-positions-once.json
 	@$(CARGO) run -q -p kglite-visual-core --example make_fixture
 	@cmp /tmp/kglv-fixture-once.kgl crates/kglite-visual-core/tests/fixtures/meta.kgl \
 	  || { echo "fixture: FAIL — regeneration is not byte-stable" >&2; exit 1; }
+	@cmp /tmp/kglv-spill-once.kgl crates/kglite-visual-core/tests/fixtures/spill.kgl \
+	  || { echo "fixture: FAIL — the spill fixture is not byte-stable" >&2; exit 1; }
 	@cmp /tmp/kglv-positions-once.json crates/kglite-visual-core/tests/fixtures/meta.positions.json \
 	  || { echo "fixture: FAIL — the positions baseline is not byte-stable" >&2; exit 1; }
-	@rm -f /tmp/kglv-fixture-once.kgl /tmp/kglv-positions-once.json
+	@rm -f /tmp/kglv-fixture-once.kgl /tmp/kglv-spill-once.kgl /tmp/kglv-positions-once.json
 	@echo "fixture: OK — regenerated twice, byte-identical"
 
 # ---- the Python wheel -------------------------------------------------

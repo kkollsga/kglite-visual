@@ -1,5 +1,5 @@
-//! Regenerate the committed test fixture: `meta.kgl` and its positions
-//! baseline. Run it with `make fixture`.
+//! Regenerate the committed test fixtures: `meta.kgl` with its positions
+//! baseline, and `spill.kgl`. Run it with `make fixture`.
 //!
 //! **Seeded end to end, and verified byte-stable** (`make fixture` regenerates
 //! twice and diffs): kglite's `graphgen` is deterministic per seed, the CSV →
@@ -38,7 +38,7 @@ use std::sync::Arc;
 use kglite::api::graphgen;
 use kglite::api::io::{load_file, prepare_kgl_write, write_kgl};
 use kglite::api::session::{execute_mut, ExecuteOptions};
-use kglite::api::{DirGraph, GraphGenConfig, SpatialConfig};
+use kglite::api::{DirGraph, GraphGenConfig, SpatialConfig, Value};
 use kglite_visual_core::{meta_graph, View};
 
 /// Person count. Everything else scales off it inside graphgen.
@@ -163,8 +163,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let positions_path = fixtures.join("meta.positions.json");
         std::fs::write(&positions_path, positions_document(&meta))?;
         eprintln!("wrote {}", positions_path.display());
+
+        write_spill_fixture(&fixtures)?;
     }
 
+    Ok(())
+}
+
+/// Nodes in the spill fixture, and the bytes each one's payload carries.
+///
+/// The product is what matters: kglite spills a **column blob of 256 KiB or
+/// more** to `$TMPDIR/kglite_portable_<pid>_<seq>/` and mmaps it, and
+/// `SPILL_NODES * SPILL_PAYLOAD_BYTES` is that column. 320 KiB clears the
+/// threshold with room for the engine to change how it measures the blob
+/// without silently making this fixture stop spilling — which is the one way
+/// the test it feeds could go quiet instead of red.
+const SPILL_NODES: usize = 8;
+const SPILL_PAYLOAD_BYTES: usize = 40 * 1024;
+
+/// A `.kgl` whose *load* spills, in about a kilobyte of committed bytes.
+///
+/// `tests/shutdown.rs` asserts that a `SIGTERM`ed server removes kglite's spill
+/// directory, and that assertion is only worth anything if the graph it loads
+/// actually mints one. `meta.kgl` used to, incidentally, because kglite created
+/// the spill directory at the start of every portable load; **0.16.15 moved the
+/// `mkdir` to the first actual blob write**, so an 11.7 KB fixture now touches
+/// no path but its own and the shutdown test's own non-vacuity guard caught it
+/// (`R1` working as designed, on a dependency bump).
+///
+/// The payload is one repeated byte pair, so the column is 320 KiB *decoded* —
+/// which is what the threshold measures — while the compressed file is ~1 KB.
+/// A random payload would commit 320 KB to git for the same effect.
+fn write_spill_fixture(fixtures: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let payload = "ab".repeat(SPILL_PAYLOAD_BYTES / 2);
+    let mut script = String::new();
+    for i in 0..SPILL_NODES {
+        let _ = writeln!(
+            script,
+            "CREATE (:Blob {{title: 'b{i}', payload: $payload}})"
+        );
+    }
+
+    let mut graph = DirGraph::new();
+    let mut params = std::collections::HashMap::new();
+    params.insert("payload".to_string(), Value::String(payload));
+    let opts = ExecuteOptions::eager(&params);
+    execute_mut(&mut graph, &script, &opts)?;
+
+    let mut graph = Arc::new(graph);
+    prepare_kgl_write(&mut graph);
+    let path = fixtures.join("spill.kgl");
+    write_kgl(&graph, path.to_str().expect("ASCII fixture path"))?;
+    eprintln!(
+        "wrote {} ({} bytes, {} KiB payload column)",
+        path.display(),
+        std::fs::metadata(&path)?.len(),
+        SPILL_NODES * SPILL_PAYLOAD_BYTES / 1024
+    );
     Ok(())
 }
 
@@ -210,11 +265,12 @@ fn positions_document(meta: &meta_graph::MetaGraphResponse) -> String {
 /// Build a `DirGraph` from graphgen's CSVs.
 ///
 /// One Cypher statement for the whole graph: nodes bind variables, edges use
-/// them. kglite has no DataFrame-free node-ingest path a downstream Rust crate
-/// can call — `api::mutation::add_nodes` takes `kglite::datatypes::values::
-/// DataFrame`, which the curated `kglite::api` facade does not export, so the
-/// function is public but not callable from here (reported upstream). Cypher
-/// is the surface that *is* reachable, and at fixture scale it is instant.
+/// them. The bulk route exists — `api::mutation::{add_nodes, DataFrame,
+/// ColumnType, ColumnData}` since kglite 0.16.14, which this project's own
+/// report asked for — and it is the one to reach for at scale, because the
+/// Cypher `CREATE` path is superlinear (~1.9 exponent; 4× the input cost 13.7×
+/// the time at 20 000 persons). At the committed fixture's 60 persons it is
+/// instant, so the simpler surface stays here.
 fn build_graph(dir: &Path) -> Result<Arc<DirGraph>, Box<dyn std::error::Error>> {
     let mut script = String::new();
 

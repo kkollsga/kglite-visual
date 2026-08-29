@@ -1492,9 +1492,9 @@ dependencies = [
 
 [[package]]
 name = "kglite"
-version = "0.16.14"
+version = "0.16.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aa8cc1fcf4e13fbe659369f2d9564f5b033a5e3f73ae0dd6943b0fdcdd8567a"
+checksum = "9f4b2cd787fa1e60e5b03e54277cdbabe3319c7b21064175c04bfaad52b78d26"
 dependencies = [
  "bzip2",
  "chrono",
