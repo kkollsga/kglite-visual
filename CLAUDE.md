@@ -5,14 +5,16 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29 (P4 landed): measured — the response bound is set by
-> numbers, not estimates.** Three crates (`core`, `cli`, `py`), a
-> Vite/TypeScript frontend that renders the type-level meta-graph through
-> cosmos.gl and drills into it, a versioned binary protocol (v2) with an
-> exact framing baseline, an axum server on localhost with the frontend
-> embedded, and a gate that builds, lints, tests and **drives** all of it in
-> a headless browser. What does **not** exist yet: the wheel (P5), CI, a
-> remote, a CHANGELOG, and any published artifact. Every command below that
+> **Status, 2026-08-29 (P5 landed): the wheel exists, and it proves
+> itself.** Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend
+> that renders the type-level meta-graph through cosmos.gl and drills into
+> it, a versioned binary protocol (v2) with an exact framing baseline, an
+> axum server on localhost with the frontend embedded, **a Python wheel
+> whose `show()` runs that same server lib-linked into the extension**, and
+> a gate that builds, lints, tests and **drives** all of it — in a headless
+> browser, and for the built wheel in a fresh virtualenv outside the repo.
+> What does **not** exist yet: CI, a remote, a CHANGELOG, and any published
+> artifact. Every command below that
 > does not exist yet is marked **(planned)**. **A planned command is not a
 > passing gate** — if you run a step and it is absent, say so and fall back;
 > never report green for a check that could not run (`R10` corollary). And
@@ -140,21 +142,27 @@ make sync-agents    # regenerate the .agents/ adapter from the authority
 make clean-build    # delete target/, node_modules/, frontend/dist/
 make e2e            # browser end-to-end smoke (Playwright + SwiftShader)
 make fixture        # regenerate the committed .kgl fixture; verifies byte-stability
+make pytest         # the wheel's suite; builds the extension into .venv first
+make wheel          # a wheel into target/wheels (WHEEL_PROFILE=--release for the artifact)
+make check-packaged-consumer   # install the built wheel elsewhere and drive it
+make py-venv        # create/reuse the project-local venv (py-venv-refresh re-installs)
 cargo test --workspace
 cd frontend && npm ci && npm run typecheck && npm run build
 ```
 
-`make gate` runs fourteen real checks: the `dev-docs/` size bound (`R4`), the
+`make gate` runs sixteen real checks: the `dev-docs/` size bound (`R4`), the
 instruction-mirror check (`R7`), the two structural bans (`@cosmograph/*` and
 `#[global_allocator]`), the build-directory report, the frontend typecheck,
 the frontend **production** build, the embedded-bundle freshness check,
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`, the generated-TypeScript freshness check, the
-protocol framing baseline, the Playwright end-to-end smoke, and an advisory
+protocol framing baseline, the Playwright end-to-end smoke, **the wheel's
+pytest suite, the packaged-consumer check**, and an advisory
 `npm audit --omit=dev`. **The frontend half runs first, and that is
 load-bearing:** `frontend/dist` is embedded into the CLI binary, so every
 cargo step downstream of it compiles against whatever bundle is on disk. It
-prints an **ABSENT** line for each step that still does not exist. That is deliberate: "green" and "not attempted" must not
+prints an **ABSENT** line for each step that still does not exist — **today
+there are none**. That is deliberate: "green" and "not attempted" must not
 render identically (`R10` corollary), so the gate makes its own emptiness
 legible rather than exiting 0 in silence.
 
@@ -164,13 +172,14 @@ briefly unreachable — neither of which is a fact about the diff. A gate that
 fails for reasons unrelated to the change is a gate people learn to bypass. CI
 owns the failing version of that check; here it reports and moves on.
 
-**Planned, and each one deletes an ABSENT line when it lands:**
-
-- `pytest` for the wheel, plus a stub/type check if type stubs are published.
-- A packaged-consumer check: exercise the *built* artifact as a real external
-  consumer, not just the source tree. For this project that means the embedded
-  frontend actually being in the binary — a source-tree test cannot see a
-  missing `rust-embed` asset.
+**The packaged-consumer check is the one thing a source-tree test
+structurally cannot do.** `scripts/check_wheel.py` opens the built `.whl`,
+asserts the extension, the shim and the console-script entry point are in
+it, and — by scanning the extension's *own bytes* for the hashed asset names
+in `frontend/dist/index.html` — that the frontend bundle was embedded, which
+no zip listing can see. Then it installs that wheel into a throwaway venv
+and drives it from a directory outside the repo, where the source tree
+cannot shadow the package under test.
 
 **The gate's membership is earned, not copied.** A check belongs in the local
 pre-push gate only once it has a record of catching a CI failure; everything
@@ -412,16 +421,20 @@ archive purge; `../kglite-visual-worktrees/` → the release flow.
 
 `target/` (cargo never garbage-collects it — a 2026-07 audit in this estate
 found 503 GB), `frontend/node_modules/` and `frontend/dist/` began writing
-files in P1, so they carry bounds now. Owner: `make clean-build`, run by a
+files in P1, and `.venv/` in P5, so they carry bounds now. Owner:
+`make clean-build`, run by a
 human; bound: `make check-build-dirs` in the gate, which reports each against
-an advisory ceiling (`TARGET_WARN_MB`, `NODE_MODULES_WARN_MB` in the
-Makefile). **That step warns and never fails** — a legitimately large
+an advisory ceiling (`TARGET_WARN_MB`, `NODE_MODULES_WARN_MB`,
+`VENV_WARN_MB` in the Makefile). **That step warns and never fails** — a legitimately large
 `target/` mid-refactor is not a reason to block a commit, and a gate that
 blocks on it is a gate people bypass. An automatic purge is P6 work; until
 then the enforcement is a human reading the warning.
 
-**Planned, and each is a `R4` obligation the moment it first writes a file:**
-wheel builds and tool caches. **Never add a new file-writing step** — a bench
+Wheel builds land in `target/wheels/`, inside `target/`'s existing bound;
+the wheel's tooling lives in `.venv/` under `VENV_WARN_MB`, owned by
+`make clean-build`. The fresh venv the packaged-consumer probe installs into
+is a `tempfile.mkdtemp()` deleted in a `finally`, so it is not a tier.
+**Never add a new file-writing step** — a bench
 capture, a fixture dump, a generated graph — without pointing it at a purged
 tier or extending the gate **in the same change**.
 
@@ -558,8 +571,8 @@ into that same `[x.y.z]` block rather than minting a new one on top.
 agent never suggests or announces a minor/major bump anywhere, including
 readiness reports.
 
-**This project's own version lives in exactly THREE files, counted by
-grepping on 2026-08-29 (P1), not assumed:**
+**This project's own version lives in exactly FOUR files, counted by
+grepping on 2026-08-29 (P1; site 4 added in P5), not assumed:**
 
 1. `Cargo.toml` — `[workspace.package] version`. Every crate inherits it with
    `version.workspace = true`, so those three inheritance lines are
@@ -567,6 +580,10 @@ grepping on 2026-08-29 (P1), not assumed:**
 2. `crates/kglite-visual-cli/Cargo.toml` — the `kglite-visual-core = { version
    = "…", path = … }` requirement.
 3. `crates/kglite-visual-py/Cargo.toml` — the same requirement.
+4. `crates/kglite-visual-py/Cargo.toml` — the `kglite-visual-cli = { version
+   = "…", path = … }` requirement. The wheel lib-links the CLI's library half
+   rather than re-implementing the server (D9), so the py crate carries two
+   internal requirement strings, not one.
 
 Sites 2 and 3 are exactly what KGLite missed when it believed "the version is
 one line" and broke a release: `[workspace.package]` reaches each crate's own

@@ -36,6 +36,27 @@ exactly like a backend bug (CLAUDE.md → "Two toolchains, one gate").
   means OS-assigned. Server binds 127.0.0.1 only.
 - Error path: bad file → exit 1, **empty stdout**, one stderr line.
 
+### From Python (the wheel)
+
+```python
+import kglite_visual as kv
+view = kv.show("crates/kglite-visual-core/tests/fixtures/meta.kgl", open_browser=False)
+view.launch_info   # {"url","port","pid","graph"} — the same four keys, same struct
+view.close()       # "closed" | "already-closed" | "stale-after-fork"; frees the port
+```
+
+`show()` also takes a `bytes` `.kgl` image or any object with `to_bytes()`
+(kglite's `KnowledgeGraph`); the object route costs ~2× the graph's size, so
+`show(path)` is the large-graph answer. **The wheel writes nothing to
+stdout** — the single-JSON-line contract is the CLI's, and a library that
+printed there would corrupt its caller's output; read `launch_info` instead.
+`open_browser` defaults to auto (quiet in a notebook kernel, a tab
+elsewhere). In a notebook the object renders itself: a proxy-prefixed iframe
+if `jupyter-server-proxy` is importable, **no iframe at all** but the URL
+and an `ssh -N -L` hint if the kernel looks remote, localhost otherwise — a
+localhost iframe from a remote kernel is a silently blank frame.
+Build/refresh it with `make py-develop`.
+
 ## 3. Inspect without a browser — the JSON twin
 
 ```bash
