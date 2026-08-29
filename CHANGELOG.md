@@ -68,14 +68,21 @@ here. The first release promotes this block whole.
 - **The graph no longer draws underneath the side panels**, where it could not
   be seen, clicked or labelled.
 
+- **The engine is `kglite` 0.16.14**, exactly pinned. That release fixes two
+  defects this project found and reported while building against 0.16.13, and
+  both are visible from here: a `.kgl` whose stored relationship counts were
+  fabricated as zero is repaired when it is opened, and saving the same graph
+  twice now produces identical bytes.
+
 ### Fixed
 
 - **Relationship counts on a `.kgl` saved without a cardinality cache.** Such a
-  file loads with every relationship count fabricated as zero, which made the
+  file loaded with every relationship count fabricated as zero, which made the
   meta-graph claim a graph with three quarters of a million edges had none and
-  left the expansion preview empty. The viewer now detects that shape at load,
-  recomputes the counts from the edges themselves (11 ms for 765 373 edges),
-  and says on stderr that it did so — a recomputed number and a stored one are
-  different provenance, and the difference is reported rather than laundered.
+  left the expansion preview empty. Fixed in the engine and verified on a
+  546 850-node file that had the defect: the counts now arrive correct, and
+  quietly, with no repair note to explain them. This project shipped a
+  load-time repair for it first; that repair is gone, because the file no
+  longer arrives broken.
 
 [Unreleased]: https://github.com/kkollsga/kglite-visual/commits/main
