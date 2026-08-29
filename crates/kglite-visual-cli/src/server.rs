@@ -92,6 +92,12 @@ fn router(state: AppState) -> Router {
         .route("/api/collapse", post(api::collapse))
         .route("/api/node", post(api::node_detail))
         .route("/api/property-stats", post(api::property_stats))
+        // The three steering commands (D14). They mutate nothing and answer
+        // with the size of the audience that heard them, so a caller learns
+        // whether anybody is actually watching.
+        .route("/api/focus", post(api::focus))
+        .route("/api/highlight", post(api::highlight))
+        .route("/api/appearance", post(api::appearance))
         // The one route that answers with image bytes rather than JSON (D13).
         // POST like the rest of the vocabulary: it carries a body, and a GET
         // whose query string held a Cypher statement would be logged, cached

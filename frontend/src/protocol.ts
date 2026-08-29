@@ -13,7 +13,10 @@ import {
   MessageType,
   PROTOCOL_VERSION,
 } from './generated/protocol-constants'
+import type { Appearance } from './generated/Appearance'
 import type { Compaction } from './generated/Compaction'
+import type { Focus } from './generated/Focus'
+import type { Highlight } from './generated/Highlight'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { GraphSliceMeta } from './generated/GraphSliceMeta'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
@@ -138,6 +141,12 @@ export type Completed =
   | { kind: 'node-detail'; value: NodeDetail }
   | { kind: 'search'; value: SearchResponse }
   | { kind: 'property-stats'; value: PropertyStatsResponse }
+  // The three v3 steering commands (plan D14). They arrive UNSOLICITED — the
+  // server pushes them to every attached client, so nothing here may assume a
+  // message answers a request this client made.
+  | { kind: 'focus'; value: Focus }
+  | { kind: 'highlight'; value: Highlight }
+  | { kind: 'appearance'; value: Appearance }
   | { kind: 'error'; value: string }
 
 /**
@@ -158,6 +167,9 @@ export class ResponseAssembler {
   private detail: NodeDetail | null = null
   private search: SearchResponse | null = null
   private stats: PropertyStatsResponse | null = null
+  private focus: Focus | null = null
+  private highlight: Highlight | null = null
+  private appearance: Appearance | null = null
   private readonly chunks = new Map<number, { offset: number; bytes: Uint8Array }[]>()
   lastSeq = -1
 
@@ -196,6 +208,15 @@ export class ResponseAssembler {
       case MessageType.PROPERTY_STATS:
         this.stats = asJson<PropertyStatsResponse>(frame)
         break
+      case MessageType.FOCUS:
+        this.focus = asJson<Focus>(frame)
+        break
+      case MessageType.HIGHLIGHT:
+        this.highlight = asJson<Highlight>(frame)
+        break
+      case MessageType.APPEARANCE:
+        this.appearance = asJson<Appearance>(frame)
+        break
       case MessageType.POINTS:
       case MessageType.LINKS: {
         const bucket = this.chunks.get(frame.msgType) ?? []
@@ -226,6 +247,9 @@ export class ResponseAssembler {
     this.detail = null
     this.search = null
     this.stats = null
+    this.focus = null
+    this.highlight = null
+    this.appearance = null
     this.chunks.clear()
     return finished
   }
@@ -265,6 +289,9 @@ export class ResponseAssembler {
     if (this.detail !== null) return { kind: 'node-detail', value: this.detail }
     if (this.search !== null) return { kind: 'search', value: this.search }
     if (this.stats !== null) return { kind: 'property-stats', value: this.stats }
+    if (this.focus !== null) return { kind: 'focus', value: this.focus }
+    if (this.highlight !== null) return { kind: 'highlight', value: this.highlight }
+    if (this.appearance !== null) return { kind: 'appearance', value: this.appearance }
     if (this.session !== null) return { kind: 'session', value: this.session }
     throw new ProtocolError('a response ended without carrying anything')
   }

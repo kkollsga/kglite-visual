@@ -371,6 +371,29 @@ export class Panels {
   }
 
   /**
+   * Show a colour-by / size-by choice this panel did not make.
+   *
+   * A remote `appearance` command (plan D14) moves the same two channels the
+   * menus do, and a menu still reading "capability" while the graph is
+   * coloured by `field` is a UI lying about its own state. An option the menus
+   * have not been filled with yet is added rather than dropped: the agent
+   * named a property the server accepted, and the human needs to see which.
+   */
+  setAppearanceSelection(colorBy: string | null, sizeBy: string | null): void {
+    const choose = (select: HTMLSelectElement, value: string | null) => {
+      const wanted = value ?? ''
+      if (wanted !== '' && ![...select.options].some((option) => option.value === wanted)) {
+        const option = element('option', undefined, wanted)
+        option.value = wanted
+        select.appendChild(option)
+      }
+      select.value = wanted
+    }
+    choose(this.colorBy, colorBy)
+    choose(this.sizeBy, sizeBy)
+  }
+
+  /**
    * Fill the appearance menus.
    *
    * Returns `[candidates, approximate]` — the second is what the e2e asserts

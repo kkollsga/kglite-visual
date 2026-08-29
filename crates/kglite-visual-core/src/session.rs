@@ -556,6 +556,34 @@ impl Session {
         stats::property_stats(&self.graph, &request.node_type)
     }
 
+    /// Refuse a slot list that names something this view cannot point at.
+    ///
+    /// The steering commands (D14) do not touch the slot space, so nothing here
+    /// *has* to fail — a client could drop the slots it does not recognise and
+    /// carry on. It fails anyway, and by name: an agent that focused slot 4 000
+    /// on a five-slot view has a wrong model of what the user is looking at,
+    /// and a silently narrowed camera would leave it holding that model.
+    pub fn check_live_slots(&self, slots: &[u32]) -> Result<(), CoreError> {
+        let view = self.read();
+        for slot in slots {
+            match view.entry(*slot) {
+                Some(SlotEntry::Tombstone) => {
+                    return Err(CoreError::Request(format!(
+                        "slot {slot} was collapsed; there is nothing there to point at"
+                    )))
+                }
+                None => {
+                    return Err(CoreError::Request(format!(
+                        "slot {slot} is not in this view, which holds slots 0..{}",
+                        view.slot_count()
+                    )))
+                }
+                Some(SlotEntry::Type { .. } | SlotEntry::Node { .. }) => {}
+            }
+        }
+        Ok(())
+    }
+
     fn entry(&self, slot: u32) -> Result<SlotEntry, CoreError> {
         self.read()
             .entry(slot)

@@ -7,6 +7,7 @@
 //! being crossed, not a convenience.
 
 pub mod bound;
+pub mod control;
 pub mod error;
 pub mod expand;
 pub mod launch;
@@ -24,6 +25,7 @@ pub mod values;
 pub mod view;
 
 pub use bound::{Bound, BoundInfo};
+pub use control::{control_frames, Appearance, Command, Focus, Highlight, HighlightConcept};
 pub use error::CoreError;
 pub use expand::{ExpansionPreview, MAX_EXPANSION_NODES};
 pub use launch::LaunchInfo;

@@ -50,7 +50,17 @@ use std::fmt;
 /// first frame instead: a v1 client meets a `VersionMismatch` before it draws
 /// anything. Growing the message vocabulary changes what a peer must
 /// understand, which is a wire-format change whether or not any byte moved.
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// **v3 (P10)** added the three steering messages ([`crate::control`]) and,
+/// with them, a second thing a peer must understand: **unsolicited** frames. A
+/// v2 client asked a question and read the answer; a v3 server pushes every
+/// view change to every client, whoever asked (D14). A v2 client attached to a
+/// v3 server would meet a `Focus` frame it has no case for — mid-session,
+/// after it had been drawing correctly for a while — so the number moves for
+/// exactly the reason it moved at v2: the skew belongs at the first word of
+/// the first frame, not at the first unfamiliar message. The layout rules
+/// above did not move, and the twelve v1/v2 codes keep their values.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Header size in bytes (6 × `u32`).
 pub const HEADER_BYTES: usize = 24;
@@ -85,8 +95,8 @@ const RECORD_BYTES: usize = 8;
 
 /// What a frame's payload is.
 ///
-/// The discriminants are the wire values; they are frozen for
-/// [`PROTOCOL_VERSION`] 1 and mirrored into TypeScript by
+/// The discriminants are the wire values; they are frozen once assigned —
+/// a version bump appends, never renumbers — and mirrored into TypeScript by
 /// `tests/protocol_baseline.rs`, which `make check-generated-ts` guards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -124,6 +134,16 @@ pub enum MessageType {
     /// UTF-8 JSON: per-type property statistics driving color-by / size-by
     /// (`PropertyStatsResponse`, plan D12).
     PropertyStats = 12,
+    /// UTF-8 JSON: zoom the camera to a set of slots (`control::Focus`, D14).
+    /// Carries no slot-space change — a client that missed one is looking at
+    /// the wrong place, not at the wrong graph.
+    Focus = 13,
+    /// UTF-8 JSON: set one interaction concept's index array
+    /// (`control::Highlight`, D14).
+    Highlight = 14,
+    /// UTF-8 JSON: drive the colour-by / size-by channels
+    /// (`control::Appearance`, D14).
+    Appearance = 15,
 }
 
 impl MessageType {
@@ -135,7 +155,7 @@ impl MessageType {
     /// Every variant, in wire order — the one list the TypeScript mirror and
     /// the decoder are both generated from, so a new variant cannot be added
     /// to one and forgotten in the other.
-    pub const ALL: [MessageType; 12] = [
+    pub const ALL: [MessageType; 15] = [
         MessageType::MetaGraphMeta,
         MessageType::Points,
         MessageType::Links,
@@ -148,6 +168,9 @@ impl MessageType {
         MessageType::SearchResult,
         MessageType::Compaction,
         MessageType::PropertyStats,
+        MessageType::Focus,
+        MessageType::Highlight,
+        MessageType::Appearance,
     ];
 
     /// The TypeScript constant name for this variant.
@@ -165,6 +188,9 @@ impl MessageType {
             MessageType::SearchResult => "SEARCH_RESULT",
             MessageType::Compaction => "COMPACTION",
             MessageType::PropertyStats => "PROPERTY_STATS",
+            MessageType::Focus => "FOCUS",
+            MessageType::Highlight => "HIGHLIGHT",
+            MessageType::Appearance => "APPEARANCE",
         }
     }
 
@@ -556,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn message_type_codes_are_frozen_for_v1() {
+    fn message_type_codes_are_frozen_across_every_version() {
         // These numbers are the wire contract, mirrored into TypeScript. A
         // renumbering is a protocol version bump, not a refactor.
         assert_eq!(MessageType::MetaGraphMeta.code(), 1);
@@ -573,7 +599,11 @@ mod tests {
         assert_eq!(MessageType::SearchResult.code(), 10);
         assert_eq!(MessageType::Compaction.code(), 11);
         assert_eq!(MessageType::PropertyStats.code(), 12);
-        assert_eq!(MessageType::ALL.len(), 12, "a new variant must join ALL");
+        // v3's steering messages. Appended, never renumbered.
+        assert_eq!(MessageType::Focus.code(), 13);
+        assert_eq!(MessageType::Highlight.code(), 14);
+        assert_eq!(MessageType::Appearance.code(), 15);
+        assert_eq!(MessageType::ALL.len(), 15, "a new variant must join ALL");
     }
 
     #[test]

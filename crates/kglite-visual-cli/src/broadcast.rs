@@ -27,6 +27,7 @@
 
 use std::sync::Arc;
 
+use kglite_visual_core::control::{control_frames, Command};
 use kglite_visual_core::session::{response_frames, Response};
 use kglite_visual_core::Session;
 use tokio::sync::broadcast;
@@ -94,6 +95,17 @@ impl Bus {
     /// Push already-framed bytes to every subscriber.
     pub fn publish(&self, frames: Vec<Vec<u8>>) {
         let _ = self.tx.send(Arc::new(frames));
+    }
+
+    /// Push a steering command, and report how many clients heard it.
+    ///
+    /// The count is the whole answer a caller gets. A command carries no slot
+    /// space and produces no slice, so "did anything happen" has exactly one
+    /// observable: whether anyone was listening.
+    pub fn publish_command(&self, command: &Command) -> usize {
+        let clients = self.client_count();
+        self.publish(control_frames(command));
+        clients
     }
 
     /// Push a response if it moved the view, and say whether it did.

@@ -66,6 +66,22 @@ export type DebugState = {
   compactions: number
   /** The last bounded response's truncation metadata, banner included. */
   truncation: Truncation | null
+  /**
+   * The camera's zoom factor, as the renderer reports it.
+   *
+   * Here because `focus` (plan D14) is otherwise unobservable: an agent that
+   * asked the user's view to frame three slots has no other evidence the
+   * camera moved, and a screenshot is not an assertion. Read back from
+   * cosmos.gl rather than remembered, so it describes the renderer's state and
+   * not this file's intention.
+   */
+  zoomLevel: number | null
+  /** Slots the last `focus` command named. `[]` means "the whole view". */
+  focusedSlots: number[]
+  /** The property the colour channel is driven by, or null for structural. */
+  colorBy: string | null
+  /** The property the size channel is driven by, or null for structural. */
+  sizeBy: string | null
   /** The four interaction concepts, as sizes (plan D7). */
   hoveredSlot: number | null
   emphasizedCount: number
@@ -110,6 +126,10 @@ export const debugState: DebugState = {
   lastSliceKind: null,
   compactions: 0,
   truncation: null,
+  zoomLevel: null,
+  focusedSlots: [],
+  colorBy: null,
+  sizeBy: null,
   hoveredSlot: null,
   emphasizedCount: 0,
   highlightedCount: 0,

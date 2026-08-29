@@ -24,6 +24,9 @@ use axum::http::header::CONTENT_TYPE;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use kglite_visual_core::control::{
+    Appearance, AppearanceRequest, Command, Focus, FocusRequest, Highlight, HighlightRequest,
+};
 use kglite_visual_core::error::CoreError;
 use kglite_visual_core::render::RenderRequest;
 use kglite_visual_core::request::{
@@ -144,6 +147,65 @@ pub async fn render(State(state): State<AppState>, Json(body): Json<RenderReques
         Ok(Err(err)) => error_response(&err),
         Err(err) => task_failed("render", &err),
     }
+}
+
+/// `POST /api/focus` — `{"slots": [n, ...]}`. Zoom every attached client's
+/// camera to those slots; an empty list frames the whole view (plan D14).
+pub async fn focus(State(state): State<AppState>, Json(body): Json<FocusRequest>) -> Response {
+    steer(&state, &body.slots, |slots| {
+        Command::Focus(Focus::new(slots))
+    })
+}
+
+/// `POST /api/highlight` — `{"slots": [n, ...], "concept":
+/// "highlighted"|"selected"}`. Set one of the index-addressed interaction
+/// concepts (D7) on every attached client.
+pub async fn highlight(
+    State(state): State<AppState>,
+    Json(body): Json<HighlightRequest>,
+) -> Response {
+    let concept = body.concept;
+    steer(&state, &body.slots, move |slots| {
+        Command::Highlight(Highlight::new(slots, concept))
+    })
+}
+
+/// `POST /api/appearance` — `{"color_by": "..."|null, "size_by": "..."|null}`.
+///
+/// **The property name is not validated here, and cannot be.** Which properties
+/// a channel can be driven by is a per-type answer that
+/// `POST /api/property-stats` computes; this endpoint moves a channel on every
+/// client, and the clients are the only parties that know which type's
+/// statistics they last fetched. A name nothing carries colours the view
+/// uniformly, which is visible rather than silent.
+pub async fn appearance(
+    State(state): State<AppState>,
+    Json(body): Json<AppearanceRequest>,
+) -> Response {
+    let clients = state
+        .bus
+        .publish_command(&Command::Appearance(Appearance::new(
+            body.color_by,
+            body.size_by,
+        )));
+    steered(clients)
+}
+
+/// Validate the slots, publish the command, and report the audience.
+///
+/// The audience is the answer, not a courtesy: a steering command that reached
+/// nobody looked exactly like one that reached the user, and an agent that
+/// cannot tell those apart will narrate a screen that never moved.
+fn steer(state: &AppState, slots: &[u32], build: impl FnOnce(Vec<u32>) -> Command) -> Response {
+    if let Err(err) = state.session.check_live_slots(slots) {
+        return error_response(&err);
+    }
+    let clients = state.bus.publish_command(&build(slots.to_vec()));
+    steered(clients)
+}
+
+fn steered(clients: usize) -> Response {
+    Json(serde_json::json!({ "clients": clients })).into_response()
 }
 
 /// `POST /api/property-stats` — `{"node_type": "..."}`.

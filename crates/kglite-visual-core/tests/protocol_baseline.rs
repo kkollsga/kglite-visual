@@ -11,6 +11,15 @@
 //!    header word keeps every constant), and that is the change that silently
 //!    breaks an old client. `make check-protocol-baseline` guards it.
 //!
+//! **The v2 -> v3 regeneration, 2026-08-29 (P10), and its reason.** Every
+//! header word in this file carries the version, so the whole golden moved on
+//! a one-line change. The change is deliberate: P10 added three steering
+//! message types (`control::{Focus, Highlight, Appearance}`) *and* made every
+//! view change unsolicited, so a v2 client attached to a v3 server would meet
+//! a frame it has no case for mid-session. Bumping the version puts that skew
+//! at the first word of the first frame instead. The twelve v1/v2 message
+//! codes are unchanged, which is what the per-case dumps below still prove.
+//!
 //! **Both are exact baselines, so both fail the moment "make it pass" is
 //! cheaper than "explain the diff"** (CLAUDE.md → "Gate honesty"). A red
 //! baseline after a deliberate protocol change is a conscious decision:
@@ -144,6 +153,24 @@ fn generate_framing_golden() {
         ("property-stats", {
             let mut enc = ResponseEncoder::new();
             enc.push_json(MessageType::PropertyStats, r#"{"sampled":false}"#);
+            enc.finish()
+        }),
+        // v3's steering messages (D14). Unlike every case above, these are
+        // pushed to clients that asked for nothing, so the dump is also the
+        // record of what an *unsolicited* frame looks like on this wire.
+        ("focus", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::Focus, r#"{"slots":[3,17]}"#);
+            enc.finish()
+        }),
+        ("highlight", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::Highlight, r#"{"concept":"selected"}"#);
+            enc.finish()
+        }),
+        ("appearance", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::Appearance, r#"{"color_by":"field"}"#);
             enc.finish()
         }),
     ];

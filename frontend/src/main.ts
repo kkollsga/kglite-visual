@@ -25,7 +25,10 @@ import {
 } from './appearance'
 import { markRendererMounted, publishBenchHook } from './bench'
 import { debugState, probeDeviceFeatures, publishDebugState } from './debug'
+import type { Appearance as AppearanceCommand } from './generated/Appearance'
 import type { BoundInfo } from './generated/BoundInfo'
+import type { Focus } from './generated/Focus'
+import type { Highlight } from './generated/Highlight'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
 import type { NodeDetail } from './generated/NodeDetail'
@@ -144,25 +147,89 @@ const panels = new Panels(root, {
     applyInteraction()
     send({ type: 'preview', slot })
   },
-  setColorBy: (property) => {
-    colorByStat = property === null ? null : (lastStats.get(property) ?? null)
-    appearanceValues.clear()
-    if (property === null) {
-      redraw()
-      return
-    }
-    requestAppearanceValues(property, 'color')
-  },
-  setSizeBy: (property) => {
-    sizeByName = property
-    sizeValues.clear()
-    if (property === null) {
-      redraw()
-      return
-    }
-    requestAppearanceValues(property, 'size')
-  },
+  setColorBy: (property) => applyColorBy(property),
+  setSizeBy: (property) => applySizeBy(property),
 })
+
+/**
+ * The colour channel, from either driver.
+ *
+ * Extracted when the `appearance` command landed (plan D14): the menu and a
+ * remote agent must move the same channel through the same code, or the two
+ * drivers would drift into two behaviours for one control.
+ */
+function applyColorBy(property: string | null): void {
+  colorByStat = property === null ? null : (lastStats.get(property) ?? null)
+  appearanceValues.clear()
+  debugState.colorBy = property
+  if (property === null) {
+    redraw()
+    return
+  }
+  requestAppearanceValues(property, 'color')
+}
+
+/** The size channel, from either driver. See {@link applyColorBy}. */
+function applySizeBy(property: string | null): void {
+  sizeByName = property
+  sizeValues.clear()
+  debugState.sizeBy = property
+  if (property === null) {
+    redraw()
+    return
+  }
+  requestAppearanceValues(property, 'size')
+}
+
+/**
+ * Frame the named slots, or the whole view when the list is empty.
+ *
+ * Slots ARE renderer point indices — that is the D4 identity contract, and it
+ * is why an agent can name what the user should look at without either side
+ * translating. Absent slots are dropped rather than passed through: a
+ * tombstoned index has a NaN position, and cosmos.gl's fit would take it as an
+ * extent and zoom to nothing.
+ */
+function applyFocus(command: Focus): void {
+  debugState.focusedSlots = [...command.slots]
+  if (surface === null) return
+  const live = new Set(view.liveSlots())
+  const targets = command.slots.filter((slot) => live.has(slot))
+  // Duration zero: this is a jump to somewhere the agent is about to talk
+  // about, not an animation, and an in-flight transition auto-pauses the
+  // simulation (see `render.ts`).
+  if (targets.length === 0) {
+    surface.graph.fitView(0)
+  } else {
+    surface.graph.fitViewByPointIndices(targets, 0)
+  }
+  syncCounts()
+}
+
+/** Set one interaction concept's index array from a remote command. */
+function applyHighlight(command: Highlight): void {
+  const live = new Set(view.liveSlots())
+  const slots = command.slots.filter((slot) => live.has(slot))
+  if (command.concept === 'selected') {
+    interaction.setSelected(slots)
+    // A selection the user did not make still has to say what it selected, or
+    // the outline ring names a node with no panel behind it.
+    if (slots.length === 1) send({ type: 'preview', slot: slots[0] as number })
+  } else {
+    interaction.setHighlighted(slots)
+  }
+  // `highlighted` rides the colour array, so it needs a full redraw; `selected`
+  // is a ring and would be satisfied by `applyInteraction`. One path for both,
+  // because two would be one more place to get the distinction wrong.
+  redraw()
+}
+
+/** Drive both appearance channels from a remote command. */
+function applyAppearance(command: AppearanceCommand): void {
+  panels.setAppearanceSelection(command.color_by, command.size_by)
+  applyColorBy(command.color_by)
+  applySizeBy(command.size_by)
+}
 
 /** The property statistics behind the two dropdowns, by property name. */
 const lastStats = new Map<string, PropertyStat>()
@@ -283,6 +350,19 @@ async function handle(completed: Completed): Promise<void> {
       debugState.approximateStats = approximate
       break
     }
+    // The three steering commands. Unsolicited by construction — they arrive
+    // because an agent, or another tab, asked this view to move — so they are
+    // handled exactly like every other message: by kind, never by matching a
+    // request this client remembers making.
+    case 'focus':
+      applyFocus(completed.value)
+      break
+    case 'highlight':
+      applyHighlight(completed.value)
+      break
+    case 'appearance':
+      applyAppearance(completed.value)
+      break
     case 'error':
       // A query failure is the panel's business, not the whole app's: the graph
       // on screen is still valid and blanking it would lose the user's place.
@@ -546,6 +626,11 @@ function isMetaGraphOnly(): boolean {
 /** Re-place the already-built candidates against the current camera. */
 function positionLabels(current: Surface): void {
   const graph = current.graph
+  // The camera moved (a zoom, a settle, a `focus` command), so the one number
+  // an agent can assert a camera move on is re-read here. cosmos.gl runs the
+  // fit through a d3 transition, so it is NOT settled when `fitView*` returns
+  // and a read at the call site reports the old zoom — measured, not assumed.
+  debugState.zoomLevel = graph.getZoomLevel()
   const wholeSchema = isMetaGraphOnly()
   labels.update(
     {
@@ -582,6 +667,9 @@ function everyPoint(current: Surface): { indices: number[]; positions: number[] 
 }
 
 function syncCounts(): void {
+  // Read back from the renderer, not from whatever this file last asked for:
+  // a zoom the GPU did not take is a zoom that did not happen.
+  debugState.zoomLevel = surface?.graph.getZoomLevel() ?? null
   debugState.pointCount = view.liveCount
   debugState.linkCount = view.linkCount
   debugState.slotCount = view.slotCount
