@@ -6,10 +6,14 @@ members = [
 ]
 resolver = "2"
 
-# VERSION SITE 1 of 3. The other two are the `kglite-visual-core` requirement
-# strings in the cli and py manifests, which `[workspace.package]` does NOT
-# reach and `cargo publish` does demand. The full enumeration, and why counting
-# beats assuming, is in CLAUDE.md → "Commits & releases".
+# VERSION SITE 1 of 4. The other three are internal dependency requirement
+# strings: `kglite-visual-core` in the cli manifest, and both
+# `kglite-visual-core` and `kglite-visual-cli` in the py manifest.
+# `[workspace.package]` does NOT reach any of them and `cargo publish` demands
+# every one. (The count was 3 until P5's lib-link gave the py crate a second
+# internal requirement; this comment said "1 of 3" until P6 recounted.) The
+# full enumeration, and why counting beats assuming, is in CLAUDE.md →
+# "Commits & releases".
 [workspace.package]
 version = "0.1.0"
 # kglite's own MSRV. This project embeds that engine, so its floor is ours;

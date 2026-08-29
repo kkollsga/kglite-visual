@@ -5,19 +5,38 @@ build-backend = "maturin"
 [project]
 name = "kglite-visual"
 description = "Interactive WebGL visualization for .kgl knowledge graphs"
-# No `readme` key: there is no README.md yet, and a `readme` pointing at a
-# missing file fails the build rather than degrading. Add both together.
+# The wheel's long description, and the reason README.md exists at all (P6).
+# It was absent through P5 with this key commented out, because a `readme`
+# pointing at a missing file fails the build rather than degrading — the pair
+# lands together or not at all.
+readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Kristian dF Kollsgård", email = "kkollsg@gmail.com"},
 ]
 keywords = ["graph", "knowledge-graph", "visualization", "webgl", "kglite"]
+# The operating systems below are exactly the platforms build_wheels.yml
+# builds a release-blocking wheel for; the best-effort aarch64-Linux legs are
+# covered by the POSIX :: Linux line either way. A classifier is a claim about
+# what ships, so it moves when the matrix moves.
+#
+# Deliberately NO per-version `Programming Language :: Python :: 3.1x` lines.
+# The extension is abi3-py310, so every 3.10+ interpreter is supported by
+# construction and `requires-python` already says so exactly; an enumerated
+# list would need a commit per Python release and is a false claim the moment
+# it lags one.
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
@@ -25,8 +44,11 @@ classifiers = [
 # assets are all inside the compiled extension.
 dependencies = []
 # NOT a version site. maturin reads the version from the Rust crate, so this
-# file has nothing to bump — the enumeration in CLAUDE.md counts three sites,
-# and this deliberately is not one of them.
+# file has nothing to bump — the enumeration in CLAUDE.md counts four sites,
+# and this deliberately is not one of them. Neither is anything added in P6:
+# README.md carries an unpinned install line, CHANGELOG.md's top section is
+# `[Unreleased]`, and build_wheels.yml *reads* the number out of Cargo.toml
+# rather than restating it. The count after P6 is still four, re-grepped.
 dynamic = ["version"]
 
 [project.scripts]
@@ -40,6 +62,8 @@ kglite-visual = "kglite_visual:_run_cli"
 [project.urls]
 Homepage = "https://github.com/kkollsga/kglite-visual"
 Repository = "https://github.com/kkollsga/kglite-visual"
+Changelog = "https://github.com/kkollsga/kglite-visual/blob/main/CHANGELOG.md"
+Issues = "https://github.com/kkollsga/kglite-visual/issues"
 
 [tool.pytest.ini_options]
 # `tests/` is outside the package on purpose: `python-source = "python"` means
@@ -59,3 +83,18 @@ module-name = "kglite_visual._native"
 # `cargo test` can still link the crate.
 features = ["python-extension"]
 python-source = "python"
+# D9: the source distribution carries a PREBUILT frontend bundle.
+#
+# `frontend/dist/` is gitignored build output, so nothing else would put it in
+# the sdist — and without it, `pip install` of the tarball needs Node, npm and
+# a network to reproduce a Vite build before rustc ever runs. That is not a
+# source fallback; it is a second toolchain requirement on exactly the users
+# who fell back to source because no wheel matched them. `format = "sdist"`
+# scopes the copy to the tarball: the wheel gets the bundle the normal way,
+# baked into the extension by rust-embed, and would otherwise ship it twice.
+#
+# The bundle is built into the tarball, so an sdist built from a stale or
+# empty `frontend/dist` silently ships a broken app. `make check-bundle`
+# refuses a bundle older than `frontend/src`, and build_wheels.yml's sdist job
+# runs the production frontend build immediately before `maturin sdist`.
+include = [{ path = "frontend/dist/**/*", format = "sdist" }]

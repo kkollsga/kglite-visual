@@ -1,0 +1,605 @@
+name: Publish Python wheels
+
+# AUTHORED IN P6, NEVER RUN, AND INERT AT THE PUBLISH STEP BY DESIGN. There is
+# no remote, no PyPI project and no trusted publisher (2026-08-29). Everything
+# up to `publish` is exercised locally — the sdist round trip, the release
+# wheel and the inventory check were all run on a developer machine before this
+# file was committed — but no Actions runner has executed any of it, and the
+# publish job cannot fire until a human turns it on (see that job's `if`).
+# A committed workflow is not a passing workflow (doctrine R10).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - 'dev-docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    name: Check if version needs publishing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      should_publish: ${{ steps.check.outputs.should_publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check version against PyPI
+        id: check
+        run: |
+          # The version is single-sourced in [workspace.package] in the root
+          # Cargo.toml; every member crate inherits it with
+          # `version.workspace = true`, and pyproject.toml declares
+          # `dynamic = ["version"]` so maturin reads it from the crate. This
+          # grep is therefore reading the one place the number lives.
+          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
+          # A pipeline reports the LAST stage's status, and `cut` always exits
+          # 0 — so a grep that matched nothing yields an empty VERSION without
+          # failing, and that empty value would drive every publish decision
+          # below into a malformed URL. The workflow would go green having
+          # published nothing (R2, and the release skill's step 11).
+          if ! printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+'; then
+            echo "::error::could not read a version from Cargo.toml (got '$VERSION')"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "workspace version: $VERSION"
+
+          # 404 is the only "publish this" signal. 200 means it is already
+          # there; anything else (403, 5xx, a network blip) means we cannot
+          # tell, and the safe answer to "cannot tell" is don't publish.
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -A "kglite-visual-ci (https://github.com/kkollsga/kglite-visual)" \
+            "https://pypi.org/pypi/kglite-visual/$VERSION/json")
+          if [ "$HTTP_STATUS" = "404" ]; then
+            echo "Version $VERSION not on PyPI (HTTP 404) — will build"
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version $VERSION already on PyPI or unverifiable (HTTP $HTTP_STATUS) — skipping"
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  ci-gate:
+    name: Wait for CI to pass
+    needs: [version-check]
+    if: needs.version-check.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # Waits on ci.yml's single `ci-success` aggregate, not on a list of check
+      # names: an allowlist is how a red job ships a release by not being on
+      # it. Poll the PUSH-triggered run specifically — the same commit can also
+      # carry a pull_request run with identical check names, so a commit-level
+      # status query is ambiguous.
+      - name: Wait for CI to pass
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          deadline=$(( $(date +%s) + 2700 ))
+          while :; do
+            line=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&per_page=10" \
+              -q '.workflow_runs[0] | "\(.status) \(.conclusion // "")"' \
+              2>/dev/null | head -n1 || true)
+            status=${line%% *}
+            conclusion=${line#* }
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then
+                echo "CI success"
+                exit 0
+              fi
+              echo "CI concluded: $conclusion"
+              exit 1
+            fi
+            [ -n "$status" ] && echo "CI: $status…" || echo "CI run not registered yet…"
+            # A timeout is a non-zero exit, never a pass.
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::timed out waiting for the CI run"
+              exit 1
+            fi
+            sleep 20
+          done
+
+  # Windows + macOS build natively. macOS builds arm64 (native on the arm
+  # runner) and x86_64 (cross — Apple ships both SDKs). One abi3-py310 wheel
+  # per target serves every Python from 3.10 up, so there is no per-Python
+  # matrix leg.
+  #
+  # Every leg builds the frontend FIRST. `frontend/dist` is gitignored build
+  # output baked into the extension by rust-embed, and its absence is a
+  # build.rs *warning*, not an error — so a leg that skipped this step would
+  # produce a wheel that installs, imports, starts a server and answers `/`
+  # with an error page. `scripts/check_wheel.py` is the backstop that reads the
+  # extension's own bytes for the bundle, and it runs on every wheel below.
+  build-native:
+    name: Build wheel — ${{ matrix.os }} — ${{ matrix.target }}
+    needs: [version-check]
+    if: needs.version-check.outputs.should_publish == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            # The wheel runs on the runner that built it, so the packaged
+            # consumer probe (install into a fresh venv, drive it from outside
+            # the repo) is possible here.
+            runnable: true
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            runnable: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            # Cross-built on an arm64 runner: this wheel cannot be imported
+            # here, so only the inventory half of the check applies.
+            runnable: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build the production frontend bundle
+        run: make frontend-install frontend-build
+      - name: Bundle freshness
+        run: make check-bundle
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Force cargo PATH precedence (macOS rustup-init shim)
+        # The macos runner images ship a `rustup-init` shim at
+        # /usr/local/bin/cargo that wins over the toolchain
+        # dtolnay/rust-toolchain installs in ~/.cargo/bin. maturin then invokes
+        # `cargo metadata` and the shim rejects it as an unknown argument.
+        # KGLite hit this twice on release builds; prepending the real
+        # toolchain is the fix it landed.
+        if: matrix.os == 'macos-latest'
+        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        shell: bash
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "wheel-${{ matrix.target }}"
+      - name: Install maturin
+        run: pip install 'maturin>=1.14.1,<2.0'
+      - name: Build the release wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p wheels
+          maturin build --release --target ${{ matrix.target }} \
+            -m crates/kglite-visual-py/Cargo.toml --out wheels
+          ls -la wheels
+      # Inventory: open the .whl, assert the extension, the shim modules and
+      # the console script are in it, and scan the extension's OWN BYTES for
+      # the hashed asset names in frontend/dist/index.html. No zip listing can
+      # answer that last one — the bundle is inside the .so, not beside it.
+      - name: Wheel inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(wheels/*.whl)
+          # A `for` loop over an empty glob runs zero times and exits 0 — a
+          # check that scanned nothing must not pass (R1).
+          test "${#wheels[@]}" -ge 1 || { echo "::error::no wheel to inventory"; exit 1; }
+          for w in "${wheels[@]}"; do
+            python scripts/check_wheel.py --wheel "$w" --inventory-only
+          done
+      - name: Packaged-consumer probe
+        if: matrix.runnable
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(wheels/*.whl)
+          test "${#wheels[@]}" -ge 1 || { echo "::error::no wheel to probe"; exit 1; }
+          for w in "${wheels[@]}"; do
+            python scripts/check_wheel.py --wheel "$w"
+          done
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: wheels/*.whl
+          # `error`, not the default `warn`: a build job that exits 0 while
+          # producing no wheel uploads an EMPTY artifact and stays green, and
+          # the publish step tolerates partial sets — so an incomplete wheel set
+          # would ship with nothing saying so (R9).
+          if-no-files-found: error
+
+  # Linux builds inside the manylinux/musllinux containers via maturin-action,
+  # never as a bare `maturin build` on the runner: a bare build tags the wheel
+  # with the RUNNER's glibc, and pip then refuses to install it on anything
+  # older. KGLite shipped a `manylinux_2_39` wheel that way and forced its
+  # downstreams to self-host.
+  #
+  # x86_64 is the must-pass pair (glibc manylinux2014 + musl). A failure here
+  # blocks the release; we never publish a Linux x86_64 set missing the primary
+  # glibc wheel.
+  build-linux:
+    name: Build wheel — linux — ${{ matrix.target }} (${{ matrix.manylinux }})
+    needs: [version-check]
+    if: needs.version-check.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            manylinux: '2014'
+            # A manylinux2014 wheel installs on the ubuntu runner (glibc far
+            # newer than 2.17), so the consumer probe is possible.
+            runnable: true
+          - target: x86_64-unknown-linux-musl
+            manylinux: musllinux_1_2
+            # A musl wheel does not install on a glibc runner.
+            runnable: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # Built on the HOST, before the container starts: maturin-action mounts
+      # the workspace into the container, so the bundle rust-embed bakes in is
+      # the one produced here. The container image has no Node.
+      - name: Build the production frontend bundle
+        run: make frontend-install frontend-build
+      - name: Bundle freshness
+        run: make check-bundle
+      - name: Build the release wheel (container)
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release -m crates/kglite-visual-py/Cargo.toml --out wheels
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+      - name: Wheel inventory
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(wheels/*.whl)
+          test "${#wheels[@]}" -ge 1 || { echo "::error::no wheel to inventory"; exit 1; }
+          for w in "${wheels[@]}"; do
+            python scripts/check_wheel.py --wheel "$w" --inventory-only
+          done
+      - name: Packaged-consumer probe
+        if: matrix.runnable
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(wheels/*.whl)
+          test "${#wheels[@]}" -ge 1 || { echo "::error::no wheel to probe"; exit 1; }
+          for w in "${wheels[@]}"; do
+            python scripts/check_wheel.py --wheel "$w"
+          done
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: wheels/*.whl
+          if-no-files-found: error
+
+  # aarch64 Linux — extra coverage, cross-built in the container. These are the
+  # fragile combos, so the job is BEST-EFFORT: a cross-build failure must not
+  # block a release that has its must-pass wheels. A cell that does build gets
+  # published; a broken one is simply absent until a later release fixes it.
+  # `continue-on-error` here is exactly why the publish job below reads
+  # `needs.*.result` explicitly instead of relying on job success.
+  build-linux-arm:
+    name: Build wheel — linux — ${{ matrix.target }} (${{ matrix.manylinux }})
+    needs: [version-check]
+    if: needs.version-check.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            # 2_28, not 2014: the manylinux2014 cross image ships gcc 4.8.5,
+            # which cannot cross-build this class of C dependency for aarch64
+            # (KGLite burned two releases on `ring`'s asm and mimalloc's
+            # `-Wdate-time` before moving). The cost is a glibc floor of 2.28
+            # on this leg only, which is strictly better than today's absent
+            # wheel.
+            manylinux: '2_28'
+          - target: aarch64-unknown-linux-musl
+            manylinux: musllinux_1_2
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build the production frontend bundle
+        run: make frontend-install frontend-build
+      - name: Bundle freshness
+        run: make check-bundle
+      - name: Build the release wheel (container)
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release -m crates/kglite-visual-py/Cargo.toml --out wheels
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+      # Inventory only — an aarch64 wheel cannot be imported on an x86_64
+      # runner. The inventory half is the platform-independent one, and it is
+      # the half that catches the missing-frontend-bundle failure.
+      - name: Wheel inventory
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(wheels/*.whl)
+          test "${#wheels[@]}" -ge 1 || { echo "::error::no wheel to inventory"; exit 1; }
+          for w in "${wheels[@]}"; do
+            python scripts/check_wheel.py --wheel "$w" --inventory-only
+          done
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: wheels/*.whl
+          if-no-files-found: error
+
+  build-sdist:
+    name: Build sdist (source fallback)
+    # WHY AN SDIST when wheels cover the common platforms: a wheel exists only
+    # for the targets built above. An older-glibc Linux, a BSD, an unusual
+    # arch, or an aarch64 box on a release where that best-effort leg did not
+    # build cannot install at all without one. pip falls back to the sdist and
+    # compiles from source.
+    #
+    # D9: the sdist carries a PREBUILT frontend. `[tool.maturin] include` with
+    # `format = "sdist"` copies `frontend/dist/**/*` into the tarball and
+    # nothing else from `frontend/` — no package.json, no src, no vite config —
+    # so the tarball is structurally incapable of needing Node. A source
+    # fallback that demanded a second toolchain would land hardest on exactly
+    # the users who reached it because no wheel matched them.
+    needs: [version-check]
+    if: needs.version-check.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the production frontend bundle
+        run: make frontend-install frontend-build
+      - name: Bundle freshness
+        run: make check-bundle
+      - name: Install maturin
+        run: pip install 'maturin>=1.14.1,<2.0'
+      - name: Build sdist
+        run: maturin sdist -m crates/kglite-visual-py/Cargo.toml --out dist
+      - name: Verify the sdist's contents
+        run: |
+          set -euo pipefail
+          sdist=$(ls dist/*.tar.gz)
+          echo "sdist: $sdist ($(du -h "$sdist" | cut -f1))"
+          listing=$(tar -tzf "$sdist")
+
+          # The licence must travel with the source.
+          printf '%s\n' "$listing" | grep -q '/LICENSE$' \
+            || { echo "::error::sdist carries no LICENSE"; exit 1; }
+
+          # The prebuilt bundle must be there, or a source install produces a
+          # server that answers / with an error page.
+          test "$(printf '%s\n' "$listing" | grep -c '/frontend/dist/')" -ge 2 \
+            || { echo "::error::sdist carries no prebuilt frontend/dist"; exit 1; }
+          printf '%s\n' "$listing" | grep -q '/frontend/dist/index.html$' \
+            || { echo "::error::sdist has no frontend/dist/index.html"; exit 1; }
+
+          # REGRESSION GUARD, and it caught a real defect once. Before P6 the
+          # kglite dependency carried a `path` to a sibling checkout OUTSIDE
+          # this workspace; maturin vendors such a dependency, and the sdist
+          # was 2.5 MB of 435 files carrying 391 files of KGLite's own source
+          # under this project's name, resolving against the vendored copy
+          # instead of crates.io. The dep is version-only now, and this asserts
+          # nothing re-introduces a foreign path dep.
+          if printf '%s\n' "$listing" | grep -Eq '^[^/]+/(KGLite|kglite)/'; then
+            echo "::error::sdist vendors a foreign crate — check for an out-of-workspace path dependency"
+            printf '%s\n' "$listing" | grep -E '^[^/]+/(KGLite|kglite)/' | head
+            exit 1
+          fi
+
+          # Resolve it where nothing else exists, exactly as a consumer would.
+          work=$(mktemp -d)
+          tar -xzf "$sdist" -C "$work"
+          cd "$work"/*/
+          cargo metadata --format-version 1 > /dev/null
+          echo "sdist resolves standalone"
+      - name: Install the sdist from source and drive it
+        # Resolving proves the manifest is coherent; it does NOT prove the
+        # thing builds. This compiles the extension exactly as a user on an
+        # uncovered platform would, then starts the server and asserts the
+        # embedded bundle came back — the one failure a manifest check cannot
+        # see. Slow on purpose; it runs once per release.
+        run: |
+          set -euo pipefail
+          sdist=$(ls dist/*.tar.gz)
+          python -m venv /tmp/sdist-check
+          /tmp/sdist-check/bin/pip install --upgrade pip
+          /tmp/sdist-check/bin/pip install --no-binary kglite-visual "$sdist"
+          # Probe from a neutral directory: the repo root holds `python/` and
+          # CWD precedes site-packages on sys.path, so running this here would
+          # import the source tree, which has no compiled extension.
+          cp crates/kglite-visual-core/tests/fixtures/meta.kgl /tmp/
+          cd /tmp
+          /tmp/sdist-check/bin/python - <<'PY'
+          import http.client
+          import kglite_visual as kv
+
+          view = kv.show("/tmp/meta.kgl", open_browser=False)
+          conn = http.client.HTTPConnection("127.0.0.1", view.port, timeout=10)
+          conn.request("GET", "/")
+          response = conn.getresponse()
+          body = response.read()
+          assert response.status == 200, response.status
+          # The no-bundle-embedded page is also a 200, so assert on the app.
+          assert b'<div id="app"></div>' in body, body[:400]
+          assert b"assets/" in body, body[:400]
+          view.close()
+          print("sdist installs, serves the embedded app:", kv.__version__)
+          PY
+      - name: Upload sdist
+        # Named `wheels-sdist` on purpose: the publish job collects
+        # `pattern: wheels-*`, so this needs no change there.
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: [version-check, ci-gate, build-native, build-linux, build-linux-arm, build-sdist]
+    # THIS JOB IS INERT UNTIL A HUMAN ENABLES IT, and that is the whole point
+    # of the first term. `vars.PYPI_PUBLISH_ENABLED` is a repository variable
+    # that DOES NOT EXIST; an unset variable evaluates to the empty string, so
+    # this condition is false and the job is skipped on every run until someone
+    # creates the variable with the value `true`. That is deliberate: the PyPI
+    # project and its trusted publisher do not exist either, and a publish step
+    # that would fail at the registry is worse than one that is visibly off —
+    # a skipped job says "not enabled", a failed one says "broken".
+    #
+    # Turning it on is the LAST release precondition, after: the remote exists,
+    # a CI run has actually gone green, the PyPI project `kglite-visual` is
+    # registered, and a trusted publisher is configured for
+    # kkollsga/kglite-visual + workflow `build_wheels.yml`.
+    #
+    # The repository check is a second, independent guard: a fork inherits this
+    # file, and a fork must never publish under this name.
+    #
+    # `always()` plus explicit `result` terms, rather than plain `needs`
+    # success: `build-linux-arm` is `continue-on-error`, and a
+    # continue-on-error job that fails still counts as a FAILED dependency,
+    # which would silently SKIP this job instead of publishing the wheels that
+    # did build. Every must-pass leg is named explicitly below; the best-effort
+    # one deliberately is not.
+    if: >-
+      always() &&
+      vars.PYPI_PUBLISH_ENABLED == 'true' &&
+      github.repository == 'kkollsga/kglite-visual' &&
+      needs.version-check.outputs.should_publish == 'true' &&
+      needs.ci-gate.result == 'success' &&
+      needs.build-native.result == 'success' &&
+      needs.build-linux.result == 'success' &&
+      needs.build-sdist.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: pypi
+      url: https://pypi.org/p/kglite-visual
+    permissions:
+      contents: write   # create the tag and the GitHub release
+      id-token: write   # OIDC, for PyPI trusted publishing
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download every build artifact
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - name: Show what will be published
+        run: find dist -type f | sort
+      - name: Verify the artifact SET, not just that something built
+        # R9. A version check answers "did something publish", never "did
+        # everything publish". The must-pass set is five wheels — win-x64,
+        # macos-arm64, macos-x86_64, linux-gnu-x86_64, linux-musl-x86_64 —
+        # plus the sdist; the two aarch64 legs are best-effort and deliberately
+        # not counted, so a release missing them is complete and a release
+        # missing macOS is not. An upload that produced nothing already failed
+        # on `if-no-files-found: error`; this catches the other shape, a leg
+        # that was skipped rather than run.
+        #
+        # The patterns match the platform tag loosely (`macosx_*_x86_64`, not
+        # `macosx_10_12_x86_64`) on purpose: the exact tag moves with the
+        # deployment target and the manylinux image, and a check that goes red
+        # on a legitimate floor change is a check someone deletes.
+        run: |
+          set -euo pipefail
+          sdists=$(find dist -name '*.tar.gz' | wc -l)
+          wheels=$(find dist -name '*.whl' | wc -l)
+          echo "sdists=$sdists wheels=$wheels"
+          test "$sdists" -eq 1 || { echo "::error::expected exactly 1 sdist, found $sdists"; exit 1; }
+          test "$wheels" -ge 5 || { echo "::error::expected at least 5 must-pass wheels, found $wheels"; exit 1; }
+          for pattern in '*win_amd64.whl' '*macosx_*_arm64.whl' '*macosx_*_x86_64.whl' \
+                         '*manylinux*_x86_64.whl' '*musllinux*_x86_64.whl'; do
+            find dist -name "$pattern" | grep -q . \
+              || { echo "::error::the artifact set has no wheel matching '$pattern'"; exit 1; }
+          done
+          echo "artifact set complete"
+      - name: Extract the changelog section for this version
+        id: changelog
+        run: |
+          VERSION="${{ needs.version-check.outputs.version }}"
+          NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{if(found) exit} found" CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "$NOTES" > /tmp/release_notes.md
+          fi
+      - name: Publish to PyPI (trusted publishing)
+        # No password and no API token: OIDC. `id-token: write` above plus a
+        # trusted publisher registered on PyPI for this repository and this
+        # workflow filename is the whole credential. Nothing to rotate, and no
+        # secret that a fork or a pull_request_target could reach.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A partial set from an earlier attempt must not fail the retry.
+          skip-existing: true
+      - name: Create the GitHub release (with changelog)
+        # The record is part of the artifact set (R9): a publish with no tag
+        # ships a version nothing points at, and a version check calls that
+        # green. The tag is created HERE, after the upload, so a failed publish
+        # leaves no tag claiming a release that does not exist.
+        if: steps.changelog.outputs.has_notes == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          body_path: /tmp/release_notes.md
+          tag_name: v${{ needs.version-check.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create the GitHub release (auto-generated notes)
+        if: steps.changelog.outputs.has_notes != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
+          tag_name: v${{ needs.version-check.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

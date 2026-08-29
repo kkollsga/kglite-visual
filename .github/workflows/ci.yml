@@ -1,0 +1,272 @@
+name: CI
+
+# AUTHORED IN P6, NEVER RUN. There is no remote and no Actions runner has ever
+# executed a line of this file (2026-08-29). It is written against the local
+# gate — every step below is a `make` target that runs on a developer machine
+# today, which is the only evidence there is that any of it works. Treat the
+# first real run as the validation step it is: a green badge here has never
+# existed, and "the workflow is committed" is not "the workflow passes"
+# (doctrine R10).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel a superseded PR run, never a push to the default branch: on `main` the
+# run IS the record of whether that commit was good, and a cancelled one leaves
+# a commit whose status nobody can read.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Read-only by default. Nothing in CI writes to the repository; the publish
+# path lives in build_wheels.yml and asks for its own permissions there.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # A CI failure that reads "thread panicked" with no frames costs a rerun.
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ---------------------------------------------------------------------
+  # `make gate` runs sixteen checks. Fourteen of them are here, split across
+  # the jobs below. The two that are deliberately absent, and why:
+  #
+  #   check-dev-docs      — bounds `dev-docs/`, which is gitignored and never
+  #                         reaches a checkout. A CI copy would scan an empty
+  #                         directory and pass vacuously (R1).
+  #   check-skill-mirrors — compares `.agents/` against `.claude/skills/`.
+  #                         `.agents/` and `AGENTS.md` are generated adapters
+  #                         and are not tracked, so CI has nothing to compare.
+  #
+  # Both are local-only by construction, not by omission. If either ever
+  # becomes checkable in CI, it gets a job here in the same change.
+  # ---------------------------------------------------------------------
+
+  structural:
+    name: Structural bans
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      # Two bans whose violation is silent: a CC-BY-NC renderer that works
+      # perfectly while making the repo unshippable, and a second global
+      # allocator that segfaults in someone else's notebook. Cheapest job in
+      # the file and it runs first for that reason.
+      - name: '@cosmograph/* and #[global_allocator] bans'
+        run: make check-bans
+
+  frontend:
+    name: Frontend — typecheck, production build, audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: make frontend-install
+      - name: Typecheck
+        run: make frontend-typecheck
+      # PRODUCTION build, not a dev build: this bundle is what rust-embed bakes
+      # into the binary and what every downstream job compiles against, so a
+      # dev-mode bundle here would make every Rust job test something the
+      # product never ships (R11).
+      - name: Production build
+        run: make frontend-build
+      - name: Bundle freshness
+        run: make check-bundle
+      # THE FAILING HALF of the local `frontend-audit`. `make frontend-audit`
+      # warns and moves on because `npm audit` queries the registry and goes
+      # red on a plane — a gate that fails for reasons unrelated to the diff is
+      # a gate people bypass. CI always has a network, so CI owns the version
+      # that blocks (CLAUDE.md → "Build & test").
+      - name: Production-dependency advisories (blocking)
+        working-directory: frontend
+        run: npm audit --omit=dev
+      # Every downstream job needs this exact bundle. Rebuilding it per job
+      # would mean four bundles and no guarantee they match; the embedded-asset
+      # checks would then be testing a bundle no other job saw.
+      - name: Upload the production bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  rust:
+    name: Rust — fmt, clippy, test (${{ matrix.os }})
+    needs: [frontend]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      # The bundle is an INPUT to the Rust build, not an output of it:
+      # `crates/kglite-visual-cli` embeds `frontend/dist` at compile time and
+      # its build.rs warns (does not fail) when the folder is missing, so a
+      # cargo job without this download would compile a binary that serves an
+      # error page and every test that never fetches `/` would still pass.
+      - name: Download the production bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "ci-${{ matrix.os }}"
+      - name: Formatting
+        run: make rust-fmt
+      - name: Clippy (warnings are errors)
+        run: make rust-clippy
+      - name: Workspace tests
+        run: make rust-test
+      # Both of these regenerate an exact committed artifact and then assert
+      # nothing moved, so they are `git diff` checks and platform-independent.
+      # Running them on one OS is the whole check; running them on two would
+      # only double the ways a shared cache can confuse the diff.
+      - name: Generated TypeScript is in step with the Rust types
+        if: matrix.os == 'ubuntu-latest'
+        run: make check-generated-ts
+      - name: Protocol framing baseline
+        if: matrix.os == 'ubuntu-latest'
+        run: make check-protocol-baseline
+
+  e2e:
+    name: End-to-end (Playwright + SwiftShader)
+    needs: [frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download the production bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "ci-ubuntu-latest"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: make frontend-install
+      # Browser binaries are ~150 MB and unchanged between runs; the cache key
+      # is the pinned @playwright/test version, so a version bump misses the
+      # cache and re-downloads instead of running the new runner against last
+      # month's browser.
+      - name: Resolve the pinned Playwright version
+        id: pw
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').devDependencies['@playwright/test']")
+          # An empty version yields a cache key everything hits, so the cache
+          # would be permanently stale and nothing would say so (R2: the
+          # pipeline's status is not the value's).
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+'; then
+            echo "::error::could not read the pinned @playwright/test version (got '$version')"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - name: Install Chromium and its system dependencies
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      # The three SwiftShader flags live in frontend/playwright.config.ts, not
+      # here: headless Chromium has no GPU, and the renderer is WebGL2. Keeping
+      # them in the config means `make e2e` locally and this job run the same
+      # browser configuration rather than two that drift.
+      - name: End-to-end smoke
+        run: make e2e
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-artifacts
+          path: frontend/tests/e2e/artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
+  python:
+    name: Python wheel — pytest + packaged consumer
+    needs: [frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download the production bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      # 3.10 is the abi3 floor the extension is built against. Testing on the
+      # floor is the point: a wheel that only works on the newest interpreter
+      # is a wheel whose `requires-python` lies.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "ci-ubuntu-latest"
+      - name: Wheel test suite
+        run: make pytest
+      # The one check a source-tree test structurally cannot do: it opens the
+      # built .whl, asserts the frontend bundle is inside the extension's own
+      # bytes, then installs into a throwaway venv and drives it from outside
+      # the repo, where the source tree cannot shadow the package under test.
+      - name: Packaged-consumer check
+        run: make check-packaged-consumer
+
+  ci-success:
+    name: CI success
+    # The single aggregate gate. build_wheels.yml waits on THIS, not on a
+    # hand-maintained list of check names — an allowlist is how a red job ships
+    # a release by simply not being listed. A job added above is covered by
+    # adding it to `needs` here, and nowhere else.
+    needs: [structural, frontend, rust, e2e, python]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify every CI job passed
+        run: |
+          results="${{ join(needs.*.result, ',') }}"
+          echo "CI job results: $results"
+          case ",$results," in
+            *,failure,* | *,cancelled,*)
+              echo "::error::At least one CI job did not succeed."
+              exit 1
+              ;;
+            *)
+              echo "All CI jobs succeeded."
+              ;;
+          esac

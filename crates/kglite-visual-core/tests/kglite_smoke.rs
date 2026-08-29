@@ -1,4 +1,4 @@
-//! Proves the kglite path dependency is more than a manifest line.
+//! Proves the pinned kglite dependency is more than a manifest line.
 //!
 //! "It compiles" is a weak test (CLAUDE.md → "A reported status is not the
 //! result"): a dependency floor can compile and still misbehave, and this one

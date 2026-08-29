@@ -9,25 +9,34 @@ repository.workspace = true
 description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
 
 [dependencies]
-# The engine. `version` + `path` together: cargo builds from the sibling
-# checkout, and the requirement string is what a publish would carry.
-#
-# `=0.16.13` is EXACT on purpose (D11). kglite is pre-1.0 and ships documented
-# breaking changes in patch releases, so a caret range would let a routine
-# `cargo update` swap the engine under us. Moving this floor means reading
-# kglite's CHANGELOG and re-greping every declaration of the old number
-# (CLAUDE.md → "Commits & releases", R16). This is the primary declaration of
-# the kglite floor; the enumeration of the rest is in CLAUDE.md.
+# The engine, from crates.io. `=0.16.13` is EXACT on purpose (D11): kglite is
+# pre-1.0 and ships documented breaking changes in patch releases, so a caret
+# range would let a routine `cargo update` swap the engine under us. Moving
+# this floor means reading kglite's CHANGELOG and re-greping every declaration
+# of the old number (CLAUDE.md → "Commits & releases", R16). This is the
+# primary declaration of the kglite floor.
 #
 # crates.io status, checked 2026-08-29 against the registry API (not the
 # README): kglite IS published — 99 versions, newest and default `0.16.13`,
-# crate not yanked. The path dep is therefore a *development* convenience
-# (edit-and-rebuild against the sibling checkout), not a necessity; dropping
-# `path` before a publish is a one-line change.
+# crate not yanked.
 #
-# The path is relative to THIS manifest: crates/kglite-visual-core/../../..
-# lands in the estate root (`Rust/`), where `KGLite/` sits beside this repo.
-kglite = { version = "=0.16.13", path = "../../../KGLite/crates/kglite" }
+# NO `path` component, and its removal (P6) fixed a shipped defect rather than
+# tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
+# maturin vendors an out-of-workspace path dependency into the source
+# distribution: the pre-P6 `maturin sdist` was 2.5 MB carrying 391 files of
+# KGLite's source under this project's name, resolving against the vendored
+# copy instead of the registry — the same failure KGLite's own build_wheels.yml
+# records for sonagram. A path dep also cannot exist in CI or in any consumer's
+# unpack directory, where `../../../KGLite` is simply absent.
+#
+# To develop against an unreleased kglite, patch it in locally and do not
+# commit the result: an untracked `.cargo/config.toml` holding
+# `[patch.crates-io] kglite = { path = "../../KGLite/crates/kglite" }` (paths
+# there are relative to the config file, not to this manifest). That rewrites
+# Cargo.lock's kglite entry to a sourceless path entry, so the committed
+# lockfile must be restored before committing — which is exactly why the patch
+# is opt-in and out of tree.
+kglite = "=0.16.13"
 
 serde = { workspace = true }
 serde_json = { workspace = true }

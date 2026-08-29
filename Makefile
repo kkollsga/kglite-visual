@@ -16,9 +16,12 @@ DEV_DOCS_MAX_MB ?= 200
 # Advisory ceilings for the two build directories cargo and npm never garbage
 # collect. WARN, not FAIL: a legitimately large target/ mid-refactor is not a
 # reason to block a commit, and a gate that blocks on it trains people to skip
-# the gate. The bound's owner today is a human running `make clean-build`; an
-# automatic purge is P6 work (doctrine R4 — bound and owner documented now,
-# enforcement grows with the tree).
+# the gate. These three stay human-owned through `make clean-build`, and
+# deliberately so: they hold no age-tiered content, only a cache whose whole
+# value is being warm, so an automatic sweep would cost rebuild time and free
+# nothing that will not be refilled. The accumulations that DO declare a
+# lifetime — dev-docs' disposable tiers and the Playwright artifacts — are
+# purged by `make prune` (doctrine R4).
 TARGET_WARN_MB ?= 20000
 NODE_MODULES_WARN_MB ?= 1000
 # The project-local venv the wheel's test loop lives in. Same tier, same owner
@@ -46,7 +49,7 @@ WHEEL_DIR = target/wheels
 # artifact is `make wheel WHEEL_PROFILE=--release`, which is what P6's CI runs.
 WHEEL_PROFILE ?=
 
-.PHONY: help gate lint self-test clean-build \
+.PHONY: help gate lint self-test clean-build prune \
         check-dev-docs check-skill-mirrors check-bans check-build-dirs \
         check-generated-ts check-protocol-baseline check-bundle sync-agents \
         rust-fmt rust-clippy rust-test cli-build fixture e2e \
@@ -126,13 +129,26 @@ clean-build:  ## Delete the regenerable build directories (owner of the R4 bound
 	@rm -rf frontend/node_modules frontend/dist
 	@rm -rf $(VENV) .pytest_cache
 
+# The other half of check-dev-docs. That check REPORTS files past their tier's
+# purge lifetime and deletes nothing, because tier assignment is a judgement a
+# script must not make — which left the bound's only enforcement a human
+# reading a WARN. This deletes, but strictly inside tiers declared disposable
+# in advance (dev-docs/README.md's table, imported rather than copied) and
+# strictly past the lifetime those declarations state. The dev-docs-cleanup
+# skill stays the owner of the judgement: what belongs in which tier, and what
+# must be rescued out of a disposable one before its clock runs down.
+# `--dry-run` lists without deleting; `scripts/prune.py --self-test` proves it
+# both purges and spares (R1).
+prune:  ## Purge dev-docs' disposable tiers and stale Playwright artifacts by age
+	@$(PYTHON) scripts/prune.py
+
 rust-fmt:  ## Formatting is decided by rustfmt, never in review
 	@$(CARGO) fmt --all -- --check
 
 rust-clippy:  ## Lints are errors: a warning nobody must fix is a warning nobody reads
 	@$(CARGO) clippy --workspace --all-targets -- -D warnings
 
-rust-test:  ## Workspace tests, including the kglite path-dep round trip
+rust-test:  ## Workspace tests, including the kglite .kgl round trip
 	@$(CARGO) test --workspace
 
 # The generated TypeScript is written by ts-rs from the Rust message types
@@ -307,3 +323,4 @@ self-test: wheel  ## Prove the gate's checks can actually fail
 	@$(PYTHON) scripts/check_bans.py --self-test
 	@$(PYTHON) scripts/check_bundle.py --self-test
 	@$(PYTHON) scripts/check_wheel.py --self-test
+	@$(PYTHON) scripts/prune.py --self-test
