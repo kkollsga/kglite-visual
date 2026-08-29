@@ -5,11 +5,14 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29 (P1 landed): a workspace skeleton exists.** Three
-> crates (`core`, `cli`, `py`), a Vite/TypeScript frontend, ts-rs-generated
-> protocol types, and a gate that builds, lints and tests all of it. What does
-> **not** exist yet: the server, the protocol, any rendering, the wheel, CI, a
-> remote, a CHANGELOG, and any published artifact. Every command below that
+> **Status, 2026-08-29 (P2 landed): the vertical slice works end to end.**
+> Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend that renders
+> the type-level meta-graph through cosmos.gl, a versioned binary protocol
+> with an exact framing baseline, an axum server on localhost with the
+> frontend embedded, and a gate that builds, lints, tests and **drives** all
+> of it in a headless browser. What does **not** exist yet: Cypher and
+> expansion (P3), the perf harness (P4), the wheel (P5), CI, a remote, a
+> CHANGELOG, and any published artifact. Every command below that
 > does not exist yet is marked **(planned)**. **A planned command is not a
 > passing gate** — if you run a step and it is absent, say so and fall back;
 > never report green for a check that could not run (`R10` corollary). And
@@ -133,18 +136,23 @@ make lint           # static checks only: bans, fmt, clippy, tsc
 make self-test      # prove every checker in the gate can go red (R1)
 make sync-agents    # regenerate the .agents/ adapter from the authority
 make clean-build    # delete target/, node_modules/, frontend/dist/
+make e2e            # browser end-to-end smoke (Playwright + SwiftShader)
+make fixture        # regenerate the committed .kgl fixture; verifies byte-stability
 cargo test --workspace
 cd frontend && npm ci && npm run typecheck && npm run build
 ```
 
-`make gate` runs eleven real checks: the `dev-docs/` size bound (`R4`), the
+`make gate` runs fourteen real checks: the `dev-docs/` size bound (`R4`), the
 instruction-mirror check (`R7`), the two structural bans (`@cosmograph/*` and
-`#[global_allocator]`), the build-directory report, `cargo fmt --check`,
-`cargo clippy --workspace --all-targets -- -D warnings`,
+`#[global_allocator]`), the build-directory report, the frontend typecheck,
+the frontend **production** build, the embedded-bundle freshness check,
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`, the generated-TypeScript freshness check, the
-frontend typecheck, the frontend **production** build, and an advisory
-`npm audit --omit=dev`. It prints an **ABSENT** line for each step that still
-does not exist. That is deliberate: "green" and "not attempted" must not
+protocol framing baseline, the Playwright end-to-end smoke, and an advisory
+`npm audit --omit=dev`. **The frontend half runs first, and that is
+load-bearing:** `frontend/dist` is embedded into the CLI binary, so every
+cargo step downstream of it compiles against whatever bundle is on disk. It
+prints an **ABSENT** line for each step that still does not exist. That is deliberate: "green" and "not attempted" must not
 render identically (`R10` corollary), so the gate makes its own emptiness
 legible rather than exiting 0 in silence.
 
@@ -157,8 +165,6 @@ owns the failing version of that check; here it reports and moves on.
 **Planned, and each one deletes an ABSENT line when it lands:**
 
 - `pytest` for the wheel, plus a stub/type check if type stubs are published.
-- A browser e2e smoke run (Playwright, SwiftShader flags) — nothing renders
-  yet.
 - A packaged-consumer check: exercise the *built* artifact as a real external
   consumer, not just the source tree. For this project that means the embedded
   frontend actually being in the binary — a source-tree test cannot see a
@@ -200,7 +206,11 @@ trap that follows: a stale frontend bundle inside a fresh binary looks exactly
 like a backend bug. Any harness that loads a built artifact resolves
 **newest-of-profile** and refuses a bundle older than its sources — never
 hard-code or *prefer* a profile path, because "release if present" is the same
-bug wearing a default.
+bug wearing a default. That rule is now a check: `scripts/check_bundle.py`
+refuses a `frontend/dist` older than `frontend/src`, and its
+`--resolve-binary` mode — which the e2e harness uses instead of a hard-coded
+path — refuses a binary older than the bundle it should embed. Both are
+proven able to fail by `make self-test`.
 
 ## Code analysis — graph-first via the code-review MCP
 

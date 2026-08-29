@@ -85,10 +85,10 @@ function.
 
 **What reads our comments (`R18`) — hands off, or handle deliberately:**
 
-> **One reader, added 2026-08-29 with P1.** `R18` says a *missing* reader list
-> stops the run; this one is maintained. There is still no lint-allowance
-> checker, no comment-suppressed lint in force and no docstring rendered as
-> `--help`.
+> **Two readers (first added with P1, second with P2).** `R18` says a
+> *missing* reader list stops the run; this one is maintained. There is still
+> no lint-allowance checker, no comment-suppressed lint in force and no
+> docstring rendered as `--help`.
 >
 > - **`ts-rs` mirrors `///` doc comments into generated TypeScript.** Every
 >   `///` on a `#[derive(TS)]` type or field in
@@ -100,6 +100,15 @@ function.
 >   the same commit; never hand-edit the `.ts` (its header says so).
 >   This is the **published-contract mirror** shape described below, and the
 >   published artifact is the frontend's compile-time contract.
+>
+> - **The protocol baselines are generated exact artifacts (P2).**
+>   `crates/kglite-visual-core/tests/protocol_baseline.rs` generates
+>   `frontend/src/generated/protocol-constants.ts` (guarded by
+>   `make check-generated-ts`) and
+>   `crates/kglite-visual-core/tests/baselines/framing.golden` (guarded by
+>   `make check-protocol-baseline`). Neither file's "do not edit" header is
+>   decorative: both are exact baselines, and both are rewritten by
+>   `cargo test -p kglite-visual-core`.
 >
 > **Add a reader here in the same change that adds the reader.** The shapes to
 > expect, each of which cost someone in this estate:
