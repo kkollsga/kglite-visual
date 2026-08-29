@@ -2647,6 +2647,54 @@ mod tests {
         }
     }
 
+    /// [`separate`] at the D5 response bound, on the input that makes it work
+    /// hardest.
+    ///
+    /// **Why this exists.** The pass runs on *every* render, after every kernel,
+    /// and it is up to [`SEPARATION_PASSES`] rebuilds of a neighbour grid over
+    /// the whole scene. The shape argument says that is cheap; the shape
+    /// argument also said the radial kernel was cheap, and an inference is not a
+    /// measurement. The scene here is the worst case rather than a realistic
+    /// one: every node stacked on one point, so no pass ever converges early and
+    /// every node is in every other's neighbourhood for the first passes.
+    ///
+    /// **A measurement, not a gate**, for the reasons the radial one gives.
+    ///
+    /// ```text
+    /// cargo test --release -p kglite-visual-core --lib \
+    ///     separation_at_the_response_bound -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "a measurement, not a gate: cargo test --release … -- --ignored --nocapture"]
+    fn separation_at_the_response_bound() {
+        let count = MAX_LAYOUT_NODES;
+        let nodes = vec![LayoutNode { radius: 6.0 }; count];
+        let canvas = Canvas {
+            width: 1600.0,
+            height: 1000.0,
+            reserved_top: 98.0,
+        };
+        for run in 1..=3 {
+            let mut xy = vec![(800.0, 500.0); count];
+            let started = std::time::Instant::now();
+            separate(&mut xy, &nodes, canvas);
+            let elapsed = started.elapsed().as_secs_f64() * 1_000.0;
+            println!("separate {count} coincident nodes, run {run}: {elapsed:.2} ms");
+        }
+        // And the realistic shape beside it: a settled ring, where nothing
+        // overlaps and the first pass exits.
+        let links: Vec<(usize, usize)> = (1..count).map(|i| (0, i)).collect();
+        let group: Vec<u32> = (0..count).map(|i| (i % 8) as u32).collect();
+        let placed = radial(&nodes, &links, 0, &group, canvas).expect("at the bound");
+        for run in 1..=3 {
+            let mut xy = placed.xy.clone();
+            let started = std::time::Instant::now();
+            separate(&mut xy, &nodes, canvas);
+            let elapsed = started.elapsed().as_secs_f64() * 1_000.0;
+            println!("separate {count} ring nodes, run {run}: {elapsed:.2} ms");
+        }
+    }
+
     #[test]
     fn the_layout_refuses_more_than_the_response_bound_permits() {
         // R1: the structural half of D5. A layout that quietly accepted an
