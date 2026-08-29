@@ -111,13 +111,32 @@ function parseArgs() {
   return args
 }
 
-/** The release binary, refused if it is older than the bundle it embeds. */
+/**
+ * The release binary, refused if it is older than the bundle it embeds — or if
+ * it is not a release binary at all.
+ *
+ * `--resolve-binary` resolves *newest of profile*, so a `make e2e` (which
+ * builds debug) run after a `cargo build --release` hands this script a debug
+ * server, and it recorded the profile without refusing it. Debug-profile
+ * timings are not evidence (`R11`), and a debug row sitting beside the release
+ * rows in results.csv is a comparison waiting to be made wrongly. `capture.py`
+ * has always refused it in `preconditions()`; this script is runnable on its
+ * own (its own usage block says so), so it refuses it too.
+ */
 function resolveBinary() {
-  return execFileSync(
+  const bin = execFileSync(
     'python3',
     [path.join(REPO, 'scripts/check_bundle.py'), '--resolve-binary', 'kglite-visual'],
     { encoding: 'utf8', cwd: REPO },
   ).trim()
+  if (!bin.includes('/release/')) {
+    throw new Error(
+      `resolved a non-release binary (${bin}). Debug-profile timings are not ` +
+        'evidence (R11); run `cargo build --release -p kglite-visual-cli` first ' +
+        '(a debug build made after it wins newest-of-profile).',
+    )
+  }
+  return bin
 }
 
 async function launchServer(graph) {
