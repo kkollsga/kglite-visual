@@ -1287,7 +1287,14 @@ fn pack_at_spacing(
         if orphan_island && island_index + 1 == islands.len() {
             let columns = ((members.len() as f64).sqrt() * 1.4).ceil().max(1.0);
             let rows = (members.len() as f64 / columns).ceil().max(1.0);
-            let cell = spacing.max(2.0 * local_nodes.iter().map(|n| n.radius).fold(0.0, f64::max));
+            // The floor is two of the widest radii **plus a slot's padding**,
+            // not two radii flat: at exactly two radii the tray's circles touch,
+            // and a grid of touching discs is the blob a grid exists to not be.
+            // It bit the moment `spacing` became something the fixed point could
+            // lower — round 2 never reached the floor, so the floor was never the
+            // number in the picture.
+            let widest = local_nodes.iter().map(|n| n.radius).fold(0.0, f64::max);
+            let cell = spacing.max(2.0 * widest + RING_SLOT_PAD_PX);
             let placed: Vec<(f64, f64)> = (0..members.len())
                 .map(|i| {
                     let column = (i % columns as usize) as f64;
@@ -2165,6 +2172,60 @@ mod tests {
             }
         }
         links
+    }
+
+    #[test]
+    fn a_crowded_trays_grid_still_has_gaps_in_it() {
+        // A grid of touching discs is the blob a grid exists to not be. The
+        // tray's cell was `spacing` floored at two of its widest radii — exactly
+        // touching — and round 2 never reached that floor, so the floor was
+        // never the number in the picture. The spacing fixed point lowers
+        // `spacing` the moment a packing overflows, which is how the meta-graph
+        // render's tray of unattached types arrived as a solid block of circles.
+        //
+        // Six dense communities and twenty fat loners: enough nodes to drive the
+        // derived spacing below two of a loner's radii, which is the condition.
+        const SIZE: usize = 60;
+        const CLIQUES: usize = 6;
+        const LONERS: usize = 20;
+        let count = CLIQUES * SIZE + LONERS;
+        let nodes: Vec<LayoutNode> = (0..count)
+            .map(|i| LayoutNode {
+                radius: if i < CLIQUES * SIZE { 6.0 } else { 30.0 },
+            })
+            .collect();
+        let links = cliques(CLIQUES, SIZE);
+        let mut community: Vec<usize> = (0..count).map(|i| (i / SIZE).min(CLIQUES)).collect();
+        for (offset, slot) in community.iter_mut().skip(CLIQUES * SIZE).enumerate() {
+            *slot = CLIQUES + offset;
+        }
+        let group = vec![0u32; count];
+        let placed = islands(
+            &nodes,
+            &links,
+            &community,
+            CLIQUES + LONERS,
+            &group,
+            Canvas {
+                width: 1600.0,
+                height: 1000.0,
+                reserved_top: 68.0,
+            },
+            5,
+        )
+        .expect("six communities and twenty loners pack");
+        let tray = placed
+            .islands
+            .iter()
+            .find(|island| island.orphans)
+            .expect("the loners are gathered into one tray");
+        assert_eq!(tray.members.len(), LONERS);
+        for (position, a) in tray.members.iter().enumerate() {
+            for b in tray.members.iter().skip(position + 1) {
+                let clear = separation(&placed.xy, *a, *b) - nodes[*a].radius - nodes[*b].radius;
+                assert!(clear > 0.0, "tray nodes {a} and {b} touch: {clear:.1} px");
+            }
+        }
     }
 
     #[test]
