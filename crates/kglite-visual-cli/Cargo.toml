@@ -23,7 +23,7 @@ axum = { version = "0.8", features = ["ws"] }
 # `sync` and `time` for the broadcast bus and rmcp's session bookkeeping; rmcp
 # spawns onto whatever runtime it finds, so the multi-thread flavour is the
 # server's, not its.
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 rust-embed = { version = "8", features = ["debug-embed", "interpolate-folder-path"] }
 mime_guess = "2.0.5"
 webbrowser = "1.2.4"

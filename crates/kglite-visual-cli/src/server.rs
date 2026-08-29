@@ -48,10 +48,23 @@ pub fn bind(session: Session, requested_port: u16, graph: String) -> std::io::Re
 }
 
 impl Bound {
-    /// Serve until the process is killed. The CLI's shape: nothing ever asks
-    /// it to stop.
+    /// Serve until the process is asked to stop.
+    ///
+    /// **`SIGTERM` is an ask, and it used to cost a directory.** kglite spills
+    /// a portable graph into `$TMPDIR/kglite_portable_<pid>_<id>/` and removes
+    /// it in `Drop`; with no handler installed, the default disposition for
+    /// `SIGTERM` terminates the process, no destructor runs, and the spill
+    /// stays. Anything that stops a server this way — a supervisor, a
+    /// harness's teardown, `kill` at a shell — leaked one directory per run,
+    /// and this project's own working folder had accumulated fifty of them.
+    ///
+    /// Catching it turns the kill into a return: the future resolves, the
+    /// listener closes, the runtime drops the connection tasks, the last
+    /// `Arc<Session>` goes, and kglite cleans up after itself. `SIGKILL`
+    /// cannot be caught and still leaks — that is the OS's contract, not a gap
+    /// here.
     pub async fn serve(self) -> std::io::Result<()> {
-        self.serve_until(std::future::pending()).await
+        self.serve_until(shutdown_signal()).await
     }
 
     /// Serve until `shutdown` resolves, then stop **without draining**.
@@ -75,6 +88,43 @@ impl Bound {
             _ = shutdown => Ok(()),
         }
     }
+}
+
+/// Resolves the first time the process is asked to stop.
+///
+/// `SIGINT` as well as `SIGTERM`: a Ctrl-C at the terminal previously ran no
+/// destructor either, so the interactive case leaked exactly like the
+/// supervised one. On a platform with no Unix signals, Ctrl-C is the whole of
+/// what there is to catch.
+///
+/// A handler that cannot be installed is reported and not fatal — the server
+/// still serves, and the failure a reader needs to know about is that stopping
+/// it will leave a directory behind.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(err) => {
+                eprintln!(
+                    "kglite-visual: WARNING could not listen for SIGTERM ({err}); \
+                     a `kill` will leave this graph's temporary spill behind"
+                );
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+    eprintln!("kglite-visual: shutting down");
 }
 
 fn router(state: AppState) -> Router {
