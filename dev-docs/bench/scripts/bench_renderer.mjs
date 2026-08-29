@@ -246,12 +246,14 @@ async function installCapture(page) {
     /**
      * Detach the app's zoom handlers, for one diagnostic cell.
      *
-     * The app rebuilds its whole label spec list on every zoom event
-     * (`main.ts` -> `updateLabels` -> `LabelOverlay.setLabels`), which is O(live
-     * slots) per event and tears down every label element. Whether that is what
-     * a real-path interaction tail is made of is a question, not an assumption,
-     * so this makes it measurable: capture with the handlers, then without, and
-     * the difference is the answer. Nothing in the product does this.
+     * The app's zoom handlers reposition the labels already on screen
+     * (`main.ts` -> `positionLabels` -> `LabelOverlay.update`), an
+     * O(sampled points) pass. Until P4b they also rebuilt the whole spec list
+     * per zoom event (`LabelOverlay.setLabels`, O(live slots), tearing down
+     * every element), and this cell is what measured that: capture with the
+     * handlers, then without, and the difference is the answer. It stays as the
+     * floor the label pass is compared against. Nothing in the product does
+     * this.
      */
     bench.detachZoomHandlers = () => {
       hook.graph.setConfigPartial({ onZoom: undefined, onZoomEnd: undefined })

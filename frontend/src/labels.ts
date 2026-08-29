@@ -96,13 +96,29 @@ export class LabelOverlay {
     container.appendChild(this.root)
   }
 
+  /**
+   * Replace the candidate set. **View path only, never a camera event.**
+   *
+   * This is the O(live slots) half of the overlay — it walks every live slot
+   * and drops every placed element — so it runs when the *view* changed and
+   * nothing else. Wiring it to `onZoom` (which fires continuously through a
+   * wheel gesture) is exactly the per-frame walk the module doc above says the
+   * overlay avoids, and it was measured: 33.3 ms p95 frame period against
+   * 18.0 ms for the same slice with the rebuild removed, at the 5 000-node
+   * response bound on a real GPU.
+   */
   setLabels(specs: LabelSpec[]): void {
     this.specs = new Map(specs.map((spec) => [spec.slot, spec]))
     for (const element of this.elements.values()) element.remove()
     this.elements.clear()
   }
 
-  /** Reposition every visible label. Call after a render and on every zoom. */
+  /**
+   * Reposition every visible label. Call after a render and on every zoom.
+   *
+   * The sampled-points pass, and the only one a camera event runs: it touches
+   * what the renderer says is on screen, not what the view holds.
+   */
   update(source: ScreenSource): void {
     const sampled = source.sampledPoints()
     const candidates: { slot: number; x: number; y: number; weight: number }[] = []
