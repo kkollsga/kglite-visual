@@ -35,11 +35,24 @@ use crate::request::EdgeDirection;
 
 /// Hard ceiling on nodes one expansion may add.
 ///
-/// **Provisional; P4 sets the final number** from the measured scale table.
-/// The plan's Phase 0 evidence puts cosmos.gl's live simulation at ~20k–50k
-/// points on M3-class hardware, so 5 000 leaves an order of magnitude of
-/// headroom for several expansions in one session and stays far inside the
-/// "render then freeze" regime under SwiftShader, where the e2e runs.
+/// **Measured, 2026-08-29, and no longer provisional.** Driven through the real
+/// app in a production build on an Apple M4, with cosmos.gl's simulation
+/// *running* — the one question fixture mode cannot answer — over three
+/// agreeing runs on ANGLE's Metal backend:
+///
+/// - a real 5 000-node slice settles at a p95 frame period of 18.0–18.2 ms with
+///   **zero dropped frames**, i.e. every frame inside a 60 Hz budget;
+/// - the GPU layout at that size holds 60 fps through scripted pan and zoom
+///   (p95 18.0–18.4 ms, no dropped frames);
+/// - at four times this ceiling — 20 000 points — the same measurement falls to
+///   a 30 fps budget (p95 34.6–34.7 ms, a third of frames dropped).
+///
+/// So the ceiling sits roughly 4x under where the renderer stops holding 60 Hz,
+/// which is the headroom several expansions in one session need. Server-side
+/// the same expansion costs 17–37 ms to walk and under 1 ms to encode, so the
+/// bound is not what makes a drill-in feel slow. Phase 0's ~20k–50k figure from
+/// upstream's own notes turns out to describe the *usable* regime, not the
+/// 60 fps one.
 pub const MAX_EXPANSION_NODES: usize = 5_000;
 
 /// Hard ceiling on the serialized size of one expansion's node list.
@@ -47,6 +60,18 @@ pub const MAX_EXPANSION_NODES: usize = 5_000;
 /// The count bound alone is defeated by shape: 5 000 nodes with 8-character
 /// titles is 400 KB and 5 000 with a paragraph in the title field is 50 MB.
 /// Four protocol chunks' worth.
+///
+/// **Measured at the count bound, 2026-08-29:** a 5 000-node slice serializes
+/// its node list at ~74 bytes per node, ~0.37 MB, so this ceiling carries about
+/// 5x headroom over the shape the generator produces.
+///
+/// **It bounds the node list and nothing else, and the link list is already the
+/// larger term.** The same 5 000-node slice carried 15 007 links at ~67 bytes
+/// each — 1.0 MB against the node list's 0.37 MB, in a single `GraphSlice`
+/// metadata frame that is never chunked — and no ceiling applies to it, so a
+/// denser relationship at the same node count grows the response without limit.
+/// Closing that needs its own change and its own test that the new bound can
+/// fire; this note exists so the gap is not rediscovered as a surprise.
 pub const MAX_EXPANSION_BYTES: usize = 2 * 1024 * 1024;
 
 /// Nodes returned when a client names no limit.
@@ -54,6 +79,10 @@ pub const MAX_EXPANSION_BYTES: usize = 2 * 1024 * 1024;
 /// Below the ceiling on purpose: the default is what a click produces, and a
 /// click should not be able to spend the whole budget by accident. A client
 /// that wants more asks for more and is still clamped.
+///
+/// **Measured, 2026-08-29:** at this size the app holds 60 fps under
+/// interaction on real hardware (p95 17.6–18.0 ms), the server walk costs
+/// 1.6–5.7 ms, and the response is 156–299 KB. A click lands.
 pub const DEFAULT_EXPANSION_NODES: usize = 1_000;
 
 /// Serialized-size estimate for one node in a slice.

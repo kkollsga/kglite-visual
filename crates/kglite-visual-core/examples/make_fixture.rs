@@ -10,8 +10,25 @@
 //!
 //! **Why so small.** The fixture's job is the *meta-graph*: 5 node types and 7
 //! relationship types. That shape is identical at 60 persons and at 20 000, so
-//! the fixture is the size that still exercises it — the committed `.kgl`
-//! stays a few tens of KB instead of megabytes.
+//! the committed fixture is the size that still exercises it — a few tens of KB
+//! instead of megabytes.
+//!
+//! **Scale is a parameter, and the committed fixture is its default.** The
+//! bench harness needs graphs whose *instance* population is large enough to
+//! fill and overrun the response bound, and generating those through a second
+//! generator would mean two graph shapes and two ways for a number to be about
+//! something else. So:
+//!
+//! ```text
+//! make_fixture                                    # the committed fixture
+//! make_fixture --persons 20000 --out /tmp/big.kgl # a bench input
+//! ```
+//!
+//! With `--out` the positions baseline is not written: it is an exact baseline
+//! for the committed 5-type meta-graph, and a second copy of it beside a
+//! throwaway graph is a file nothing reads. Every scale stays seeded, so a
+//! bench input is regenerable rather than precious (it belongs in the purged
+//! `bench/out/` tier, never in git).
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -31,22 +48,74 @@ const KNOWS_PER: u64 = 3;
 /// The plan's fixture seed (P2).
 const SEED: u64 = 1234;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let fixtures = fixture_dir();
-    std::fs::create_dir_all(&fixtures)?;
+/// What one invocation was asked to build.
+struct Args {
+    persons: u64,
+    knows_per: u64,
+    seed: u64,
+    /// `None` writes the committed fixture *and* its positions baseline;
+    /// `Some` writes one `.kgl` at that path and nothing else.
+    out: Option<PathBuf>,
+}
 
-    let staging = tempfile::tempdir()?;
-    let cfg = GraphGenConfig {
+fn parse_args() -> Result<Args, String> {
+    let mut args = Args {
         persons: PERSONS,
         knows_per: KNOWS_PER,
         seed: SEED,
+        out: None,
+    };
+    let mut raw = std::env::args().skip(1);
+    while let Some(flag) = raw.next() {
+        match flag.as_str() {
+            "--persons" => args.persons = parse_u64(&flag, raw.next())?,
+            "--knows-per" => args.knows_per = parse_u64(&flag, raw.next())?,
+            "--seed" => args.seed = parse_u64(&flag, raw.next())?,
+            "--out" => {
+                args.out = Some(PathBuf::from(
+                    raw.next().ok_or_else(|| format!("{flag} needs a path"))?,
+                ))
+            }
+            other => return Err(format!("unknown flag {other}")),
+        }
+    }
+    Ok(args)
+}
+
+fn parse_u64(flag: &str, value: Option<String>) -> Result<u64, String> {
+    value
+        .ok_or_else(|| format!("{flag} needs a number"))?
+        .parse()
+        .map_err(|e| format!("{flag}: {e}"))
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = parse_args()?;
+    let fixtures = fixture_dir();
+    let kgl_path = match &args.out {
+        Some(path) => path.clone(),
+        None => {
+            std::fs::create_dir_all(&fixtures)?;
+            fixtures.join("meta.kgl")
+        }
+    };
+    if let Some(parent) = kgl_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let seed = args.seed;
+    let staging = tempfile::tempdir()?;
+    let cfg = GraphGenConfig {
+        persons: args.persons,
+        knows_per: args.knows_per,
+        seed,
         zipf: true,
         zipf_exp: 1.6,
     };
     let stats = graphgen(&cfg, staging.path())?;
     eprintln!(
-        "graphgen: {} nodes, {} edges (seed {SEED})",
-        stats.nodes, stats.edges
+        "graphgen: {} nodes, {} edges (seed {seed}, persons {})",
+        stats.nodes, stats.edges, args.persons
     );
 
     let mut graph = build_graph(staging.path())?;
@@ -77,7 +146,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     graph.set_type_connectivity(triples);
 
-    let kgl_path = fixtures.join("meta.kgl");
     prepare_kgl_write(&mut graph);
     write_kgl(&graph, kgl_path.to_str().expect("ASCII fixture path"))?;
     eprintln!(
@@ -86,14 +154,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::metadata(&kgl_path)?.len()
     );
 
-    // Read the positions back off the *saved* graph, not the in-memory one:
-    // the baseline must describe what a consumer loading the fixture sees.
-    let reloaded = load_file(kgl_path.to_str().expect("ASCII fixture path"))?;
-    let mut view = View::new();
-    let meta = meta_graph::compute(&reloaded, &mut view);
-    let positions_path = fixtures.join("meta.positions.json");
-    std::fs::write(&positions_path, positions_document(&meta))?;
-    eprintln!("wrote {}", positions_path.display());
+    if args.out.is_none() {
+        // Read the positions back off the *saved* graph, not the in-memory one:
+        // the baseline must describe what a consumer loading the fixture sees.
+        let reloaded = load_file(kgl_path.to_str().expect("ASCII fixture path"))?;
+        let mut view = View::new();
+        let meta = meta_graph::compute(&reloaded, &mut view);
+        let positions_path = fixtures.join("meta.positions.json");
+        std::fs::write(&positions_path, positions_document(&meta))?;
+        eprintln!("wrote {}", positions_path.display());
+    }
 
     Ok(())
 }

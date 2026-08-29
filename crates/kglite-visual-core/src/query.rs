@@ -42,9 +42,16 @@ pub const QUERY_THREAD_STACK_BYTES: usize = kglite::api::session::QUERY_THREAD_S
 
 /// Rows one query may return.
 ///
-/// **Provisional; P4 sets the final number.** The results table is HTML, and a
-/// browser building 100 000 rows of DOM is the same freeze the whole
-/// progressive-disclosure design exists to avoid.
+/// The results table is HTML, and a browser building 100 000 rows of DOM is the
+/// same freeze the whole progressive-disclosure design exists to avoid.
+///
+/// **Measured, 2026-08-29, and no longer provisional.** At this ceiling the
+/// panel answers `MATCH (n:Person) RETURN id(n), n.title` over a 20 000-person
+/// graph — engine, wire and DOM together, in the real app on a production
+/// build — in 104–108 ms, the mean of first events over three cold pages. That
+/// is a click that lands rather than a pause, and it is an end-to-end number on
+/// purpose: the row count is chosen against what the *user* waits for, not
+/// against the engine's half of it.
 pub const MAX_QUERY_ROWS: usize = 5_000;
 
 /// Serialized ceiling for one result table. Four protocol chunks.

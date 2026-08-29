@@ -33,9 +33,16 @@ use crate::slots::SlotAllocator;
 ///
 /// A tombstone costs one slot of every array the renderer holds, so a view that
 /// has collapsed most of itself pays for a graph it is no longer showing. 30%
-/// is the plan's provisional figure and is deliberately not tight: compaction
-/// invalidates every index the client is holding, so doing it often is worse
-/// than carrying some waste. P4 measures the real cost and sets the number.
+/// is deliberately not tight: compaction invalidates every index the client is
+/// holding, so doing it often is worse than carrying some waste.
+///
+/// **Measured, 2026-08-29, and kept.** Collapsing a slice at the node bound —
+/// 5 005 slots down to 5 — costs 58–64 ms end to end in the real app (mean of
+/// first events over three cold pages): the server's answer, the remap, and a
+/// full re-upload of every array. That is three to four frame budgets, so a
+/// threshold that fired often would trade a steady 60 fps for a visible stall,
+/// while the waste it would reclaim is a fraction of one upload. The number
+/// stays where the round trip is rare.
 pub const COMPACTION_TOMBSTONE_RATIO: f32 = 0.30;
 
 /// Below this many slots, compaction is never worth a round trip whatever the

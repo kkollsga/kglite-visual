@@ -68,6 +68,16 @@ const KNOWN_FLAGS: u32 = FLAG_TERMINAL;
 /// The plan's window is 256 KB–1 MB (D4); this sits mid-range and is an exact
 /// multiple of the 8-byte record size of both array payloads (a point is two
 /// `f32`, a link is two `f32`), so a chunk boundary never splits a record.
+///
+/// **Swept across the whole window, 2026-08-29, and kept — the finding is that
+/// the choice is not load-bearing.** At every size the response bound permits,
+/// a slice's two array payloads total 16–160 KB, which is under even the
+/// smallest target: production emits one frame per array whichever number is
+/// chosen, so the three settings are indistinguishable on the wire. Forced to
+/// saturate with a 4 MB array, 256 KB / 512 KB / 1 MB produce 17 / 9 / 5 frames
+/// and encode in 0.14–0.16 ms — a spread inside the run-to-run scatter of the
+/// capture's own control cells. The bytes that *do* dominate a slice are the
+/// JSON metadata frame, which is deliberately never chunked.
 pub const CHUNK_TARGET_BYTES: usize = 512 * 1024;
 
 /// Bytes per `f32` array record — one point (x, y) or one link (src, tgt).
@@ -301,13 +311,27 @@ impl ResponseEncoder {
     /// An empty array still emits one frame: "zero points" is an answer, and a
     /// response that simply omits the message leaves a client waiting.
     pub fn push_f32(&mut self, msg_type: MessageType, values: &[f32]) {
+        self.push_f32_chunked(msg_type, values, CHUNK_TARGET_BYTES);
+    }
+
+    /// [`push_f32`](Self::push_f32) at an explicit chunk target.
+    ///
+    /// The parameterised form exists because D4 fixed a *window* (256 KB–1 MB)
+    /// rather than a number, and the only honest way to choose inside a window
+    /// is to sweep it against the real encoder. A sweep that reimplemented the
+    /// chunking in the harness would be measuring the harness. Production always
+    /// goes through [`push_f32`], which passes [`CHUNK_TARGET_BYTES`]; nothing
+    /// on the wire depends on the caller of this function agreeing, because
+    /// `payload_offset` makes every chunk self-describing.
+    pub fn push_f32_chunked(&mut self, msg_type: MessageType, values: &[f32], target: usize) {
         let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
         if bytes.is_empty() {
             self.push_frame(msg_type, &[], 0);
             return;
         }
-        for (chunk_index, chunk) in bytes.chunks(chunk_bytes()).enumerate() {
-            let offset = (chunk_index * chunk_bytes()) as u32;
+        let stride = chunk_bytes_for(target);
+        for (chunk_index, chunk) in bytes.chunks(stride).enumerate() {
+            let offset = (chunk_index * stride) as u32;
             self.push_frame(msg_type, chunk, offset);
         }
     }
@@ -339,8 +363,16 @@ impl ResponseEncoder {
 
 /// Chunk size rounded down to a whole number of 8-byte records, so a chunk
 /// boundary never splits an (x, y) pair or a (src, tgt) link.
-const fn chunk_bytes() -> usize {
-    CHUNK_TARGET_BYTES - CHUNK_TARGET_BYTES % RECORD_BYTES
+///
+/// A target under one record would round to zero and make `chunks()` panic, so
+/// the floor is one record.
+const fn chunk_bytes_for(target: usize) -> usize {
+    let rounded = target - target % RECORD_BYTES;
+    if rounded == 0 {
+        RECORD_BYTES
+    } else {
+        rounded
+    }
 }
 
 #[cfg(test)]
@@ -564,6 +596,6 @@ mod tests {
     #[test]
     fn the_chunk_target_stays_inside_the_plans_window() {
         assert!((256 * 1024..=1024 * 1024).contains(&CHUNK_TARGET_BYTES));
-        assert_eq!(chunk_bytes() % RECORD_BYTES, 0);
+        assert_eq!(chunk_bytes_for(CHUNK_TARGET_BYTES) % RECORD_BYTES, 0);
     }
 }

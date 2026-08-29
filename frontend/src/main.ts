@@ -21,6 +21,7 @@ import {
   UNSET_COLOR,
   type Rgba,
 } from './appearance'
+import { markRendererMounted, publishBenchHook } from './bench'
 import { debugState, probeDeviceFeatures, publishDebugState } from './debug'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
@@ -43,6 +44,7 @@ if (!mount) throw new Error('#app is missing from index.html')
 assertLittleEndian()
 debugState.deviceFeatures = probeDeviceFeatures()
 publishDebugState()
+publishBenchHook()
 
 const root = document.createElement('div')
 root.className = 'kglv-root'
@@ -298,6 +300,7 @@ async function showMetaGraph(message: {
     attachHandlers(surface)
     debugState.simRunning = surface.graph.isSimulationRunning
     redraw()
+    markRendererMounted(surface.graph)
     debugState.ready = true
   } catch (err) {
     // A device with no WebGL2 lands here. D10: an honest error, never a
