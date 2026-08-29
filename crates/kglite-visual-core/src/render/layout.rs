@@ -216,14 +216,21 @@ pub struct Positions {
     pub xy: Vec<(f64, f64)>,
     /// Per node, parallel to `xy`. See [`LabelSide`].
     pub label_side: Vec<LabelSide>,
+    /// The packed communities, in packing order — empty for every layout that
+    /// did not pack any. See [`Island`].
+    pub islands: Vec<Island>,
 }
 
 impl Positions {
-    /// Positions with every label under its node — what a layout with no centre
-    /// to radiate from produces.
+    /// Positions with every label under its node and no islands — what a layout
+    /// with no centre to radiate from and no grouping to draw produces.
     fn below(xy: Vec<(f64, f64)>) -> Self {
         let label_side = vec![LabelSide::Below; xy.len()];
-        Self { xy, label_side }
+        Self {
+            xy,
+            label_side,
+            islands: Vec::new(),
+        }
     }
 }
 
@@ -600,6 +607,7 @@ pub fn radial(
     Ok(Positions {
         xy: fit(&xy, nodes, width, height, reserved_top, side_room),
         label_side,
+        islands: Vec::new(),
     })
 }
 
@@ -621,8 +629,22 @@ fn unit(angle: f64) -> (f64, f64) {
     (quantise(angle.cos()), quantise(angle.sin()))
 }
 
-/// Padding between two packed islands, in pixels.
-const ISLAND_PAD_PX: f64 = 54.0;
+/// Padding between two packed islands, as a multiple of one node's spacing —
+/// and a floor, in pixels, for the case where the spacing itself is tiny.
+///
+/// **The gap between two islands has to beat the gap inside one, or there are
+/// no islands.** Round 1 packed at a flat 54 px while a node inside an island
+/// got up to 120 px of its own, so the *lane* between two communities was
+/// narrower than the space between two members of one, and the coordinator's
+/// verdict on the meta-graph was that island-ness is not visible. It is a
+/// multiple of the spacing now, so the two move together and the relationship
+/// between them is fixed rather than coincidental.
+const ISLAND_PAD_SPACINGS: f64 = 1.5;
+const ISLAND_PAD_MIN_PX: f64 = 80.0;
+
+/// Quiet keep-out between an island's outermost circle and the boundary drawn
+/// around it, in pixels. Emitted geometry, not layout — see [`Island`].
+pub const ISLAND_HULL_PAD_PX: f64 = 16.0;
 
 /// Bounds on the side length one node is given inside its island.
 ///
@@ -646,7 +668,30 @@ const ISLAND_SPACING_MAX_PX: f64 = 120.0;
 ///
 /// Under 1 because shelf packing leaves gaps and [`fit`] adds a margin; aiming
 /// at the whole canvas overshoots and reintroduces the shrink this is avoiding.
-const ISLAND_FILL: f64 = 0.62;
+///
+/// **Lowered in round 2 to buy the lanes.** The padding above is now a multiple
+/// of the spacing, so islands that fill 62% of the frame leave lanes that get
+/// scaled away by `fit` the moment the padded packing overflows. At 0.44 the
+/// island interiors are denser, the lanes survive at the width they were
+/// computed at, and the picture answers "how many groups are there" before it
+/// answers anything else.
+const ISLAND_FILL: f64 = 0.9;
+
+/// One packed community, for the emitter.
+///
+/// **A boundary is a claim, so it names what it encloses.** A tinted hull round
+/// a Louvain community says "these belong together" and that is exactly the
+/// finding; the same hull round the tray of unattached singletons would say the
+/// opposite of the truth, which is why `orphans` is carried rather than
+/// inferred from a size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Island {
+    /// Node indices into the scene, ascending.
+    pub members: Vec<usize>,
+    /// True for the one island that is a *tray* of communities of one rather
+    /// than a community.
+    pub orphans: bool,
+}
 
 /// Lay each community out on its own and pack the results (P11 direction (c)).
 ///
@@ -701,10 +746,14 @@ pub fn islands(
             _ => islands.push(bucket),
         }
     }
-    // Largest first: the eye lands on the biggest structure, and the packing
-    // below wastes least when the tall shelves come first.
+    // Largest first, then chained by how heavily each island is tied to the one
+    // before it — see `order_by_affinity`. The packer lays boxes out in this
+    // order along shelves, so it decides which islands end up adjacent, and
+    // adjacency is what a cross-island line's length costs.
     islands.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a[0].cmp(&b[0])));
-    if !orphans.is_empty() {
+    order_by_affinity(&mut islands, links, count);
+    let orphan_island = !orphans.is_empty();
+    if orphan_island {
         orphans.sort_unstable();
         islands.push(orphans);
     }
@@ -715,6 +764,7 @@ pub fn islands(
     let spacing = (ISLAND_FILL * width * (height - reserved_top) / (1.0625 * count as f64))
         .sqrt()
         .clamp(ISLAND_SPACING_MIN_PX, ISLAND_SPACING_MAX_PX);
+    let pad = (spacing * ISLAND_PAD_SPACINGS).max(ISLAND_PAD_MIN_PX);
 
     let mut xy = vec![(0.0f64, 0.0f64); count];
     let mut label_side = vec![LabelSide::Below; count];
@@ -739,6 +789,29 @@ pub fn islands(
             .filter_map(|(a, b)| Some((*position_of.get(a)?, *position_of.get(b)?)))
             .collect();
         let local_group: Vec<u32> = members.iter().map(|i| group[*i]).collect();
+
+        // The tray of unattached singletons is a **grid**, never a force pass.
+        // A force layout over nodes with no edges at all is nothing but the
+        // repulsion term against gravity: it settles into a blob whose shape is
+        // an artefact of the seed lattice, and a reader looking for meaning in
+        // it finds a pattern that is not in the data. A grid says exactly what
+        // is true — "these are unattached, here they are, there are this many"
+        // — and says it at a glance.
+        if orphan_island && island_index + 1 == islands.len() {
+            let columns = ((members.len() as f64).sqrt() * 1.4).ceil().max(1.0);
+            let rows = (members.len() as f64 / columns).ceil().max(1.0);
+            let cell = spacing.max(2.0 * local_nodes.iter().map(|n| n.radius).fold(0.0, f64::max));
+            let placed: Vec<(f64, f64)> = (0..members.len())
+                .map(|i| {
+                    let column = (i % columns as usize) as f64;
+                    let row = (i / columns as usize) as f64;
+                    (column * cell, row * cell)
+                })
+                .collect();
+            boxes.push(((columns - 1.0) * cell + 1.0, (rows - 1.0) * cell + 1.0));
+            placements.push(placed);
+            continue;
+        }
 
         // A different starting point per island, so two islands of the same
         // size are not two copies of one picture.
@@ -799,12 +872,12 @@ pub fn islands(
     // width. Trying every shelf count from one to the island count is at most a
     // few hundred trivial passes and picks the packing that actually happened.
     let widest = boxes.iter().fold(1.0f64, |m, (w, _)| m.max(*w));
-    let total_width: f64 = boxes.iter().map(|(w, _)| w + ISLAND_PAD_PX).sum();
+    let total_width: f64 = boxes.iter().map(|(w, _)| w + pad).sum();
     let want = (width / height).max(0.2);
     let mut best: Option<(f64, Vec<(f64, f64)>)> = None;
     for shelves in 1..=boxes.len() {
         let strip = (total_width / shelves as f64).max(widest);
-        let (offsets, extent) = shelve(&boxes, strip);
+        let (offsets, extent) = shelve(&boxes, strip, pad);
         let aspect = extent.0 / extent.1.max(1.0);
         // Log-ratio, so "twice as wide as wanted" and "half as wide" cost the
         // same; a linear difference would systematically prefer wide packings.
@@ -823,26 +896,126 @@ pub fn islands(
         }
     }
 
+    let last = islands.len().saturating_sub(1);
+    let reported: Vec<Island> = islands
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut members)| {
+            members.sort_unstable();
+            Island {
+                members,
+                orphans: orphan_island && index == last,
+            }
+        })
+        .collect();
+
     Ok(Positions {
         xy: fit(&xy, nodes, width, height, reserved_top, 0.0),
         label_side,
+        islands: reported,
     })
+}
+
+/// Reorder islands so heavily linked ones end up adjacent in the packing.
+///
+/// **A cross-island line is the ink the island layout is trying not to spend.**
+/// Round 1 packed strictly by size, so two communities joined by forty edges
+/// could land at opposite corners and draw forty lines across the whole frame —
+/// which is most of what made the meta-graph read as a web rather than as
+/// islands. Greedy chaining: the largest island opens, and each next slot goes
+/// to whichever unplaced island is most heavily tied to the one just placed,
+/// falling back on its weight to everything placed so far, then on size, then
+/// on its lowest member — a total order, so the result is a function of the
+/// input and not of a scan order.
+///
+/// Greedy rather than an optimal seriation because the objective is a
+/// travelling-salesman shape and the input is at most a few dozen islands whose
+/// shelf positions are decided afterwards anyway: a better ordering buys
+/// nothing a shelf wrap does not immediately spend.
+fn order_by_affinity(islands: &mut Vec<Vec<usize>>, links: &[(usize, usize)], count: usize) {
+    if islands.len() < 3 {
+        return;
+    }
+    let mut island_of = vec![usize::MAX; count];
+    for (index, members) in islands.iter().enumerate() {
+        for member in members {
+            island_of[*member] = index;
+        }
+    }
+    let n = islands.len();
+    let mut weight = vec![0u32; n * n];
+    for (a, b) in links {
+        let (Some(ia), Some(ib)) = (island_of.get(*a), island_of.get(*b)) else {
+            continue;
+        };
+        if *ia == usize::MAX || *ib == usize::MAX || ia == ib {
+            continue;
+        }
+        weight[ia * n + ib] += 1;
+        weight[ib * n + ia] += 1;
+    }
+
+    let mut placed = vec![false; n];
+    let mut order: Vec<usize> = Vec::with_capacity(n);
+    // Index 0 is the largest island — `islands` arrived sorted by size.
+    let mut current = 0usize;
+    placed[0] = true;
+    order.push(0);
+    let mut to_placed = vec![0u32; n];
+    for i in 0..n {
+        to_placed[i] = weight[current * n + i];
+    }
+    while order.len() < n {
+        let mut best = usize::MAX;
+        let mut best_key = (0u32, 0u32, 0usize);
+        for candidate in 0..n {
+            if placed[candidate] {
+                continue;
+            }
+            let key = (
+                weight[current * n + candidate],
+                to_placed[candidate],
+                islands[candidate].len(),
+            );
+            // Strictly greater, so an exact tie keeps the lower island index —
+            // which is the larger island, and after that the lower first member.
+            if best == usize::MAX || key > best_key {
+                best = candidate;
+                best_key = key;
+            }
+        }
+        placed[best] = true;
+        order.push(best);
+        current = best;
+        for i in 0..n {
+            to_placed[i] += weight[best * n + i];
+        }
+    }
+
+    let mut reordered: Vec<Vec<usize>> = Vec::with_capacity(n);
+    let mut source: Vec<Option<Vec<usize>>> = islands.drain(..).map(Some).collect();
+    for index in order {
+        if let Some(members) = source[index].take() {
+            reordered.push(members);
+        }
+    }
+    *islands = reordered;
 }
 
 /// Lay boxes out on shelves no wider than `strip`; returns each box's offset
 /// and the extent of the whole packing.
-fn shelve(boxes: &[(f64, f64)], strip: f64) -> (Vec<(f64, f64)>, (f64, f64)) {
+fn shelve(boxes: &[(f64, f64)], strip: f64, pad: f64) -> (Vec<(f64, f64)>, (f64, f64)) {
     let (mut cursor_x, mut cursor_y, mut shelf_height) = (0.0f64, 0.0f64, 0.0f64);
     let (mut extent_x, mut extent_y) = (0.0f64, 0.0f64);
     let mut offsets = Vec::with_capacity(boxes.len());
     for (box_width, box_height) in boxes {
         if cursor_x > 0.0 && cursor_x + box_width > strip {
             cursor_x = 0.0;
-            cursor_y += shelf_height + ISLAND_PAD_PX;
+            cursor_y += shelf_height + pad;
             shelf_height = 0.0;
         }
         offsets.push((cursor_x, cursor_y));
-        cursor_x += box_width + ISLAND_PAD_PX;
+        cursor_x += box_width + pad;
         shelf_height = shelf_height.max(*box_height);
         extent_x = extent_x.max(cursor_x);
         extent_y = extent_y.max(cursor_y + shelf_height);
@@ -1378,6 +1551,117 @@ mod tests {
             };
             assert_eq!(placed.label_side[i], want, "node {i} at {:?}", placed.xy[i]);
         }
+    }
+
+    /// `k` cliques of `size`, plus whatever extra links the caller adds.
+    fn cliques(k: usize, size: usize) -> Vec<(usize, usize)> {
+        let mut links = Vec::new();
+        for clique in 0..k {
+            let base = clique * size;
+            for i in 0..size {
+                for j in (i + 1)..size {
+                    links.push((base + i, base + j));
+                }
+            }
+        }
+        links
+    }
+
+    #[test]
+    fn islands_pack_their_most_connected_neighbour_next() {
+        // Round 1 packed strictly by size, so two communities joined by a
+        // bundle of edges could land at opposite corners and draw that bundle
+        // across the whole frame. Four equal cliques, with the last one tied to
+        // the first: it must come out second in packing order, ahead of the two
+        // it has no edge to.
+        let size = 6;
+        let mut links = cliques(4, size);
+        for i in 0..4 {
+            links.push((i, 3 * size + i));
+        }
+        let count = 4 * size;
+        let nodes = vec![LayoutNode { radius: 6.0 }; count];
+        let community: Vec<usize> = (0..count).map(|i| i / size).collect();
+        let group = vec![0u32; count];
+        let placed = islands(
+            &nodes,
+            &links,
+            &community,
+            4,
+            &group,
+            Canvas {
+                width: 1600.0,
+                height: 1000.0,
+                reserved_top: 0.0,
+            },
+            5,
+        )
+        .expect("four cliques pack");
+        assert_eq!(placed.islands.len(), 4);
+        assert!(
+            placed.islands[1].members.contains(&(3 * size)),
+            "the island tied to the first must pack beside it, not opposite it: {:?}",
+            placed
+                .islands
+                .iter()
+                .map(|i| i.members[0])
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn unattached_nodes_land_on_a_grid_and_are_marked_as_a_tray() {
+        // A force pass over nodes with no edges is repulsion against gravity,
+        // and it settles into a blob whose shape is an artefact of the seed
+        // lattice — a pattern a reader will look for meaning in and not find.
+        let size = 5;
+        let links = cliques(2, size);
+        let loners = 9;
+        let count = 2 * size + loners;
+        let nodes = vec![LayoutNode { radius: 6.0 }; count];
+        let mut community: Vec<usize> = (0..count).map(|i| (i / size).min(2)).collect();
+        for (offset, slot) in community.iter_mut().skip(2 * size).enumerate() {
+            *slot = 2 + offset;
+        }
+        let groups = 2 + loners;
+        let group = vec![0u32; count];
+        let placed = islands(
+            &nodes,
+            &links,
+            &community,
+            groups,
+            &group,
+            Canvas {
+                width: 1600.0,
+                height: 1000.0,
+                reserved_top: 0.0,
+            },
+            5,
+        )
+        .expect("two cliques and nine loners pack");
+        let tray = placed
+            .islands
+            .iter()
+            .find(|island| island.orphans)
+            .expect("the loners are gathered into one tray");
+        assert_eq!(tray.members.len(), loners);
+        // A grid, observed as one rather than read back off the constant that
+        // builds it: `rows x columns` cells hold the nine nodes with at most
+        // one ragged row over. A force blob puts every node on its own row and
+        // its own column, so its product is `n^2` and it misses this by a wide
+        // margin.
+        let distinct = |values: Vec<f64>| {
+            let mut rounded: Vec<i64> = values.iter().map(|v| (v / 4.0).round() as i64).collect();
+            rounded.sort_unstable();
+            rounded.dedup();
+            rounded.len()
+        };
+        let rows = distinct(tray.members.iter().map(|i| placed.xy[*i].1).collect());
+        let columns = distinct(tray.members.iter().map(|i| placed.xy[*i].0).collect());
+        assert!(
+            rows * columns >= loners && rows * columns <= loners + columns,
+            "nine unattached nodes must fill a lattice, not scatter: {rows} x {columns}"
+        );
     }
 
     #[test]

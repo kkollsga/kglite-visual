@@ -116,6 +116,7 @@ pub(crate) fn emit(
         palette.background
     ));
 
+    emit_islands(&mut out, scene, positions, &palette);
     emit_links(&mut out, scene, positions, &palette);
     emit_nodes(&mut out, scene, positions);
     emit_labels(&mut out, scene, positions, &palette, width, height);
@@ -123,6 +124,79 @@ pub(crate) fn emit(
 
     out.push_str("</svg>\n");
     out
+}
+
+/// Corner radius of an island boundary, in pixels — soft enough that it reads
+/// as a region and not as a table cell.
+const ISLAND_CORNER_PX: f64 = 22.0;
+
+/// A quiet boundary around each packed community, drawn behind everything.
+///
+/// **Position alone was not carrying it.** The island layout puts a community
+/// in one place, but a reader scanning a hundred type names cannot tell "this
+/// gap is a boundary" from "this gap is where the packing happened to leave
+/// room" — which is exactly the coordinator's round-1 verdict on the
+/// meta-graph: island-ness is not visible. A faint tint and a hairline say
+/// where one group ends, using the two channels the picture is not already
+/// spending on the data (nodes carry hue, links carry width).
+///
+/// **Quiet is a requirement, not a preference.** At any weight a reader would
+/// call a box, the boundary becomes the loudest thing in the image and the
+/// graph inside it becomes decoration. The tint is 0.045 alpha and the stroke
+/// 0.16, which is visible on a scan and invisible on a glance at one node.
+///
+/// The tray of unattached singletons gets a dashed outline and no tint: it is
+/// not a community, and a solid hull round it would claim the opposite of what
+/// the partition found.
+fn emit_islands(out: &mut String, scene: &Scene, positions: &Positions, palette: &Palette) {
+    if positions.islands.is_empty() {
+        return;
+    }
+    for island in &positions.islands {
+        let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);
+        let (mut max_x, mut max_y) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for member in &island.members {
+            let (Some((x, y)), Some(node)) = (positions.xy.get(*member), scene.nodes.get(*member))
+            else {
+                continue;
+            };
+            min_x = min_x.min(x - node.radius);
+            max_x = max_x.max(x + node.radius);
+            min_y = min_y.min(y - node.radius);
+            max_y = max_y.max(y + node.radius);
+        }
+        if !min_x.is_finite() || !min_y.is_finite() {
+            continue;
+        }
+        let pad = super::layout::ISLAND_HULL_PAD_PX;
+        let (x, y) = (min_x - pad, min_y - pad);
+        let (w, h) = (max_x - min_x + 2.0 * pad, max_y - min_y + 2.0 * pad);
+        if island.orphans {
+            out.push_str(&format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" fill=\"none\" \
+                 stroke=\"{}\" stroke-opacity=\"0.16\" stroke-width=\"1\" \
+                 stroke-dasharray=\"4 6\"/>\n",
+                num(x),
+                num(y),
+                num(w),
+                num(h),
+                num(ISLAND_CORNER_PX),
+                palette.island
+            ));
+            continue;
+        }
+        out.push_str(&format!(
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" fill=\"{}\" \
+             fill-opacity=\"0.045\" stroke=\"{}\" stroke-opacity=\"0.16\" stroke-width=\"1\"/>\n",
+            num(x),
+            num(y),
+            num(w),
+            num(h),
+            num(ISLAND_CORNER_PX),
+            palette.island,
+            palette.island
+        ));
+    }
 }
 
 fn emit_links(out: &mut String, scene: &Scene, positions: &Positions, palette: &Palette) {

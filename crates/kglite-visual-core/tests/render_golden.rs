@@ -287,6 +287,37 @@ fn the_node_a_ring_is_centred_on_is_drawn_larger_and_haloed() {
     );
 }
 
+/// A packed community is enclosed, and the enclosure stays quiet.
+///
+/// Both halves matter. Without a boundary a reader cannot tell "this gap is
+/// where one group ends" from "this gap is where the packing left room", which
+/// was the coordinator's round-1 verdict on the meta-graph. With a loud one the
+/// boxes become the picture and the graph inside them becomes decoration, so
+/// the opacity is asserted too — a boundary nobody can ignore is the same
+/// defect wearing the opposite sign.
+#[test]
+fn a_packed_community_is_enclosed_quietly() {
+    let svg = render_to_string(&cypher_request());
+    let hulls: Vec<&str> = svg
+        .lines()
+        .filter(|line| line.starts_with("<rect") && line.contains("rx=\"22\""))
+        .collect();
+    assert!(
+        !hulls.is_empty(),
+        "the island layout drew no boundary at all"
+    );
+    for hull in &hulls {
+        assert!(
+            hull.contains("fill-opacity=\"0.045\"") || hull.contains("fill=\"none\""),
+            "an island boundary must stay a hint, not a box: {hull}"
+        );
+        assert!(
+            hull.contains("stroke-opacity=\"0.16\""),
+            "an island boundary must stay a hint, not a box: {hull}"
+        );
+    }
+}
+
 /// A render request that cannot produce a picture fails with a message naming
 /// what to do about it, rather than emitting an empty canvas.
 #[test]

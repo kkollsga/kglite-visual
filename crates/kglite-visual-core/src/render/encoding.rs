@@ -283,6 +283,14 @@ pub struct Palette {
     pub status_stroke: &'static str,
     /// Mirrors `.kglv-warn` — the colour the truncation banner is drawn in.
     pub warn: &'static str,
+    /// The boundary drawn around a packed community (`super::svg::emit_islands`).
+    ///
+    /// **No frontend counterpart.** The app has no island packing to enclose —
+    /// its layout is cosmos.gl's force simulation — so this is chrome the
+    /// static image needs and the live view has no equivalent of. It takes the
+    /// muted foreground each palette already uses for links and status text,
+    /// rather than a new colour, because a boundary is not a datum.
+    pub island: &'static str,
 }
 
 impl Theme {
@@ -305,6 +313,7 @@ impl Theme {
                 status_fill: "#0d1117",
                 status_stroke: "#8b949e",
                 warn: "#f0883e",
+                island: "#8b949e",
             },
             // The dark palette's roles, re-derived for a light ground. Not a
             // second design: the same seven roles, inverted, so a reader who
@@ -324,6 +333,7 @@ impl Theme {
                 status_fill: "#ffffff",
                 status_stroke: "#57606a",
                 warn: "#bc4c00",
+                island: "#57606a",
             },
         }
     }
