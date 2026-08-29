@@ -77,3 +77,57 @@ fn a_missing_file_is_a_load_error_not_a_panic() {
         Ok(_) => panic!("a missing file must fail"),
     }
 }
+
+/// The engine's half of the `row_limit` contract, pinned at the floor.
+///
+/// This file exists because "it compiles" is a weak test of a dependency
+/// floor, and `row_limit` is now load-bearing for the response bound: the
+/// banner's total comes from `QueryDiagnostics::total_rows`, and the rows above
+/// the cap are supposed never to be built. Both halves are asserted against
+/// the engine directly, so a floor move that quietly changed either — a cap
+/// that stopped biting, a total that became a lower bound — arrives here as a
+/// failure rather than as a wrong number in a picture.
+///
+/// It is a row-count proxy, not a memory measurement: nothing this side of the
+/// engine can weigh the `Vec` that was never allocated. What it does establish
+/// is that the rows above the cap do not exist in the value we are handed.
+/// **Our** wiring of the cap is proved separately, in `query.rs` — this test
+/// constructs its own `ExecuteOptions` and so cannot see that wiring at all.
+#[test]
+fn the_engine_stops_retaining_rows_at_the_cap_and_still_counts_them_all() {
+    const NODES: usize = 500;
+    const CAP: usize = 7;
+
+    let mut graph = DirGraph::new();
+    let params = HashMap::new();
+    let opts = ExecuteOptions::eager(&params);
+    let script: String = (0..NODES)
+        .map(|i| format!("CREATE (:Item {{n: {i}}})\n"))
+        .collect();
+    execute_mut(&mut graph, &script, &opts).expect("fixture Cypher must execute");
+
+    let mut capped = ExecuteOptions::eager(&params);
+    capped.row_limit = Some(CAP);
+    let outcome = kglite::api::session::execute_read(&graph, "MATCH (n:Item) RETURN n.n", &capped)
+        .expect("the query runs");
+
+    assert_eq!(
+        outcome.result.rows.len(),
+        CAP,
+        "row_limit did not reach the executor: it handed back every row"
+    );
+    let diagnostics = outcome
+        .result
+        .diagnostics
+        .expect("a capped execution reports diagnostics");
+    assert_eq!(
+        diagnostics.row_limit,
+        Some(CAP),
+        "the cap in force is echoed whether or not it bit"
+    );
+    assert_eq!(
+        diagnostics.total_rows,
+        Some(NODES as u64),
+        "the pre-truncation total must be exact — it is what the banner prints"
+    );
+}

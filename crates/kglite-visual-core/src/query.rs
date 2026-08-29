@@ -15,6 +15,25 @@
 //! bolt-server bug. There is one construction site for `ExecuteOptions` in this
 //! file for exactly that reason.
 //!
+//! **The row bound is the engine's, the byte bound is ours.** `run_cypher`
+//! hands its row ceiling to `ExecuteOptions::row_limit` rather than
+//! materialising the whole answer and truncating it — the engine still computes
+//! every row (so an `ORDER BY` result is a genuine top-N and an aggregate is
+//! whole) and stops *retaining* at the cap, reporting the exact pre-truncation
+//! count in `QueryDiagnostics::total_rows`. kglite has no byte-shaped
+//! equivalent, so [`MAX_QUERY_BYTES`] stays a second ceiling applied here over
+//! whatever survives the first.
+//!
+//! **The engine's truncation warning is deliberately not forwarded.** kglite
+//! also raises an ordinary query warning on truncation, so that a caller who
+//! reads nothing but `warnings` still learns its result was cut. This project
+//! is not that caller: [`BoundInfo`] is on every response whether the bound
+//! fired or not, the UI must display it, and the renderer draws it into the
+//! picture — so forwarding the warning would put the same fact on screen twice,
+//! in two wordings, one of which we do not control. The warning would only
+//! start carrying information the banner lacks if `returned`/`total` ever
+//! stopped being exact, and the test above is what holds that.
+//!
 //! **Search is server-side, always** (plan D7). No client-side index: an index
 //! the browser builds is an index over what the browser already has, which on a
 //! 100M-node graph is nothing worth searching.
@@ -52,6 +71,12 @@ pub const QUERY_THREAD_STACK_BYTES: usize = kglite::api::session::QUERY_THREAD_S
 /// is a click that lands rather than a pause, and it is an end-to-end number on
 /// purpose: the row count is chosen against what the *user* waits for, not
 /// against the engine's half of it.
+///
+/// Since kglite 0.16.15 this reaches the executor as `ExecuteOptions::row_limit`
+/// instead of being applied to a fully materialised `Vec<Vec<Value>>`, so the
+/// rows above the ceiling are never built. The ceiling itself did not move —
+/// the measurement above is about what the browser can draw, not about what the
+/// engine can hold.
 pub const MAX_QUERY_ROWS: usize = 5_000;
 
 /// Serialized ceiling for one result table. Four protocol chunks.
@@ -179,10 +204,31 @@ pub fn run_cypher(
     };
 
     let started = Instant::now();
-    let outcome = execute(graph, &request.query, &params, config)?;
+    // The row half of the bound is the engine's job now: `row_limit` stops the
+    // executor *retaining* rows past the cap, so a `MATCH (n) RETURN n` over a
+    // 100M-node graph builds 5 000 rows here rather than 100M of them for us to
+    // throw away. `EXPLAIN` is exempt in the engine, so the plan still arrives
+    // whole.
+    let outcome = execute(
+        graph,
+        &request.query,
+        &params,
+        config,
+        Some(bound.max_items),
+    )?;
     let elapsed_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
 
-    let mut table = to_table(outcome.result.columns, outcome.result.rows, bound);
+    let total_rows = outcome
+        .result
+        .diagnostics
+        .as_ref()
+        .and_then(|d| d.total_rows);
+    let mut table = to_table(
+        outcome.result.columns,
+        outcome.result.rows,
+        bound,
+        total_rows,
+    );
     table.elapsed_ms = elapsed_ms;
     table.explain = outcome.explain;
     Ok(table)
@@ -196,15 +242,22 @@ pub fn run_cypher(
 /// `deadline` set (an interactive tool cannot host an unbounded query),
 /// `max_work_units` set to [`MAX_QUERY_WORK_UNITS`] — a runaway guard, **not** the
 /// response bound; see that constant for the measurement that separates them.
+///
+/// `row_limit` is the response bound's row half, and it is the field that
+/// *does* truncate (kglite 0.16.15). `None` means the caller enforces its own
+/// row ceiling in the query text — which is what [`search`] does with its
+/// `LIMIT`, and why this is a parameter rather than a constant.
 fn execute(
     graph: &DirGraph,
     query: &str,
     params: &HashMap<String, Value>,
     config: QueryConfig,
+    row_limit: Option<usize>,
 ) -> Result<kglite::api::session::ExecuteOutcome, CoreError> {
     let mut opts = ExecuteOptions::eager(params);
     opts.deadline = config.deadline();
     opts.max_work_units = Some(MAX_QUERY_WORK_UNITS);
+    opts.row_limit = row_limit;
     Ok(execute_read(graph, query, &opts)?)
 }
 
@@ -216,10 +269,36 @@ fn bind_params(params: &BTreeMap<String, serde_json::Value>) -> HashMap<String, 
         .collect()
 }
 
-/// Transpose kglite's rows into columns, applying the bound once.
-fn to_table(columns: Vec<String>, rows: Vec<Vec<Value>>, bound: Bound) -> QueryTable {
-    let total = rows.len();
-    let kept = total.min(bound.max_items);
+/// Transpose kglite's rows into columns, applying the byte bound.
+///
+/// `engine_total` is `QueryDiagnostics::total_rows` — the exact count the query
+/// produced before `row_limit` truncated it, populated by the engine **only**
+/// when rows were actually dropped, so `Some` is itself the truncation signal.
+/// It is exact on every execution path rather than an estimate or a lower
+/// bound, which is the property the banner rests on: `"5 000 of 412 003"` is a
+/// count, not a guess. With no engine truncation the rows in hand *are* the
+/// whole answer, so their length is the total.
+///
+/// The row cap is still applied here as well, and deliberately: it costs one
+/// `take` and it means a future caller that forgets to pass `row_limit` gets a
+/// bounded response rather than an unbounded one. The **byte** bound has no
+/// engine equivalent at all — kglite counts rows, not serialized size — so it
+/// stays a second ceiling over whatever survives the first.
+fn to_table(
+    columns: Vec<String>,
+    rows: Vec<Vec<Value>>,
+    bound: Bound,
+    engine_total: Option<u64>,
+) -> QueryTable {
+    // Saturating, not `as`: `total_rows` is a `u64` and `BoundInfo.total` is a
+    // `u32` on the wire, and a wrapping cast is the one failure mode that would
+    // make a truncated answer report a *smaller* total than it returned — which
+    // reads as complete. A saturated total is still visibly truncated.
+    let total = match engine_total {
+        Some(exact) => exact.min(u64::from(u32::MAX)) as usize,
+        None => rows.len(),
+    };
+    let kept = rows.len().min(bound.max_items);
 
     let mut node_ids: Vec<u32> = Vec::new();
     let mut seen_nodes: HashSet<u32> = HashSet::new();
@@ -257,11 +336,7 @@ fn to_table(columns: Vec<String>, rows: Vec<Vec<Value>>, bound: Bound) -> QueryT
         protocol_version: PROTOCOL_VERSION,
         columns,
         data,
-        bound: BoundInfo {
-            returned: returned as u32,
-            total: total as u32,
-            truncated: returned < total,
-        },
+        bound: BoundInfo::new(returned, total),
         elapsed_ms: 0,
         node_ids,
         relationships,
@@ -431,7 +506,15 @@ pub fn search(
     );
 
     let started = Instant::now();
-    let outcome = execute(graph, &cypher, &params, config)?;
+    // No `row_limit` here, and that is the interactive-latency decision: the
+    // `LIMIT limit + 1` above lets the planner stop as soon as it has one more
+    // hit than the panel shows, while `row_limit` bounds retention only — the
+    // query still runs to completion, so on a graph the size of sodir it would
+    // turn a keystroke-latency search into a full scan for the sake of an exact
+    // total nobody reads. The cost is that `total` here stays a lower bound
+    // (`201` means "at least 201"), which the "load into view" path is built
+    // around anyway.
+    let outcome = execute(graph, &cypher, &params, config, None)?;
     let elapsed_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
 
     let total = outcome.result.rows.len();
@@ -514,6 +597,7 @@ mod tests {
                 max_items: 10,
                 max_bytes: 10_000,
             },
+            None,
         );
         assert_eq!(table.columns, vec!["a", "b"]);
         assert_eq!(table.data.len(), 2, "one array per column");
@@ -538,6 +622,7 @@ mod tests {
                 max_items: 3,
                 max_bytes: 10_000,
             },
+            None,
         );
         assert_eq!(table.data[0].len(), 3);
         assert_eq!(
@@ -548,6 +633,53 @@ mod tests {
                 truncated: true
             }
         );
+    }
+
+    #[test]
+    fn the_engine_reported_total_is_what_the_banner_shows() {
+        // The row_limit adoption's whole point: the rows in hand are the cap,
+        // and the total beside them is the count the engine made *before* it
+        // stopped retaining. Reading `rows.len()` for the total — which is what
+        // this function did while it truncated a fully materialised answer —
+        // would report "5 of 5" for a query that produced 412 003 rows and
+        // render as a complete result.
+        let rows: Vec<Vec<Value>> = (0..5).map(|i| vec![Value::Int64(i)]).collect();
+        let table = to_table(
+            vec!["n".into()],
+            rows,
+            Bound {
+                max_items: 5,
+                max_bytes: 10_000,
+            },
+            Some(412_003),
+        );
+        assert_eq!(
+            table.bound,
+            BoundInfo {
+                returned: 5,
+                total: 412_003,
+                truncated: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_total_too_large_for_the_wire_saturates_rather_than_wrapping() {
+        // `total_rows` is a u64 and the wire field is a u32. A wrapping cast is
+        // the one arithmetic failure that inverts the signal: 2^32 + 5 rows
+        // would report `total: 5` beside `returned: 5` and read as complete.
+        let rows: Vec<Vec<Value>> = (0..5).map(|i| vec![Value::Int64(i)]).collect();
+        let table = to_table(
+            vec!["n".into()],
+            rows,
+            Bound {
+                max_items: 5,
+                max_bytes: 10_000,
+            },
+            Some(u64::from(u32::MAX) + 5),
+        );
+        assert_eq!(table.bound.total, u32::MAX);
+        assert!(table.bound.truncated);
     }
 
     #[test]
@@ -562,6 +694,7 @@ mod tests {
                 max_items: 1000,
                 max_bytes: 500,
             },
+            None,
         );
         assert!(
             table.bound.truncated,
@@ -583,6 +716,66 @@ mod tests {
                 .min(MAX_QUERY_ROWS);
             assert_eq!(effective, MAX_QUERY_ROWS);
         }
+    }
+
+    /// Our wiring of the cap, not the engine's honouring of it.
+    ///
+    /// The distinction is not pedantic — it is what an `R1` probe found. A test
+    /// that builds its own `ExecuteOptions` proves the engine truncates and
+    /// says nothing about whether [`execute`] passes the cap on; and a test
+    /// that reads only [`QueryTable::bound`] cannot tell either, because
+    /// materialise-then-truncate and cap-at-the-executor produce the *same*
+    /// banner (`7 of 500`) by design. The one observable that separates them is
+    /// the length of the row vector [`execute`] is handed: 7 when the cap
+    /// reached the executor, 500 when it did not.
+    #[test]
+    fn the_row_cap_reaches_the_executor_rather_than_being_applied_after_it() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        const NODES: usize = 500;
+        const CAP: usize = 7;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        let script: String = (0..NODES)
+            .map(|i| format!("CREATE (:Item {{n: {i}}})\n"))
+            .collect();
+        execute_mut(&mut graph, &script, &ExecuteOptions::eager(&empty)).expect("fixture builds");
+
+        let outcome = execute(
+            &graph,
+            "MATCH (n:Item) RETURN n.n",
+            &empty,
+            QueryConfig::default(),
+            Some(CAP),
+        )
+        .expect("the query runs");
+        assert_eq!(
+            outcome.result.rows.len(),
+            CAP,
+            "execute() did not pass row_limit through: the whole answer was materialised"
+        );
+        assert_eq!(
+            outcome
+                .result
+                .diagnostics
+                .and_then(|d| d.total_rows)
+                .expect("truncation populates the exact total"),
+            NODES as u64
+        );
+
+        // And with no cap the same call materialises everything — which is what
+        // `search` relies on, and what makes the assertion above meaningful.
+        let uncapped = execute(
+            &graph,
+            "MATCH (n:Item) RETURN n.n",
+            &empty,
+            QueryConfig::default(),
+            None,
+        )
+        .expect("the query runs");
+        assert_eq!(uncapped.result.rows.len(), NODES);
     }
 
     #[test]
@@ -636,6 +829,7 @@ mod tests {
                 max_items: 10,
                 max_bytes: 10_000,
             },
+            None,
         );
         assert_eq!(table.node_ids, vec![1, 2], "deduplicated, first-seen order");
         assert_eq!(table.relationships.len(), 1);
