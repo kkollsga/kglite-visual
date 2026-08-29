@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Read-only by default. Nothing in CI writes to the repository; the publish
-# path lives in build_wheels.yml and asks for its own permissions there.
+# path lives in release.yml and asks for its own permissions there.
 permissions:
   contents: read
 
@@ -261,7 +261,7 @@ jobs:
 
   ci-success:
     name: CI success
-    # The single aggregate gate. build_wheels.yml waits on THIS, not on a
+    # The single aggregate gate. release.yml waits on THIS, not on a
     # hand-maintained list of check names — an allowlist is how a red job ships
     # a release by simply not being listed. A job added above is covered by
     # adding it to `needs` here, and nowhere else.

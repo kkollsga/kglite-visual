@@ -6,12 +6,14 @@ description: Cut a kglite-visual release — goal-check against the phased plan,
 # Release
 
 > **Nothing has ever been released from this repo (2026-08-29), but the
-> pipeline this skill describes now exists in file form.** P6 landed the two
-> workflows, the sdist, the CHANGELOG and the wheel matrix. What is still
-> missing is everything only a human can create: a remote, a single executed
-> CI run, a PyPI project and a trusted publisher. **The workflows have never
-> run**, so every step below that reads a CI result is authored-but-unproven
-> — report it that way, never as a pass. **Do not run this skill to "see what happens".** The first release
+> pipeline is live and validated.** The remote exists
+> (`github.com/kkollsga/kglite-visual`), CI has run red-then-green on real
+> runners, `release.yml`'s wheel matrix built all seven wheels + the sdist
+> green on its first run, and the PyPI pending publisher is registered
+> against `release.yml`. Still needed before the publish leg can fire: the
+> repository variable `PYPI_PUBLISH_ENABLED=true`. The publish leg itself
+> has never executed — treat its first firing as a validation, not a
+> formality. **Do not run this skill to "see what happens".** The first release
 > is preceded by a `phased-plan` that *builds* the pipeline; this file is the
 > procedure that pipeline must satisfy, written down first so the pipeline is
 > built to fit a known-good shape rather than discovered afterwards.
@@ -82,7 +84,7 @@ A deferred PR is named in the final report with the user's decision recorded,
 not just "deferred". *(The prior rule elsewhere in this estate silently
 skipped drafts, and a release shipped past a draft fix branch the user learned
 about only from the final report. Skipping is a scope decision, so it belongs
-to the user, up front.)* **(ABSENT — no remote, so no PRs. Real the moment the remote exists.)**
+to the user, up front.)*
 
 ## Preconditions
 
@@ -144,11 +146,9 @@ to the user, up front.)* **(ABSENT — no remote, so no PRs. Real the moment the
    not. Read `.outcome`, not `.conclusion`, on anything carrying
    `continue-on-error`; and check for a **job-level** flag, which makes the
    whole job unable to fail and every gate inside it decorative (`R1`).
-   **(AUTHORED, NEVER RUN.** `.github/workflows/ci.yml` exists and its
-   `ci-success` job is the single aggregate to poll. No Actions run has ever
-   happened here, so the first poll is also the first validation — a failure
-   at this step is as likely to be a workflow bug as a code bug, and the
-   fix-and-push loop below is the right response to either.**)**
+   `ci-success` is the single aggregate to poll, and it is validated in
+   production: the repo's first-ever CI run went red on a real bug, the
+   aggregate refused it, and the fix went green (2026-08-29).
 
 5. **Bump version — always patch, unless the invocation said otherwise.**
    `x.y.Z` → `x.y.Z+1`, no clarification prompt and no judgement call. A minor
@@ -261,7 +261,7 @@ to the user, up front.)* **(ABSENT — no remote, so no PRs. Real the moment the
 
 11. **Verify the published artifact SET, and verify the release was
     *recorded*** (`R9`). **(The workflow does this itself as of P6:
-    `build_wheels.yml`'s publish job asserts the artifact SET — one sdist and
+    `release.yml`'s publish job asserts the artifact SET — one sdist and
     five must-pass platform tags, the two best-effort aarch64 legs
     deliberately uncounted — before uploading, and creates the tag AFTER the
     upload so a failed publish leaves no tag claiming a release that does not

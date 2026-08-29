@@ -518,7 +518,7 @@ jobs:
     # Turning it on is the LAST release precondition, after: the remote exists,
     # a CI run has actually gone green, the PyPI project `kglite-visual` is
     # registered, and a trusted publisher is configured for
-    # kkollsga/kglite-visual + workflow `build_wheels.yml`.
+    # kkollsga/kglite-visual + workflow `release.yml`.
     #
     # The repository check is a second, independent guard: a fork inherits this
     # file, and a fork must never publish under this name.

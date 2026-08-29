@@ -186,18 +186,6 @@ go-ahead.** If they decline, proceed without it.
 - Put the phased plan into the **PR description as a checklist** (one box per
   phase).
 
-> **PARTIALLY ABSENT: CI exists as a file and has never run, and there is
-> still no remote (2026-08-29, after P6).** `.github/workflows/ci.yml` and
-> `build_wheels.yml` are committed and pass `actionlint`, but no Actions run
-> has ever happened and no PR has ever existed. Until the user creates the
-> remote and the first run goes green, this phase is **not applicable, and
-> saying so is the correct output** — never report a green PR check that does
-> not exist (`R10` corollary). Work on `main` locally, keep the phase commits
-> bisectable anyway, and note in the report-out that CI confirmation is
-> outstanding. Delete this block in the same change that lands the first green
-> CI run — not in the one that creates the remote, because a remote with a
-> never-executed workflow is exactly the state this block describes.
-
 ## Phase 3 — Execute each phase (the autonomous loop)
 
 For every phase, in order:

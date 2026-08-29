@@ -32,13 +32,16 @@ localhost CLI and a Python wheel.
 > that installs without Node, a CHANGELOG, and a gate that builds, lints,
 > tests and
 > **drives** all of it — in a headless browser, and for the built wheel in a
-> fresh virtualenv outside the repo. **CI is AUTHORED AND HAS NEVER RUN**
-> (`.github/workflows/{ci,build_wheels}.yml`): there is no remote, no
-> Actions run, no PyPI project and no published artifact, and the publish
-> job is inert until a human sets a repository variable that does not exist.
-> A committed workflow is not a passing workflow — treat the first run as
-> the validation step it is, and never report a green check that never ran
-> (`R10` corollary). And when a planned thing becomes real, delete its
+> fresh virtualenv outside the repo. **CI is live and green**
+> (`.github/workflows/{ci,release}.yml`, remote
+> `github.com/kkollsga/kglite-visual`): the first-ever CI run went red on a
+> real SIGTERM-race bug the warm dev machine could not see — which is what
+> a first run is for — and everything since is green, including the full
+> wheel matrix (seven platform wheels + sdist, first try). **Not yet
+> published**: the PyPI pending publisher is registered
+> (workflow `release.yml`), and the publish job stays skipped until the
+> repository variable `PYPI_PUBLISH_ENABLED=true` is set and `/release`
+> runs. And when a planned thing becomes real, delete its
 > caveat *in the same change*: an honesty label nobody retires becomes a
 > lie, which is how one estate repo still described itself as "brand-new, no
 > code yet" two weeks after shipping a gate and 17 test files.
@@ -200,9 +203,9 @@ briefly unreachable — neither of which is a fact about the diff. A gate that
 fails for reasons unrelated to the change is a gate people learn to bypass. CI
 owns the failing version of that check; here it reports and moves on.
 
-**CI exists as a file and has never executed.** `.github/workflows/ci.yml`
+**CI is live; its first run earned its keep.** `.github/workflows/ci.yml`
 runs fifteen of the gate's seventeen checks across five jobs plus a
-`ci-success` aggregate that `build_wheels.yml` waits on — an aggregate, never
+`ci-success` aggregate that `release.yml` waits on — an aggregate, never
 a list of check names, because an allowlist is how a red job ships a release
 by not being on it. The two gate checks with no CI job are local-only *by
 construction*: `check-dev-docs` bounds a gitignored directory that never
@@ -210,14 +213,17 @@ reaches a checkout, and `check-skill-mirrors` compares against an untracked
 generated adapter. CI owns the **failing** half of `npm audit --omit=dev`.
 The concurrency group cancels a superseded `pull_request` run and never a
 push to `main`, where the run *is* the record of whether that commit was
-good. `build_wheels.yml` is the maturin matrix: native windows/macOS,
+good. `release.yml` is the maturin matrix: native windows/macOS,
 manylinux2014 + musllinux_1_2 containers for x86_64, best-effort aarch64,
 and an sdist carrying a prebuilt `frontend/dist`; `if-no-files-found: error`
 on every upload, `scripts/check_wheel.py` against every wheel, and an
-artifact-**set** check before publish (`R9`). **None of it has run.** Both
-files pass `actionlint` locally and every inner command was exercised on a
-developer machine; that is the whole of the evidence, and it is not a green
-CI.
+artifact-**set** check before publish (`R9`). **Both have run on the real
+runners (2026-08-29): CI's first run went red on a genuine bug and green on
+the fix; `release.yml`'s first run built all seven wheels + the sdist green
+and skipped publish as designed.** The `ci-success` aggregate has been seen
+refusing a red job in production — the R1 proof local runs could only
+reason about. The publish leg remains the one never-executed path; treat
+its first firing as the validation it is.
 
 **The packaged-consumer check is the one thing a source-tree test
 structurally cannot do.** `scripts/check_wheel.py` opens the built `.whl`,
@@ -702,7 +708,7 @@ project's name. *kglite was verified present on crates.io on 2026-08-29: 99
 versions, newest and default `0.16.13`, crate not yanked*, and the workspace
 now builds and tests against the published crate. The floor moved to
 `=0.16.14` on 2026-08-29 (P8) — the release KGLite cut from this project's
-nine findings. `build_wheels.yml`'s sdist job asserts no foreign crate
+nine findings. `release.yml`'s sdist job asserts no foreign crate
 reappears.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
