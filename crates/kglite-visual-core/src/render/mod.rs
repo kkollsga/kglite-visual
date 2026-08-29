@@ -206,7 +206,8 @@ pub struct Rendered {
     /// Nodes the slice carried — **drawn plus folded**, so this stays the
     /// answer to "how big was the result" whether or not any fan was folded.
     pub nodes: u32,
-    /// Links drawn.
+    /// Links the slice carried — counted, like `nodes`, before any fan was
+    /// folded, so the JSON and the status block drawn into the image agree.
     pub links: u32,
     /// Nodes folded into aggregate wedges and therefore NOT drawn individually
     /// (P11). `nodes - folded` is what a reader can count in the picture.
@@ -342,7 +343,13 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         ));
     }
 
+    // Counted before the fold, because the status block inside the image is
+    // also written before it: a JSON line reporting 556 links beside a picture
+    // whose own banner says 748 makes a reader doubt both numbers. Both halves
+    // answer "what did the slice carry"; `folded` is the one that says how
+    // much of it a reader can count.
     let slice_nodes = scene.nodes.len() as u32;
+    let slice_links = scene.links.len() as u32;
     let folded = fold_leaf_fans(&mut scene, f64::from(width) * f64::from(height));
     if folded > 0 {
         // Drawn INTO the image, beside the truncation banner and for the same
@@ -397,7 +404,7 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         width,
         height,
         nodes: slice_nodes,
-        links: scene.links.len() as u32,
+        links: slice_links,
         folded,
         layout_ms,
         truncated: !scene.banners.is_empty(),
