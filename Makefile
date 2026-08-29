@@ -33,6 +33,30 @@ PYTHON ?= python3
 CARGO ?= cargo
 NPM ?= npm
 
+# ts-rs rewrites every `#[ts(export)]` type into frontend/src/generated/ on
+# every `cargo test`, unchanged content included — and `check_bundle.py
+# --freshness` counts those files as sources of the embedded bundle. So a gate
+# run that merely *proved* the generated TypeScript had not moved left it
+# newer than the bundle, and the bundle the gate had just built read as stale
+# to everything downstream: the bench harness refused to start immediately
+# after a green gate for exactly this reason.
+#
+# Every step that runs `cargo test` therefore brackets it with these two. The
+# stamp is the newest generated file's timestamp from BEFORE the run, so a
+# genuinely new generated type keeps its own (correctly newer) timestamp and
+# still trips the freshness check — the restore only undoes the bump a no-op
+# regeneration caused. Content drift is caught by the git comparisons in
+# check-generated-ts, which mtimes have nothing to do with.
+GENERATED_TS_STAMP = target/.generated-ts.stamp
+SAVE_GENERATED_MTIMES = mkdir -p target; \
+  newest="$$(ls -t frontend/src/generated/*.ts 2>/dev/null | head -1)"; \
+  if [ -n "$$newest" ]; then touch -r "$$newest" $(GENERATED_TS_STAMP); \
+  else rm -f $(GENERATED_TS_STAMP); fi
+RESTORE_GENERATED_MTIMES = if [ -f $(GENERATED_TS_STAMP) ]; then \
+  find frontend/src/generated -name '*.ts' \
+    -exec touch -r $(GENERATED_TS_STAMP) {} +; \
+  fi
+
 # One project-local virtualenv, created on demand and reused thereafter, so
 # `make pytest` means the same thing on every machine and in CI. Created rather
 # than skipped: an ABSENT pytest step and a passing one must not depend on
@@ -149,7 +173,9 @@ rust-clippy:  ## Lints are errors: a warning nobody must fix is a warning nobody
 	@$(CARGO) clippy --workspace --all-targets -- -D warnings
 
 rust-test:  ## Workspace tests, including the kglite .kgl round trip
+	@$(SAVE_GENERATED_MTIMES)
 	@$(CARGO) test --workspace
+	@$(RESTORE_GENERATED_MTIMES)
 
 # The generated TypeScript is written by ts-rs from the Rust message types
 # during `cargo test`, so this regenerates and then asserts nothing moved. That
@@ -168,6 +194,7 @@ rust-test:  ## Workspace tests, including the kglite .kgl round trip
 #      against the index rather than HEAD so a correctly-staged regeneration
 #      passes, including in a first commit.
 check-generated-ts:  ## FAIL if frontend/src/generated/ is stale or hand-edited
+	@$(SAVE_GENERATED_MTIMES)
 	@$(CARGO) test -p kglite-visual-core --quiet
 	@if [ -z "$$(ls -A frontend/src/generated 2>/dev/null)" ]; then \
 	  echo "check-generated-ts: FAIL — frontend/src/generated/ is empty; ts-rs exported nothing" >&2; \
@@ -185,6 +212,7 @@ check-generated-ts:  ## FAIL if frontend/src/generated/ is stale or hand-edited
 	  echo "  Regenerate with 'cargo test -p kglite-visual-core' and stage the result." >&2; \
 	  exit 1; \
 	fi
+	@$(RESTORE_GENERATED_MTIMES)
 	@echo "check-generated-ts: OK"
 
 # The two-toolchain seam. `--freshness` fails when the embedded bundle is
@@ -200,7 +228,9 @@ check-bundle:  ## FAIL if frontend/dist is older than frontend/src
 # commit, with the version bumped and the reason stated — never to silence a
 # diff nobody can explain (CLAUDE.md → "Gate honesty").
 check-protocol-baseline:  ## FAIL if the committed protocol framing baseline moved
+	@$(SAVE_GENERATED_MTIMES)
 	@$(CARGO) test -p kglite-visual-core --quiet
+	@$(RESTORE_GENERATED_MTIMES)
 	@if [ -z "$$(ls -A crates/kglite-visual-core/tests/baselines 2>/dev/null)" ]; then \
 	  echo "check-protocol-baseline: FAIL — the baseline directory is empty; the generator wrote nothing" >&2; \
 	  exit 1; \
