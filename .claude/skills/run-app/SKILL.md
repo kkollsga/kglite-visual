@@ -96,6 +96,39 @@ summarise it.
 `--query-timeout-secs N` (default 30) raises the wall-clock ceiling for one
 Cypher query. Leave it alone unless a deliberate analytical query needs it.
 
+## 3b. Get a picture — no browser, no server
+
+    "$BIN" render crates/kglite-visual-core/tests/fixtures/meta.kgl --meta -o /tmp/m.svg
+    # {"out":"/tmp/m.svg","format":"svg","width":2000,"height":1250,"nodes":5,
+    #  "links":7,"truncated":false,"banners":[],"bytes":3705}
+
+Same stdout rule as the server: exactly one JSON line, diagnostics on stderr,
+**nothing on stdout when it fails** — so a harness that read a line got a
+render. Sources are mutually exclusive: `--meta` (default), `--cypher "…"`,
+`--expand type=T rel=R dir=out`. `--format png`, `--theme light`,
+`--width/--height`, `--seed`, `--limit`.
+
+The layout is seeded and deterministic — same request, same bytes, forever —
+so `--seed` is how you get a *different* arrangement of the same data, and
+`make check-render-baseline` is an exact baseline over it.
+
+Against a running server, the same thing over HTTP, answering with bytes:
+
+    curl -s -XPOST $B/api/render -H "$C" \
+      -d '{"source":{"type":"meta"},"format":"png","width":900,"height":600}' -o /tmp/m.png
+    # content-type: image/png, plus x-kglv-{nodes,links,truncated,banner}
+
+**It does not move the live view.** `core::render` opens a private session
+over the same read-only graph, so an image request is a question and never
+changes what the user is looking at. Rendering the *user's actual* geometry
+is P10 + the deferred client-position capture, not this.
+
+**What the image is not:** content-identical to the app,
+geometry-different. The browser's layout runs on the user's GPU; this is a
+seeded Fruchterman-Reingold in core. Same nodes, same links, same
+truncation, a different arrangement — never claim "your screen shows X at
+the top left".
+
 ## 4. Drive the real frontend
 
 - Scripted: `make e2e` (Playwright, headless Chromium with

@@ -5,16 +5,21 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29 (P7 landed on top of the completed P0–P6 buildout):
-> the artifact exists, proves itself, and reads as a graph on real data.**
+> **Status, 2026-08-29 (P9 landed on top of P0–P8): the artifact exists,
+> proves itself, reads as a graph on real data — and now hands that graph
+> to an agent as an image.**
 > Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend that
 > renders the type-level meta-graph through cosmos.gl — GPU force layout by
 > default, the D2 deterministic mode behind an explicit `?deterministic=1`
 > switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v2)
 > with an exact framing baseline, an axum server on localhost with the
 > frontend embedded, **a Python wheel whose `show()` runs that same server
-> lib-linked into the extension**, a source distribution that installs
-> without Node, a CHANGELOG, and a gate that builds, lints, tests and
+> lib-linked into the extension**, **`kglite-visual render` /
+> `POST /api/render`** — the meta-graph, a Cypher result or a bounded
+> expansion drawn as a deterministic SVG or PNG with the app's own visual
+> encoding and the truncation banner in the picture — a source distribution
+> that installs without Node, a CHANGELOG, and a gate that builds, lints,
+> tests and
 > **drives** all of it — in a headless browser, and for the built wheel in a
 > fresh virtualenv outside the repo. **CI is AUTHORED AND HAS NEVER RUN**
 > (`.github/workflows/{ci,build_wheels}.yml`): there is no remote, no
@@ -152,18 +157,23 @@ make check-packaged-consumer   # install the built wheel elsewhere and drive it
 make py-venv        # create/reuse the project-local venv (py-venv-refresh re-installs)
 make prune          # purge the disposable tiers by age (dev-docs' temp/, bench/out/,
                     # bin/, and stale Playwright artifacts). --dry-run to look first.
+kglite-visual render g.kgl --meta            # one image, no browser; SVG by
+kglite-visual render g.kgl --cypher "…"      # default, --format png for PNG.
+kglite-visual render g.kgl --expand type=T rel=R dir=out
+                    # writes the file, prints one JSON line {out,nodes,links,truncated,…}
 cargo test --workspace
 cd frontend && npm ci && npm run typecheck && npm run build
 ```
 
-`make gate` runs sixteen real checks: the `dev-docs/` size bound (`R4`), the
+`make gate` runs seventeen real checks: the `dev-docs/` size bound (`R4`), the
 instruction-mirror check (`R7`), the two structural bans (`@cosmograph/*` and
 `#[global_allocator]`), the build-directory report, the frontend typecheck,
 the frontend **production** build, the embedded-bundle freshness check,
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`, the generated-TypeScript freshness check, the
-protocol framing baseline, the Playwright end-to-end smoke, **the wheel's
-pytest suite, the packaged-consumer check**, and an advisory
+protocol framing baseline, the rendered-image baseline, the Playwright
+end-to-end smoke, **the wheel's pytest suite, the packaged-consumer
+check**, and an advisory
 `npm audit --omit=dev`. **The frontend half runs first, and that is
 load-bearing:** `frontend/dist` is embedded into the CLI binary, so every
 cargo step downstream of it compiles against whatever bundle is on disk. It
@@ -179,7 +189,7 @@ fails for reasons unrelated to the change is a gate people learn to bypass. CI
 owns the failing version of that check; here it reports and moves on.
 
 **CI exists as a file and has never executed.** `.github/workflows/ci.yml`
-runs fourteen of the gate's sixteen checks across five jobs plus a
+runs fifteen of the gate's seventeen checks across five jobs plus a
 `ci-success` aggregate that `build_wheels.yml` waits on — an aggregate, never
 a list of check names, because an allowlist is how a red job ships a release
 by not being on it. The two gate checks with no CI job are local-only *by
