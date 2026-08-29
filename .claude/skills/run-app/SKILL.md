@@ -62,7 +62,12 @@ curl -s -XPOST $B/api/property-stats -H "$C" -d '{"node_type":"Person"}'
 
 Same structs as the binary WebSocket protocol — divergence between the twin
 and the wire is a bug, not a nuance. Every bounded response carries
-`{returned, total, truncated}`; report those numbers, don't hide them. A bad
+`{returned, total, truncated}`; report those numbers, don't hide them. A
+**graph slice carries two**: `meta.bound` for its nodes and
+`meta.link_bound` for its links, because nodes and links share one byte
+budget in core — the node list can be complete while the link list is not,
+and a slice that reported only the first would let a partial neighbourhood
+read as a whole one. A bad
 request is **400** and names what it refused; a query the engine rejected is
 **422** and carries kglite's own diagnostic verbatim — quote it, don't
 summarise it.
