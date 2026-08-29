@@ -28,6 +28,24 @@ export type Launched = {
 }
 
 /**
+ * The app URL in D2's deterministic layout mode.
+ *
+ * **Every spec that asserts a position, a count or a screenshot goes through
+ * this**, and the reason is the thing the flag switches off. The user default
+ * is the GPU force simulation: it moves every point continuously until it
+ * settles, so `positionsHash` would hash vendor float behaviour and a label
+ * count would depend on when the frame was taken. `?deterministic=1` restores
+ * exactly the constructor this suite was written against — server-supplied
+ * positions, `enableSimulation: false` — so the assertions below prove the
+ * same property they always did, about the same code path the server still
+ * feeds. Specs assert `layoutMode` too, so a dropped flag fails here rather
+ * than being absorbed as flake.
+ */
+export function appUrl(info: LaunchInfo): string {
+  return `${info.url}?deterministic=1`
+}
+
+/**
  * Resolve the binary through the newest-of-profile check.
  *
  * Never `target/debug/...` hard-coded, and never "release if present": the

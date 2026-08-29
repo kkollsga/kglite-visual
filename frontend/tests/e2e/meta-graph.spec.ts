@@ -13,7 +13,7 @@
 
 import { expect, test } from '@playwright/test'
 
-import { FIXTURE, launch } from './harness'
+import { appUrl, FIXTURE, launch } from './harness'
 
 /** The meta-graph of `meta.kgl`, asserted exactly (see the core L1 tests). */
 const EXPECTED = {
@@ -41,7 +41,7 @@ test('the meta-graph renders and reports the fixture back through __kglv', async
     expect(server.info.port).toBeGreaterThan(0)
     expect(server.info.graph).toBe(FIXTURE)
 
-    await page.goto(server.info.url)
+    await page.goto(appUrl(server.info))
 
     // The whole point of the debug hook: wait for a *state*, not a duration.
     await page.waitForFunction(() => window.__kglv?.ready === true, undefined, {
@@ -56,6 +56,10 @@ test('the meta-graph renders and reports the fixture back through __kglv', async
     console.log('__kglv:', JSON.stringify(state, null, 2))
 
     expect(state.error).toBeNull()
+    // Asserted BEFORE the position hash, because it is what makes the hash an
+    // assertion: in the force mode a user gets, the positions on the GPU are
+    // the simulation's and hashing them would prove nothing.
+    expect(state.layoutMode).toBe('deterministic')
     expect(state.protocolVersion).toBe(EXPECTED.protocolVersion)
     expect(state.tier).toBe(EXPECTED.tier)
     expect(state.pointCount).toBe(EXPECTED.pointCount)

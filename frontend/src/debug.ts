@@ -39,6 +39,16 @@ export type Truncation = {
 export type DebugState = {
   protocolVersion: number
   tier: string | null
+  /**
+   * `force` (the user default) or `deterministic` (`?deterministic=1`).
+   *
+   * Here because `positionsHash` is only an assertion in the second one: with
+   * the simulation running, the positions on the GPU are a product of vendor
+   * float behaviour and frame cadence, and a hash of them would be asserting
+   * on the scheduler. A test that reads a hash without checking this field is
+   * asserting on nothing.
+   */
+  layoutMode: 'force' | 'deterministic'
   /** Points that currently draw something — tombstones excluded. */
   pointCount: number
   linkCount: number
@@ -87,6 +97,7 @@ declare global {
 export const debugState: DebugState = {
   protocolVersion: 0,
   tier: null,
+  layoutMode: 'force',
   pointCount: 0,
   linkCount: 0,
   slotCount: 0,

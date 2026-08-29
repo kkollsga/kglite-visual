@@ -15,7 +15,7 @@
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { launch, type Launched } from './harness'
+import { appUrl, launch, type Launched } from './harness'
 
 /** The fixture's Person type: 60 members, largest type, therefore slot 0. */
 const PERSON_SLOT = 0
@@ -57,7 +57,7 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
 
   try {
     server = await launch()
-    await page.goto(server.info.url)
+    await page.goto(appUrl(server.info))
     await ready(page)
 
     // ── the entry screen ────────────────────────────────────────────────
@@ -203,7 +203,7 @@ test('a full expansion compacts on collapse and the client applies the remap', a
   let server: Launched | null = null
   try {
     server = await launch()
-    await page.goto(server.info.url)
+    await page.goto(appUrl(server.info))
     await ready(page)
 
     // No limit this time: all 60 Persons, which puts the view at 65 slots —
@@ -245,7 +245,7 @@ test('server-side search highlights what is loaded and offers to load the rest',
   let server: Launched | null = null
   try {
     server = await launch()
-    await page.goto(server.info.url)
+    await page.goto(appUrl(server.info))
     await ready(page)
 
     // Nothing is loaded yet, so every hit is cold: the answer is a list plus a

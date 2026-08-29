@@ -33,7 +33,7 @@ import { InteractionState } from './interaction'
 import { LabelOverlay } from './labels'
 import { Panels } from './panels'
 import { assertLittleEndian, fnv1a, ResponseAssembler, type Completed } from './protocol'
-import { mountGraph, type Appearance, type Surface } from './render'
+import { layoutModeFromSearch, mountGraph, type Appearance, type Surface } from './render'
 import { connectedAtom } from './state'
 import { rendersGraph } from './tiers'
 import { WebSocketTransport } from './transport'
@@ -44,6 +44,16 @@ if (!mount) throw new Error('#app is missing from index.html')
 
 assertLittleEndian()
 debugState.deviceFeatures = probeDeviceFeatures()
+/**
+ * `force` unless the page was asked for `?deterministic=1`.
+ *
+ * Read once, at startup: the mode decides how the renderer is constructed, so
+ * a mid-session change would mean tearing the renderer down, and nothing in
+ * the app wants that. `__kglv` reports it because `positionsHash` only means
+ * something in the deterministic mode.
+ */
+const layoutMode = layoutModeFromSearch(window.location.search)
+debugState.layoutMode = layoutMode
 publishDebugState()
 publishBenchHook()
 
@@ -219,6 +229,11 @@ async function handle(completed: Completed): Promise<void> {
         panels.clearSelection()
       }
       redraw()
+      // The node set changed, so the layout has new work to do. Reheating on a
+      // slice and nowhere else is the rule: an appearance change that
+      // re-energised the simulation would make the graph jump under the
+      // user's cursor for no reason they could name.
+      surface?.reheat()
       break
     }
     case 'preview':
@@ -298,7 +313,7 @@ async function showMetaGraph(message: {
   }
 
   try {
-    surface = await mountGraph(canvasHost, view, appearance())
+    surface = await mountGraph(canvasHost, view, appearance(), layoutMode)
     attachHandlers(surface)
     debugState.simRunning = surface.graph.isSimulationRunning
     redraw()
@@ -420,6 +435,24 @@ function attachHandlers(current: Surface): void {
     // 18.0 ms without, same slice and same simulation).
     onZoom: () => positionLabels(current),
     onZoomEnd: () => positionLabels(current),
+    // A moving layout moves the points a label names, so the overlay has to
+    // follow it. This is the same cheap sampled-points pass a zoom already runs
+    // once per frame — never `setLabels`, which walks the whole view.
+    onSimulationTick: () => {
+      debugState.simRunning = true
+      positionLabels(current)
+    },
+    onSimulationEnd: () => {
+      debugState.simRunning = false
+      // The settled layout's extent is not the seed's, so the data-derived
+      // zoom no longer frames it. A fit is a viewport-dependent operation and
+      // therefore banned in deterministic mode (D2) — here the layout is
+      // already viewport-independent only up to the simulation, so framing it
+      // costs nothing that was still being protected.
+      current.graph.fitView(0)
+      positionLabels(current)
+      syncCounts()
+    },
   })
 }
 

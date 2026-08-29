@@ -1,20 +1,36 @@
 /**
- * The cosmos.gl renderer, in D2's fixture mode.
+ * The cosmos.gl renderer, in one of two layout modes.
  *
- * Every constructor value below is a determinism decision, not a preference:
+ * **`force` is what a user gets.** The server's lattice positions are a *seed*
+ * — a deterministic, cheap starting point that makes the first paint stable —
+ * and the GPU force simulation then runs and turns them into a picture of the
+ * graph's structure. A lattice of evenly spaced dots is not that picture: it
+ * says nothing about which types are connected to which, which is the entire
+ * question the meta-graph entry screen exists to answer.
  *
- * - `enableSimulation: false` — positions come from the server. cosmos.gl's
- *   `randomSeed` is init-only and the simulation leaks nondeterminism three
- *   ways (GPU float math differs by vendor, tick count rides
- *   requestAnimationFrame cadence, and v3 defaults to an 800 ms transition), so
- *   a seed is not a determinism switch and server-supplied positions are.
+ * **`deterministic` is what a test gets** (`?deterministic=1`). It is D2's
+ * fixture mode, unchanged: the simulation never runs, so the positions on the
+ * GPU are exactly the ones the server computed and `positionsHash` describes
+ * something. The e2e suite and the bench harness both pass the flag, and
+ * `window.__kglv.layoutMode` reports which mode is live — a position hash
+ * asserted in force mode would be asserting on GPU float scheduling.
+ *
+ * The constructor values that are *not* mode-dependent, and why:
+ *
  * - `rescalePositions: false` — its default silently rewrites the coordinates
  *   the server just computed, which would make the committed positions
- *   baseline describe nothing.
- * - `transitionDuration: 0` — animation is opted into per call site.
+ *   baseline describe nothing. (cosmos.gl's `undefined` default is itself
+ *   mode-dependent — it rescales only when the simulation is off — so leaving
+ *   it out would make the two modes disagree about the seed.)
+ * - `transitionDuration: 0` — animation is opted into per call site, and in
+ *   force mode it is load-bearing rather than cosmetic: a position transition
+ *   with a positive duration *auto-pauses a running simulation and leaves it
+ *   paused* (cosmos.gl's own note on `setPointPositions`). Zero duration means
+ *   there is no transition to pause it.
  * - `fitViewOnInit: false` + a fixed `initialZoomLevel` — a fit depends on the
  *   viewport, so it would make the same data render differently at two window
- *   sizes.
+ *   sizes. In force mode the layout stops being a function of the data alone
+ *   once it settles, so a settle-time fit is added back there and only there.
  *
  * Uploads go through {@link Surface.upload}: whole typed arrays, one call each,
  * never a per-point callback (plan D7).
@@ -23,6 +39,22 @@
 import { Graph } from '@cosmos.gl/graph'
 
 import type { SlotView } from './view'
+
+/** Where the positions on the GPU come from. */
+export type LayoutMode = 'force' | 'deterministic'
+
+/**
+ * Read the layout mode out of the page's query string.
+ *
+ * Opt-*in* to determinism, not out of it: the default has to be the mode that
+ * is useful on a real graph, and a test that forgets the flag fails loudly on
+ * `layoutMode` rather than passing by accident.
+ */
+export function layoutModeFromSearch(search: string): LayoutMode {
+  return new URLSearchParams(search).get('deterministic') === '1'
+    ? 'deterministic'
+    : 'force'
+}
 
 /**
  * Screen span, in CSS pixels, the graph is scaled to occupy.
@@ -59,6 +91,49 @@ const POINT_SAMPLING_DISTANCE_PX = 24
  */
 const SPACE_SIZE = 4096
 
+/**
+ * Force parameters, chosen by iterating on the real thing: the 98-type /
+ * 124-relationship meta-graph of `sodir_graph.kgl` (546 850 nodes, 765 373
+ * edges), driven headless at 1280×800 and screenshotted after each settle,
+ * until it read as a graph instead of a blob or a scatter.
+ *
+ * cosmos.gl's defaults are tuned for tens of thousands of instance nodes and
+ * are wrong here in both directions at once: a meta-graph is small, its hub
+ * types carry twenty-odd relationships each, and its node radii span four
+ * orders of magnitude — so the picture has to be sparse enough that one type's
+ * circle does not swallow its neighbours' labels.
+ *
+ * Each departure from the default, and the picture that bought it:
+ *
+ * - `simulationLinkDistance: 150` (default 10) — at the default every
+ *   connected pair sat inside one node's radius and the schema collapsed into
+ *   a single unreadable knot roughly 80 px across.
+ * - `simulationLinkSpring: 0.15` (default 1) — with a stiff spring the hubs
+ *   dragged the whole periphery back into that knot; slackening it is what
+ *   lets the core spread while staying visibly connected.
+ * - `simulationRepulsion: 4` (default 1) — the separation the labels need.
+ *   Tried 5 with gravity 0.25: the picture became an evenly filled disc, which
+ *   is a different way of showing no structure.
+ * - `simulationGravity: 0.12` (default 0.25) — the counterweight. This graph
+ *   has isolated types with no edges at all, and nothing but gravity brings
+ *   those back; at 0.05 they drifted off the visible space, at 0.25 the whole
+ *   layout compressed back toward uniform.
+ * - `simulationDecay: 300` (default 5000) — the parameter is *ticks to
+ *   settle*, not a rate (`alphaDecay = 1 - 1e-3^(1/decay)`), so the default is
+ *   5 000 frames: over a minute of an entry screen visibly crawling, which a
+ *   user reads as broken. 300 ticks settles in 7.6 s under headless
+ *   SwiftShader — and, measured against 600, reaches the same picture.
+ * - `simulationFriction`, `simulationCenter`, `simulationRepulsionTheta` stay
+ *   at their defaults; nothing in the picture asked them to move.
+ */
+const FORCE_CONFIG = {
+  simulationLinkDistance: 150,
+  simulationLinkSpring: 0.15,
+  simulationRepulsion: 4,
+  simulationGravity: 0.12,
+  simulationDecay: 300,
+} as const
+
 /** One upload's worth of appearance, compiled by the caller. */
 export type Appearance = {
   colors: Float32Array
@@ -68,7 +143,10 @@ export type Appearance = {
 
 /** The renderer, plus the one method that feeds it. */
 export class Surface {
-  constructor(readonly graph: Graph) {}
+  constructor(
+    readonly graph: Graph,
+    readonly mode: LayoutMode,
+  ) {}
 
   /**
    * Push the whole view to the GPU.
@@ -81,17 +159,74 @@ export class Surface {
   upload(view: SlotView, appearance: Appearance): void {
     // `true` = do not rescale: the second argument is `dontRescale`, and
     // letting cosmos.gl rescale would rewrite the server's coordinates.
-    this.graph.setPointPositions(toRendererSpace(view.positions), true)
+    this.graph.setPointPositions(this.positionsFor(view), true)
     this.graph.setPointSizes(appearance.sizes)
     this.graph.setPointColors(appearance.colors)
     this.graph.setLinks(view.links)
     this.graph.setLinkWidths(appearance.linkWidths)
-    this.graph.setConfigPartial({ initialZoomLevel: zoomFor(view.positions) })
-    // `render(undefined, 0)` — no simulation alpha, no transition. With
-    // on-demand rendering a static scene draws exactly one frame, and that
-    // frame has to be asked for. Zero duration is what makes a collapse *snap*
-    // rather than animating slots into a space they no longer occupy.
+    if (this.mode === 'deterministic') this.zoomToPayload(view)
+    // `render(undefined, 0)` — keep the current simulation alpha, no
+    // transition. With on-demand rendering a static scene draws exactly one
+    // frame, and that frame has to be asked for. Zero duration is what makes a
+    // collapse *snap* rather than animating slots into a space they no longer
+    // occupy — and in force mode it is what keeps the simulation unpaused.
     this.graph.render(undefined, 0)
+  }
+
+  /**
+   * Reheat the simulation. Force mode only; a no-op otherwise.
+   *
+   * Called when the *node set* changed, never when the appearance did: a
+   * colour-by choice that re-energised the layout would make the graph jump
+   * under the user's cursor for no reason they could name.
+   */
+  reheat(alpha = 1): void {
+    if (this.mode === 'deterministic') return
+    this.graph.start(alpha)
+  }
+
+  /**
+   * Frame the payload at the data-derived zoom.
+   *
+   * **`setZoomLevel`, not `setConfigPartial({ initialZoomLevel })`.**
+   * `initialZoomLevel` is an init-only field, and cosmos.gl explicitly restores
+   * it to its pre-update value on every `setConfig` / `setConfigPartial`
+   * (`preserveInitOnlyFields`), so setting it after mount is a documented
+   * no-op — measured: the zoom read back unchanged at 0.4237 after a
+   * `setConfigPartial({ initialZoomLevel: 0.001 })`, and moved to 0.001 through
+   * this setter. Before that was found, every expansion after the meta-graph
+   * kept the meta-graph's zoom and ran off screen.
+   */
+  private zoomToPayload(view: SlotView): void {
+    this.graph.setZoomLevel(zoomFor(view.positions))
+  }
+
+  /**
+   * The positions to upload: the server's, except where the simulation has
+   * already moved a slot somewhere better.
+   *
+   * In force mode the server's lattice is a *seed*, and it is only a seed for
+   * slots that have never been drawn. Re-pushing it wholesale on every slice
+   * would yank the settled layout back to a grid each time a user expanded
+   * anything — the picture would rebuild itself from scratch on every click.
+   * So: keep whatever the GPU has for a slot it already holds, and take the
+   * server's value for a slot it does not. A NaN from the server wins outright,
+   * because that is a tombstone and absence is the server's call (D4).
+   */
+  private positionsFor(view: SlotView): Float32Array {
+    const seeded = toRendererSpace(view.positions)
+    if (this.mode === 'deterministic') return seeded
+    const live = this.graph.getPointPositions()
+    const shared = Math.min(live.length, seeded.length)
+    for (let i = 0; i < shared; i += 2) {
+      const x = live[i]
+      const y = live[i + 1]
+      if (x === undefined || y === undefined) continue
+      if (Number.isNaN(seeded[i]) || !Number.isFinite(x) || !Number.isFinite(y)) continue
+      seeded[i] = x
+      seeded[i + 1] = y
+    }
+    return seeded
   }
 }
 
@@ -99,9 +234,12 @@ export async function mountGraph(
   container: HTMLDivElement,
   view: SlotView,
   appearance: Appearance,
+  mode: LayoutMode,
 ): Promise<Surface> {
+  const force = mode === 'force'
   const graph = new Graph(container, {
-    enableSimulation: false,
+    enableSimulation: force,
+    ...(force ? FORCE_CONFIG : {}),
     rescalePositions: false,
     transitionDuration: 0,
     fitViewOnInit: false,
@@ -113,6 +251,11 @@ export async function mountGraph(
     renderLinks: true,
     linkWidthScale: 1,
     pointSizeScale: 1,
+    // Dragging a node is how a user pulls a cluster apart to read it, and it
+    // only means anything while a simulation is there to re-settle around the
+    // change. In deterministic mode the positions on screen are an assertion,
+    // so nothing may move them.
+    enableDrag: force,
     // The hover affordances the four interaction concepts drive. Rings rather
     // than a colour change, so hovering composes with a colour-by choice
     // instead of overwriting it.
@@ -132,10 +275,11 @@ export async function mountGraph(
     attribution: 'cosmos.gl',
   })
 
-  const surface = new Surface(graph)
+  const surface = new Surface(graph, mode)
   surface.upload(view, appearance)
   await graph.ready
   graph.render(undefined, 0)
+  surface.reheat()
   return surface
 }
 
