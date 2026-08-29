@@ -392,7 +392,11 @@ a renderer.
    and **immunity from what it anchors** (`R11` corollary): a control chosen
    because *our* source cannot touch it silently expires when a **dependency**
    moves instead — and this project has two moving dependencies, `kglite` and
-   the renderer. Re-justify the controls after every dependency bump. A
+   the renderer. Re-justify the controls after every dependency bump.
+   (kglite moved 0.16.13 → 0.16.14 on 2026-08-29; the bench `.kgl` inputs
+   under `dev-docs/bench/out/` were written by the older engine and 0.16.14
+   changed how a `.kgl` is written, so regenerate them at the next capture
+   rather than comparing across engines.) A
    control that moves **deterministically** across repeated re-measures is not
    instrument wander — re-measuring returns the same number forever; the
    control's premise is void, and that is a finding about the gate.
@@ -642,7 +646,12 @@ there would be a fourth thing to keep in step for no benefit). Adding a number
 to either of those adds a site — update this list in the same change.
 
 Re-count with:
-`grep -rn '<old-version>' . --exclude-dir=target --exclude-dir=node_modules --exclude=Cargo.lock`
+`command grep -rn '<old-version>' . --exclude-dir=target --exclude-dir=node_modules --exclude=Cargo.lock`
+
+**`command grep`, not `grep`.** A `grep` that resolves to a ripgrep wrapper
+honours `.gitignore` and therefore skips `dev-docs/` and `inbox/` — the
+working state this sweep exists to cover. Measured on 2026-08-29 during P8's
+floor move: 9 hits against 41.
 
 **Never hand-edit a manifest to bump** — the bump goes through one target that
 rewrites every site and verifies with a **resolving** `cargo metadata`
@@ -669,8 +678,10 @@ maturin vendors an out-of-workspace path dependency, and `maturin sdist` was
 emitting 435 files / 2.5 MB carrying 391 files of KGLite's source under this
 project's name. *kglite was verified present on crates.io on 2026-08-29: 99
 versions, newest and default `0.16.13`, crate not yanked*, and the workspace
-now builds and tests against that published crate. `build_wheels.yml`'s sdist
-job asserts no foreign crate reappears.
+now builds and tests against the published crate. The floor moved to
+`=0.16.14` on 2026-08-29 (P8) — the release KGLite cut from this project's
+nine findings. `build_wheels.yml`'s sdist job asserts no foreign crate
+reappears.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
