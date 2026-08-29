@@ -10,6 +10,11 @@
 //! Two callers: `main.rs`, and the wheel's `kglite-visual` console script,
 //! which reaches [`run_from`] through PyO3. Both get the same parser, the same
 //! stdout line and the same exit codes, because there is one of each.
+//!
+//! **Two modes, one stdout rule.** `kglite-visual <file>` serves; `kglite-visual
+//! render <file> …` draws one image and exits (plan D13). Each prints exactly
+//! one JSON line — the launch contract, or the render summary — so "read one
+//! line of stdout" stays the whole agent-facing protocol.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -18,17 +23,29 @@ use std::time::Duration;
 use clap::Parser;
 use kglite_visual_core::{load_graph, GraphSource, QueryConfig, Session, QUERY_THREAD_STACK_BYTES};
 
+use crate::render_cmd::{self, RenderArgs};
 use crate::{assets, server};
 
 #[derive(Parser, Debug)]
 #[command(
     name = "kglite-visual",
     version,
-    about = "Interactive viewer for .kgl knowledge graphs"
+    about = "Interactive viewer for .kgl knowledge graphs",
+    // `kglite-visual <file>` predates the subcommand and stays the bare form:
+    // it is what the wheel's console script, the e2e harness and every existing
+    // instruction run. `subcommand_negates_reqs` is what lets the positional
+    // `file` stay required for that form while `render` supplies its own, and
+    // `args_conflicts_with_subcommands` refuses the ambiguous middle
+    // (`kglite-visual a.kgl render`) instead of silently picking one reading.
+    args_conflicts_with_subcommands = true,
+    subcommand_negates_reqs = true
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
     /// The `.kgl` file to view.
-    file: PathBuf,
+    file: Option<PathBuf>,
 
     /// Port to bind. `0` asks the OS for a free one; the resolved port is
     /// always reported in the stdout JSON, so nothing needs to guess.
@@ -49,6 +66,12 @@ struct Cli {
     query_timeout_secs: u64,
 }
 
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+    /// Draw one image of this graph and exit — no server, no browser.
+    Render(RenderArgs),
+}
+
 /// Parse `args` and run to completion, returning the process exit code.
 ///
 /// `u8` rather than `ExitCode`: the console-script caller crosses a PyO3
@@ -64,7 +87,26 @@ where
     T: Into<OsString> + Clone,
 {
     let cli = Cli::parse_from(args);
-    match run(&cli) {
+    if cli.command.is_none() && cli.file.is_none() {
+        // `subcommand_negates_reqs` makes the positional optional at the parser
+        // level *unconditionally*, so a bare `kglite-visual` now parses instead
+        // of being refused. Before the render subcommand existed it produced
+        // clap's usage text and clap's exit code; a one-line message and a
+        // different code would be a silent change to the contract a harness
+        // sees. This hands the case back to clap, which formats and exits.
+        use clap::CommandFactory as _;
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "the following required arguments were not provided:\n  <FILE>",
+            )
+            .exit();
+    }
+    let outcome = match &cli.command {
+        Some(Command::Render(args)) => render_cmd::run(args),
+        None => run(&cli),
+    };
+    match outcome {
         Ok(()) => 0,
         Err(err) => {
             eprintln!("kglite-visual: {err}");
@@ -74,12 +116,18 @@ where
 }
 
 fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
+    // `run_from` has already handed the empty invocation back to clap, so this
+    // is the type system catching up with a case that cannot reach here.
+    let file = cli
+        .file
+        .as_ref()
+        .ok_or("no .kgl file was given; run `kglite-visual --help`")?;
     // Load before binding: a LaunchInfo for a graph that turned out to be
     // unreadable would be a URL nothing serves.
-    let graph = load_graph(GraphSource::Path(&cli.file))?;
+    let graph = load_graph(GraphSource::Path(file))?;
     let session = Session::open_with(
         graph,
-        cli.file.display().to_string(),
+        file.display().to_string(),
         QueryConfig {
             timeout: Duration::from_secs(cli.query_timeout_secs),
         },
@@ -109,7 +157,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("kglite-visual: {embedded} embedded frontend asset(s)");
     }
 
-    let bound = server::bind(session, cli.port, cli.file.display().to_string())?;
+    let bound = server::bind(session, cli.port, file.display().to_string())?;
     let url = bound.info.url.clone();
 
     // THE one stdout line. Printed after the port is resolved and the socket
@@ -160,7 +208,7 @@ mod tests {
         let cli = Cli::parse_from(["kglite-visual", "--port", "8731", "--no-open", "g.kgl"]);
         assert_eq!(cli.port, 8731);
         assert!(cli.no_open);
-        assert_eq!(cli.file, PathBuf::from("g.kgl"));
+        assert_eq!(cli.file, Some(PathBuf::from("g.kgl")));
 
         let defaults = Cli::parse_from(["kglite-visual", "g.kgl"]);
         assert_eq!(defaults.port, 0, "0 means OS-assigned");
@@ -169,6 +217,55 @@ mod tests {
 
         let slow = Cli::parse_from(["kglite-visual", "--query-timeout-secs", "300", "g.kgl"]);
         assert_eq!(slow.query_timeout_secs, 300);
+    }
+
+    #[test]
+    fn the_render_subcommand_does_not_disturb_the_bare_serve_form() {
+        // The regression this pairing exists to catch: adding a subcommand to a
+        // parser whose first positional was required is exactly how a working
+        // `kglite-visual g.kgl` becomes a usage error. Both forms, one test.
+        let serve = Cli::parse_from(["kglite-visual", "g.kgl"]);
+        assert!(serve.command.is_none());
+        assert_eq!(serve.file, Some(PathBuf::from("g.kgl")));
+
+        let render = Cli::parse_from([
+            "kglite-visual",
+            "render",
+            "g.kgl",
+            "--cypher",
+            "MATCH (n) RETURN n",
+            "--format",
+            "png",
+            "--seed",
+            "7",
+        ]);
+        let Some(Command::Render(args)) = render.command else {
+            panic!("the subcommand did not dispatch");
+        };
+        assert_eq!(args.file, PathBuf::from("g.kgl"));
+        assert_eq!(args.cypher.as_deref(), Some("MATCH (n) RETURN n"));
+        assert_eq!(args.format, crate::render_cmd::FormatArg::Png);
+        assert_eq!(args.seed, 7);
+        assert_eq!(
+            args.theme,
+            crate::render_cmd::ThemeArg::Dark,
+            "dark is app parity"
+        );
+    }
+
+    #[test]
+    fn the_three_render_sources_are_mutually_exclusive() {
+        // A caller who wrote two of them meant one; picking silently would draw
+        // a picture of a question nobody asked.
+        assert!(Cli::try_parse_from([
+            "kglite-visual",
+            "render",
+            "g.kgl",
+            "--meta",
+            "--cypher",
+            "MATCH (n) RETURN n",
+        ])
+        .is_err());
     }
 
     #[test]

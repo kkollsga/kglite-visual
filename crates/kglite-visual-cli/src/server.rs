@@ -91,6 +91,11 @@ fn router(session: Arc<Session>) -> Router {
         .route("/api/collapse", post(api::collapse))
         .route("/api/node", post(api::node_detail))
         .route("/api/property-stats", post(api::property_stats))
+        // The one route that answers with image bytes rather than JSON (D13).
+        // POST like the rest of the vocabulary: it carries a body, and a GET
+        // whose query string held a Cypher statement would be logged, cached
+        // and re-run by anything in the path.
+        .route("/api/render", post(api::render))
         // `any` rather than `get`: a WebSocket upgrade is a GET, but routing it
         // through `any` keeps the 405 for a mistaken POST out of the upgrade
         // path, where it would surface as an opaque handshake failure.

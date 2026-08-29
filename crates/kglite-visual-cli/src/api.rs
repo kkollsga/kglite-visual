@@ -20,10 +20,12 @@
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::http::header::CONTENT_TYPE;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use kglite_visual_core::error::CoreError;
+use kglite_visual_core::render::RenderRequest;
 use kglite_visual_core::request::{
     CypherRequest, ExpandRequest, Request, SearchRequest, SlotRequest, TypeRequest,
 };
@@ -85,6 +87,64 @@ pub async fn collapse(state: State<Arc<Session>>, Json(body): Json<SlotRequest>)
 /// `POST /api/node` — `{"slot": n}`. One node's stored properties.
 pub async fn node_detail(state: State<Arc<Session>>, Json(body): Json<SlotRequest>) -> Response {
     dispatch(state, Request::NodeDetail(body)).await
+}
+
+/// `POST /api/render` — `{"source": {...}, "format": "svg"|"png", "width": n,
+/// "height": n, "seed": n, "theme": "dark"|"light"}` (plan D13).
+///
+/// **The one endpoint that answers with bytes, not JSON.** Everything else here
+/// is the JSON twin of a WebSocket message; this is an image, and an image
+/// wrapped in JSON would be base64 an agent has to undo before it can look at
+/// anything. The counts and the truncation state travel *inside the picture*
+/// (D5's banner) and in the response headers, so a caller that only reads
+/// headers still learns the answer was clipped.
+///
+/// **It does not touch this session's view.** `core::render` opens a private
+/// session over the same read-only graph, so a `POST /api/render` cannot move
+/// the slot space of whatever browser tab is attached. (Rendering the *live*
+/// view is a different request, and P10 is where it lands.)
+pub async fn render(
+    State(session): State<Arc<Session>>,
+    Json(body): Json<RenderRequest>,
+) -> Response {
+    let graph = Arc::clone(session.graph());
+    let name = session.info().graph;
+    let config = session.config();
+    // A render lays out a bounded slice and, for PNG, rasterises it: tens of
+    // milliseconds, and on the async runtime that is the WebSocket feeding the
+    // renderer stalling for all of them.
+    match tokio::task::spawn_blocking(move || {
+        kglite_visual_core::render(&graph, &name, config, &body)
+    })
+    .await
+    {
+        Ok(Ok(rendered)) => {
+            let banners = rendered.banners.join("; ");
+            let mut response = (
+                [(CONTENT_TYPE, rendered.format.content_type())],
+                rendered.bytes,
+            )
+                .into_response();
+            let headers = response.headers_mut();
+            for (name, value) in [
+                ("x-kglv-nodes", rendered.nodes.to_string()),
+                ("x-kglv-links", rendered.links.to_string()),
+                ("x-kglv-truncated", rendered.truncated.to_string()),
+                ("x-kglv-banner", banners),
+            ] {
+                // A header value has to be ASCII-safe, and a banner is built
+                // from a graph's own type names. A name that cannot ride in a
+                // header is dropped from the header and stays in the image,
+                // which is the copy that matters.
+                if let Ok(value) = axum::http::HeaderValue::from_str(&value) {
+                    headers.insert(name, value);
+                }
+            }
+            response
+        }
+        Ok(Err(err)) => error_response(&err),
+        Err(err) => task_failed("render", &err),
+    }
 }
 
 /// `POST /api/property-stats` — `{"node_type": "..."}`.
