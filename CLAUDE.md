@@ -5,9 +5,10 @@ produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
 estate). A Rust workspace plus a TypeScript/WebGL frontend, shipped as a
 localhost CLI and a Python wheel.
 
-> **Status, 2026-08-29 (P9 landed on top of P0–P8): the artifact exists,
-> proves itself, reads as a graph on real data — and now hands that graph
-> to an agent as an image.**
+> **Status, 2026-08-29 (P10 landed on top of P0–P9): the artifact exists,
+> proves itself, reads as a graph on real data, hands that graph to an
+> agent as an image — and lets the agent navigate it while a human
+> watches.**
 > Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend that
 > renders the type-level meta-graph through cosmos.gl — GPU force layout by
 > default, the D2 deterministic mode behind an explicit `?deterministic=1`
@@ -17,7 +18,11 @@ localhost CLI and a Python wheel.
 > lib-linked into the extension**, **`kglite-visual render` /
 > `POST /api/render`** — the meta-graph, a Cypher result or a bounded
 > expansion drawn as a deterministic SVG or PNG with the app's own visual
-> encoding and the truncation banner in the picture — a source distribution
+> encoding and the truncation banner in the picture — **an MCP server at
+> `/mcp` on the running instance** — nine tools an agent uses to show,
+> expand, collapse, highlight, focus and re-colour the live view, with
+> every change broadcast to every attached browser, so the user's screen
+> follows the agent in real time — a source distribution
 > that installs without Node, a CHANGELOG, and a gate that builds, lints,
 > tests and
 > **drives** all of it — in a headless browser, and for the built wheel in a

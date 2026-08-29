@@ -29,7 +29,7 @@ exactly like a backend bug (CLAUDE.md → "Two toolchains, one gate").
 "$BIN" crates/kglite-visual-core/tests/fixtures/meta.kgl --no-open --port 0 &
 ```
 
-- Exactly **one line on stdout**, JSON: `{"url","port","pid","graph"}`.
+- Exactly **one line on stdout**, JSON: `{"url","port","pid","graph","mcp"}`.
   Parse it; never scrape stderr, never race a hardcoded port.
 - All diagnostics are on stderr.
 - `--no-open` is mandatory for agents/CI (no browser spawn); `--port 0`
@@ -41,7 +41,7 @@ exactly like a backend bug (CLAUDE.md → "Two toolchains, one gate").
 ```python
 import kglite_visual as kv
 view = kv.show("crates/kglite-visual-core/tests/fixtures/meta.kgl", open_browser=False)
-view.launch_info   # {"url","port","pid","graph"} — the same four keys, same struct
+view.launch_info   # {"url","port","pid","graph","mcp"} — the same five keys, same struct
 view.close()       # "closed" | "already-closed" | "stale-after-fork"; frees the port
 ```
 
@@ -128,6 +128,43 @@ geometry-different. The browser's layout runs on the user's GPU; this is a
 seeded Fruchterman-Reingold in core. Same nodes, same links, same
 truncation, a different arrangement — never claim "your screen shows X at
 the top left".
+
+## 3c. Drive the live view over MCP
+
+The running server speaks MCP at the `mcp` URL its stdout line printed —
+streamable HTTP, no second process, no discovery file. Nine tools:
+`view_state`, `show_cypher`, `expand`, `collapse`, `highlight`, `focus`,
+`set_appearance`, `reset_view`, `render`.
+
+```bash
+M="$(python3 -c 'import json,sys;print(json.load(sys.stdin)["mcp"])' < server.json)"
+H=(-H 'content-type: application/json' -H 'accept: application/json, text/event-stream')
+# initialize first; keep the mcp-session-id header it returns on every later call.
+curl -sD- -XPOST "$M" "${H[@]}" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+curl -s   -XPOST "$M" "${H[@]}" -H "mcp-session-id: $S" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+curl -s   -XPOST "$M" "${H[@]}" -H "mcp-session-id: $S" -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+```
+
+Responses default to `text/event-stream`; the JSON-RPC payload is the last
+`data:` line. Errors an agent can act on come back as `isError: true` with
+kglite's own message — quote it, don't summarise it.
+
+**The view is shared, and it is last-writer-wins.** Anything that changes it
+is pushed to every attached browser, whoever asked. `view_state` is the
+server-side `window.__kglv`; re-read it rather than assuming your last call
+still describes the screen.
+
+**`render` geometry is not the user's geometry.** The layout runs on the
+viewer's GPU and the server never learns the final positions, so
+`render{target:"live-view"}` returns the same nodes and links in a different
+arrangement. Describe what is in the view; use `focus` and `highlight` to say
+"look at this" instead of naming a screen position you cannot see.
+
+The same verbs exist on the JSON twin — `POST /api/{focus,highlight,appearance,reset}`,
+`GET /api/view-state` — which is the `curl`-shaped way to drive the same
+broadcast without an MCP client. The steering endpoints answer with
+`{"clients":n}`: a command that reached nobody is otherwise indistinguishable
+from one that reached the user.
 
 ## 4. Drive the real frontend
 
