@@ -3,17 +3,19 @@
 /**
  * How much of the schema the server decided to send.
  *
- * **Mirrored from kglite, which does not export it.** `GraphScale` and
- * `graph_scale()` live in `crates/kglite/src/graph/introspection/mod.rs`
- * (kglite 0.16.13), inside the `pub(crate) mod graph` that the curated
- * `kglite::api` facade seals — `api::introspection` re-exports the detail
- * enums and `SchemaOverview` but not the scale classifier. The thresholds
- * below are that function's, verbatim, and the duplication is deliberate:
- * this crate cannot name the upstream type. Read kglite's CHANGELOG on every
- * floor bump and re-check these four ranges.
+ * **This is a wire type, and the wire contract is ours** (`R8` in reverse):
+ * the client switches on these kebab-case names, so the enum stays here with
+ * its `serde`/`ts-rs` shape even though the *classification* is kglite's.
+ * What used to live here and no longer does is the four threshold ranges —
+ * `kglite::api::introspection::graph_scale` is exported as of 0.16.14 and
+ * [`compute`] calls it, so the numbers are read from the engine rather than
+ * copied out of it. [`DetailTier::from`] is the whole mapping, and its match
+ * is exhaustive: an upstream variant added to `GraphScale` breaks this build
+ * instead of silently falling into a default.
  *
  * The classification counts **core** types only — a type with a parent in
  * `parent_types` is a supporting type and does not push a graph into a
- * coarser tier, exactly as upstream does it.
+ * coarser tier — and that rule is now upstream's to apply, not ours to
+ * restate.
  */
 export type DetailTier = "full" | "compact" | "top-types" | "summary";

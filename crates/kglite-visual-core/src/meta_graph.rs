@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 
+use kglite::api::introspection::{graph_scale, GraphScale};
 use kglite::api::{DirGraph, GraphRead};
 use serde::Serialize;
 use ts_rs::TS;
@@ -28,18 +29,20 @@ use crate::view::{View, ViewEdge};
 
 /// How much of the schema the server decided to send.
 ///
-/// **Mirrored from kglite, which does not export it.** `GraphScale` and
-/// `graph_scale()` live in `crates/kglite/src/graph/introspection/mod.rs`
-/// (kglite 0.16.13), inside the `pub(crate) mod graph` that the curated
-/// `kglite::api` facade seals — `api::introspection` re-exports the detail
-/// enums and `SchemaOverview` but not the scale classifier. The thresholds
-/// below are that function's, verbatim, and the duplication is deliberate:
-/// this crate cannot name the upstream type. Read kglite's CHANGELOG on every
-/// floor bump and re-check these four ranges.
+/// **This is a wire type, and the wire contract is ours** (`R8` in reverse):
+/// the client switches on these kebab-case names, so the enum stays here with
+/// its `serde`/`ts-rs` shape even though the *classification* is kglite's.
+/// What used to live here and no longer does is the four threshold ranges —
+/// `kglite::api::introspection::graph_scale` is exported as of 0.16.14 and
+/// [`compute`] calls it, so the numbers are read from the engine rather than
+/// copied out of it. [`DetailTier::from`] is the whole mapping, and its match
+/// is exhaustive: an upstream variant added to `GraphScale` breaks this build
+/// instead of silently falling into a default.
 ///
 /// The classification counts **core** types only — a type with a parent in
 /// `parent_types` is a supporting type and does not push a graph into a
-/// coarser tier, exactly as upstream does it.
+/// coarser tier — and that rule is now upstream's to apply, not ours to
+/// restate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 #[serde(rename_all = "kebab-case")]
@@ -69,13 +72,17 @@ pub const MAX_META_BYTES: usize = 512 * 1024;
 /// worst case, so the node bound alone does not bound this list.
 pub const MAX_META_LINKS: usize = 4_000;
 
-/// Classify a graph by core type count. See [`DetailTier`] for the citation.
-pub fn tier_for_core_types(core_types: usize) -> DetailTier {
-    match core_types {
-        0..=15 => DetailTier::Full,
-        16..=200 => DetailTier::Compact,
-        201..=5000 => DetailTier::TopTypes,
-        _ => DetailTier::Summary,
+impl From<GraphScale> for DetailTier {
+    /// The only thing this crate still owns about tiering: which wire name each
+    /// of kglite's four scales is called by. Exhaustive on purpose — a fifth
+    /// upstream variant must be a decision here, not a default.
+    fn from(scale: GraphScale) -> Self {
+        match scale {
+            GraphScale::Small => DetailTier::Full,
+            GraphScale::Medium => DetailTier::Compact,
+            GraphScale::Large => DetailTier::TopTypes,
+            GraphScale::Extreme => DetailTier::Summary,
+        }
     }
 }
 
@@ -178,14 +185,22 @@ pub struct MetaGraphResponse {
 }
 
 /// kglite's four per-type capability flags, recomputed here because
-/// `TypeCapabilities` is `pub(super)` inside kglite's introspection module.
+/// `TypeCapabilities` is still `pub(super)` inside kglite's introspection
+/// module — re-checked against the 0.16.14 sources on 2026-08-29, whose
+/// fourteen new facade exports do not include it. This is the one upstream
+/// mirror in this crate that the 0.16.14 exports did not retire.
 ///
 /// Every source below is a `DirGraph` field the engine already maintains —
 /// three config maps and the embedding store's keys — so the whole scan is
 /// O(#types) and needs no node access. Mirrors
-/// `crates/kglite/src/graph/introspection/capabilities.rs::compute_type_capabilities`
-/// (kglite 0.16.13), including the `loc`-suppressed-by-`geo` rule in
-/// `flags_csv`.
+/// `crates/kglite/src/graph/introspection/capabilities.rs::compute_type_capabilities`,
+/// including the `loc`-suppressed-by-`geo` rule in `flags_csv`.
+///
+/// Deliberately **not** mirrored: `bubble_capabilities`, which `describe()`
+/// applies afterwards to merge a supporting type's flags into its parent. A
+/// meta-graph node is a type, and the honest flag on it is what that type
+/// carries — not what a child of it carries. So these flags can be narrower
+/// than the same type's flags in `describe()` output, by choice.
 fn capabilities_for(graph: &DirGraph, node_type: &str) -> Vec<String> {
     let has_timeseries = graph.timeseries_configs.contains_key(node_type);
 
@@ -245,7 +260,11 @@ pub fn compute(graph: &DirGraph, view: &mut View) -> MetaGraphResponse {
     let node_count = graph.graph.node_count() as u64;
     let edge_count = graph.graph.edge_count() as u64;
     let core_type_count = types.iter().filter(|(_, _, s)| !s).count();
-    let tier = tier_for_core_types(core_type_count);
+    // The tier comes from kglite's own classifier, never from a copy of its
+    // thresholds. `core_type_count` above is the same population counted the
+    // same way (`parent_types` membership) and is sent for the stats panel; the
+    // *decision* is the engine's.
+    let tier = DetailTier::from(graph_scale(graph));
 
     // Largest first; name breaks ties. The tie-break is not cosmetic: the
     // prefix the bound keeps, the slot each type gets and therefore its
@@ -351,17 +370,29 @@ pub fn compute(graph: &DirGraph, view: &mut View) -> MetaGraphResponse {
 mod tests {
     use super::*;
 
+    /// Every `GraphScale` reaches a wire tier, and the one it reaches is the
+    /// one the client was written against.
+    ///
+    /// This replaced a test that pinned kglite's four threshold *numbers* by
+    /// hand. Those numbers are no longer ours — 0.16.14 exports `graph_scale`
+    /// and [`compute`] calls it — so re-pinning them here would only assert
+    /// that a copy still matches the copy it was made from. What is left to
+    /// get wrong is the mapping and the wire names, and that is what this
+    /// asserts. Upstream *moving* a threshold is caught where it can actually
+    /// be observed: the fixture and 60-type tests in
+    /// `tests/meta_graph_fixture.rs` run real graphs through the real
+    /// classifier.
     #[test]
-    fn tier_thresholds_match_kglites_graph_scale() {
-        // The exact boundaries of kglite's `graph_scale`. If a floor bump
-        // moves them upstream, this test is what notices.
-        assert_eq!(tier_for_core_types(0), DetailTier::Full);
-        assert_eq!(tier_for_core_types(15), DetailTier::Full);
-        assert_eq!(tier_for_core_types(16), DetailTier::Compact);
-        assert_eq!(tier_for_core_types(200), DetailTier::Compact);
-        assert_eq!(tier_for_core_types(201), DetailTier::TopTypes);
-        assert_eq!(tier_for_core_types(5000), DetailTier::TopTypes);
-        assert_eq!(tier_for_core_types(5001), DetailTier::Summary);
+    fn every_upstream_scale_maps_to_the_wire_tier_the_client_switches_on() {
+        for (scale, tier, wire) in [
+            (GraphScale::Small, DetailTier::Full, "\"full\""),
+            (GraphScale::Medium, DetailTier::Compact, "\"compact\""),
+            (GraphScale::Large, DetailTier::TopTypes, "\"top-types\""),
+            (GraphScale::Extreme, DetailTier::Summary, "\"summary\""),
+        ] {
+            assert_eq!(DetailTier::from(scale), tier, "{scale:?}");
+            assert_eq!(serde_json::to_string(&tier).unwrap(), wire, "{scale:?}");
+        }
     }
 
     #[test]
