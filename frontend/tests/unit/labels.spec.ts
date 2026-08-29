@@ -48,3 +48,42 @@ test('only the summary tier drops out of the graph view', () => {
   expect(rendersGraph('top-types')).toBe(true)
   expect(rendersGraph('summary')).toBe(false)
 })
+
+test('placeAll nudges a loser into a free neighbouring cell instead of dropping it', () => {
+  // Two names on the same circle. The meta-graph must show both: an unlabelled
+  // type node is a dot, which is the entry screen this mode exists to fix.
+  const stacked = [
+    { slot: 0, x: 100, y: 100, weight: 10 },
+    { slot: 1, x: 105, y: 102, weight: 5 },
+  ]
+  expect(chooseLabels(stacked)).toHaveLength(1)
+  const all = chooseLabels(stacked, true)
+  expect(all.map((p) => p.slot)).toEqual([0, 1])
+  // The heavier one keeps the spot it earned; the other moves by exactly one
+  // cell, so it is still recognisably attached to its own circle.
+  expect(all[0]).toEqual({ slot: 0, x: 100, y: 100 })
+  expect(all[1]?.x).toBe(105)
+  expect(Math.abs((all[1]?.y ?? 0) - 102)).toBe(30)
+})
+
+test('placeAll draws an overlap rather than losing a label when nothing is free', () => {
+  // Eleven candidates on one point: one cell plus every nudge the search knows.
+  const pile = Array.from({ length: 12 }, (_, i) => ({
+    slot: i,
+    x: 400,
+    y: 400,
+    weight: 100 - i,
+  }))
+  expect(chooseLabels(pile, true)).toHaveLength(12)
+})
+
+test('the placement is a function of the input, not of its order', () => {
+  const spread = [
+    { slot: 4, x: 100, y: 100, weight: 3 },
+    { slot: 7, x: 108, y: 104, weight: 3 },
+    { slot: 2, x: 640, y: 400, weight: 9 },
+  ]
+  const forward = chooseLabels(spread, true)
+  const reversed = chooseLabels([...spread].reverse(), true)
+  expect(forward).toEqual(reversed)
+})

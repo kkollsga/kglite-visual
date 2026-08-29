@@ -36,6 +36,70 @@ const CATEGORY_COLORS: Rgba[] = [
 /** Anything the chosen property does not cover. */
 export const UNSET_COLOR: Rgba = [0.42, 0.47, 0.55, 0.75]
 
+/**
+ * Radius range for a meta-graph type node, in graph units before zoom.
+ *
+ * The floor is the smallest circle that still reads as a disc rather than a
+ * speck and still has room for the hover ring the interaction layer draws
+ * around it. The ceiling is set by the label chips: a label sits *below* its
+ * circle, so a radius much past this puts the biggest type's name a third of
+ * the way down the screen from the thing it names, and its circle covers its
+ * neighbours' labels.
+ */
+const TYPE_MIN_PX = 6
+const TYPE_MAX_PX = 36
+
+/**
+ * Scale applied to a supporting type's radius.
+ *
+ * Not a separate ramp — the same ramp, one step quieter — so a large
+ * supporting type still reads as larger than a small one. On the graph that
+ * motivated this, 63 of 98 types are supporting, and drawing all 98 at equal
+ * weight is most of why the entry screen read as a cloud of dots.
+ */
+const SUPPORTING_SCALE = 0.6
+
+/**
+ * Radius for a type node with `count` members, on a graph whose largest type
+ * has `max`.
+ *
+ * **Log, not a root.** Type populations are log-uniform in practice — on the
+ * graph this was tuned against the deciles run 3, 23, 118, 1 051, 4 249,
+ * 11 000, 102 420 — so a log ramp spreads them evenly across the pixel range
+ * and every decile is a visibly different size. The fourth-root ramp this
+ * replaces put the bottom three quartiles of that graph inside 10–16 px of a
+ * 8–34 px range: the small types were not merely small, they were
+ * indistinguishable from each other, which is the "lot of dots" the entry
+ * screen was reported as. Linear is worse again: at a 34 000× spread it puts
+ * 97 of 98 types on the floor.
+ */
+export function typeRadius(count: number, max: number, supporting: boolean): number {
+  const ceiling = Math.max(max, 1)
+  const ramp = Math.log1p(Math.max(count, 0)) / Math.log1p(ceiling)
+  const radius = TYPE_MIN_PX + (TYPE_MAX_PX - TYPE_MIN_PX) * Math.min(ramp, 1)
+  return supporting ? radius * SUPPORTING_SCALE : radius
+}
+
+/** Width range for a meta-graph link, in the same units. */
+const LINK_MIN_PX = 0.5
+const LINK_MAX_PX = 5
+
+/**
+ * Width for a meta-graph link carrying `count` edges.
+ *
+ * Same argument as {@link typeRadius}, over the same spread: the relationship
+ * counts on the tuning graph run from 1 to 102 420. A count of 0 means the
+ * server had no number to give — which after the load-time connectivity repair
+ * only happens for an edge whose endpoint type does not resolve — and gets the
+ * floor rather than a fabricated width.
+ */
+export function linkWidth(count: number, max: number): number {
+  if (count <= 0) return LINK_MIN_PX
+  const ceiling = Math.max(max, 1)
+  const ramp = Math.log1p(count) / Math.log1p(ceiling)
+  return LINK_MIN_PX + (LINK_MAX_PX - LINK_MIN_PX) * Math.min(ramp, 1)
+}
+
 /** A search or query hit. Overrides whatever the colour-by chose. */
 export const HIGHLIGHT_COLOR: Rgba = [1.0, 0.86, 0.2, 1.0]
 

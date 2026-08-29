@@ -56,6 +56,18 @@
   font-weight: 600;
 }
 
+/* A supporting type's name, matching its circle: still readable, visibly
+   secondary, so the core types carry the picture. */
+.kglv-label-dim {
+  background: rgb(13 17 23 / 55%);
+  border-color: rgb(139 148 158 / 18%);
+  color: #8b949e;
+}
+
+.kglv-label-dim .kglv-label-name {
+  font-weight: 500;
+}
+
 .kglv-label-count {
   color: #8b949e;
   font-variant-numeric: tabular-nums;

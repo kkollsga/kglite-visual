@@ -18,6 +18,8 @@ import {
   compileCategoricalColor,
   compileNumericSize,
   fillColors,
+  linkWidth,
+  typeRadius,
   UNSET_COLOR,
   type Rgba,
 } from './appearance'
@@ -347,6 +349,7 @@ function appearance(): Appearance {
   const slots = view.slotCount
   const sizes = new Float32Array(slots)
   const sizeOf = compileNumericSize([...sizeValues.values()])
+  const largestType = maxTypeCount()
   for (let slot = 0; slot < slots; slot += 1) {
     const label = view.label(slot)
     if (label === undefined) {
@@ -356,10 +359,7 @@ function appearance(): Appearance {
     if (sizeByName !== null && sizeValues.has(slot)) {
       sizes[slot] = sizeOf(sizeValues.get(slot))
     } else if (label.isType) {
-      // Fourth root, not linear or square-root: a meta-graph routinely spans
-      // four orders of magnitude between its largest and smallest type, and
-      // both of the usual scales make the small ones invisible at that spread.
-      sizes[slot] = 8 + 26 * Math.pow(label.weight, 0.25) / Math.pow(maxTypeCount(), 0.25)
+      sizes[slot] = typeRadius(label.weight, largestType, label.supporting)
     } else {
       sizes[slot] = 6
     }
@@ -373,17 +373,46 @@ function appearance(): Appearance {
     highlighted,
   )
 
+  return { colors, sizes, linkWidths: linkWidths() }
+}
+
+/**
+ * One width per link, from the edge count the meta-graph carried.
+ *
+ * A link between two type nodes is a summary of hundreds of thousands of real
+ * edges, and drawing every one of them at the same 1 px says the schema is
+ * uniform when it is not. Links that are not meta links — anything an
+ * expansion or a query added — get the floor: they are single edges, and there
+ * is no count to encode.
+ */
+function linkWidths(): Float32Array {
   const widths = new Float32Array(view.linkCount)
-  widths.fill(1)
-  return { colors, sizes, linkWidths: widths }
+  let heaviest = 1
+  const counts = new Float32Array(view.linkCount)
+  for (let link = 0; link < view.linkCount; link += 1) {
+    const source = view.links[link * 2]
+    const target = view.links[link * 2 + 1]
+    if (source === undefined || target === undefined) continue
+    const count = view.typeLinkWeight(source, target)
+    counts[link] = count
+    heaviest = Math.max(heaviest, count)
+  }
+  for (let link = 0; link < widths.length; link += 1) {
+    widths[link] = linkWidth(counts[link] ?? 0, heaviest)
+  }
+  return widths
 }
 
 /**
  * A slot's colour before highlighting.
  *
- * With no colour-by chosen, the one bit a type node carries is whether it
- * declares any capability, and an instance node is drawn in its own muted hue
- * so the meta-graph stays legible under an expansion.
+ * With no colour-by chosen, the two bits a type node carries are whether it
+ * declares any capability and whether it is a *supporting* type — a type with
+ * a parent in kglite's `is_a` forest, which is the server's own answer to
+ * "which of these types is the graph actually about". A supporting type keeps
+ * its hue and loses most of its opacity, so the core types it hangs off carry
+ * the picture. An instance node is drawn in its own muted hue so the
+ * meta-graph stays legible under an expansion.
  */
 function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rgba {
   const label = view.label(slot)
@@ -392,7 +421,10 @@ function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rg
   if (!label.isType) return [0.55, 0.70, 0.90, 0.85]
   const plain = label.badges.length === 0
   // cosmos.gl takes 0..1 channels, not 0..255.
-  return plain ? [0.35, 0.65, 0.98, 0.92] : [0.98, 0.75, 0.32, 0.92]
+  const [r, g, b, a]: Rgba = plain
+    ? [0.35, 0.65, 0.98, 0.92]
+    : [0.98, 0.75, 0.32, 0.92]
+  return label.supporting ? [r, g, b, a * 0.45] : [r, g, b, a]
 }
 
 function maxTypeCount(): number {
@@ -479,19 +511,63 @@ function refreshLabelSpecs(): void {
         text: label?.text ?? '',
         badges: label?.badges ?? [],
         weight: label?.weight ?? 0,
+        dimmed: label?.supporting === true,
       }
     }),
   )
 }
 
+/**
+ * True while the view is nothing but the type-level meta-graph.
+ *
+ * The meta-graph is a picture *of its labels* — a hundred type names is the
+ * schema, and a hundred unlabelled dots is the "cloud" this screen was
+ * reported as. So on this view every candidate is offered (the renderer's own
+ * point sampler exists to thin a million instance nodes and drops type nodes
+ * that must all be named) and none is dropped for want of a cell. The moment
+ * an expansion adds instance nodes the view stops being that, and both
+ * thinnings come back.
+ */
+function isMetaGraphOnly(): boolean {
+  return view.liveSlots().every((slot) => view.label(slot)?.isType === true)
+}
+
 /** Re-place the already-built candidates against the current camera. */
 function positionLabels(current: Surface): void {
   const graph = current.graph
-  labels.update({
-    sampledPoints: () => graph.getSampledPoints(),
-    toScreen: (position: [number, number]) => graph.spaceToScreenPosition(position),
-    radius: (index: number) => graph.getPointRadiusByIndex(index) ?? 0,
-  })
+  const wholeSchema = isMetaGraphOnly()
+  labels.update(
+    {
+      sampledPoints: () => (wholeSchema ? everyPoint(current) : graph.getSampledPoints()),
+      toScreen: (position: [number, number]) => graph.spaceToScreenPosition(position),
+      radius: (index: number) => graph.getPointRadiusByIndex(index) ?? 0,
+    },
+    wholeSchema,
+  )
+}
+
+/**
+ * Every live point, in the shape `getSampledPoints()` returns.
+ *
+ * O(slots) and therefore only ever called on the meta-graph, where the slot
+ * count is the type count. Positions come from the renderer rather than from
+ * the view because in force mode the two disagree by design: the view holds
+ * the server's seed, and the simulation holds where the point actually is.
+ */
+function everyPoint(current: Surface): { indices: number[]; positions: number[] } {
+  const live = current.graph.getPointPositions()
+  const indices: number[] = []
+  const positions: number[] = []
+  for (const slot of view.liveSlots()) {
+    const x = live[slot * 2]
+    const y = live[slot * 2 + 1]
+    if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) {
+      continue
+    }
+    indices.push(slot)
+    positions.push(x, y)
+  }
+  return { indices, positions }
 }
 
 function syncCounts(): void {

@@ -49,6 +49,25 @@ here. The first release promotes this block whole.
   source on a platform with no matching wheel needs a Rust toolchain — and
   deliberately not Node, npm or a network round trip to a JavaScript registry.
 
+### Changed
+
+- **The entry screen lays itself out.** The meta-graph used to be drawn on a
+  fixed lattice, which on a real graph is a field of evenly spaced dots that
+  says nothing about which types connect to which. The server's positions are
+  now a starting point and a force layout takes over from there, so connected
+  types settle next to each other and the schema is visible as a shape. Nodes
+  can be dragged. `?deterministic=1` on the viewer URL restores the fixed
+  layout, which is what the test suites use.
+- **The meta-graph is drawn in proportion.** Type circles are sized on a log
+  scale by member count, so a type with three members and one with a hundred
+  thousand are both visible and clearly different; links are drawn in
+  proportion to the edges they stand for; and a *supporting* type — one that
+  hangs off another in the graph's own type hierarchy — is drawn quieter than
+  the types the graph is about. Every type is now labelled, rather than only
+  those that won their patch of screen.
+- **The graph no longer draws underneath the side panels**, where it could not
+  be seen, clicked or labelled.
+
 ### Fixed
 
 - **Relationship counts on a `.kgl` saved without a cardinality cache.** Such a

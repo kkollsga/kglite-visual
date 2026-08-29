@@ -15,7 +15,9 @@ import {
   compileNumericSize,
   fillColors,
   HIGHLIGHT_COLOR,
+  linkWidth,
   statLabel,
+  typeRadius,
   UNSET_COLOR,
 } from '../../src/appearance'
 import type { PropertyStat } from '../../src/generated/PropertyStat'
@@ -156,4 +158,32 @@ test('one colour fill covers every slot, with highlights winning', () => {
   for (const [channel, expected] of UNSET_COLOR.entries()) {
     expect(colors[channel]).toBeCloseTo(expected, 6)
   }
+})
+
+test('the type size ramp keeps a 3-member type and a 102k one both visible and apart', () => {
+  // The real spread from the graph this was tuned against.
+  const smallest = typeRadius(3, 102_420, false)
+  const median = typeRadius(1_051, 102_420, false)
+  const largest = typeRadius(102_420, 102_420, false)
+  expect(smallest).toBeGreaterThanOrEqual(6)
+  expect(largest).toBeCloseTo(36, 5)
+  // The failure this replaces: the fourth-root ramp put the median type at
+  // 16.3px in an 8-34px range, i.e. in the bottom third with everything else.
+  // A log ramp has to put it near the middle or it has not fixed anything.
+  expect(median).toBeGreaterThan((smallest + largest) / 2 - 5)
+  expect(median - smallest).toBeGreaterThan(10)
+  expect(largest - median).toBeGreaterThan(10)
+})
+
+test('a supporting type is drawn smaller than a core type of the same size', () => {
+  expect(typeRadius(1_051, 102_420, true)).toBeLessThan(typeRadius(1_051, 102_420, false))
+  // Still ranked among themselves: quieter, not flattened.
+  expect(typeRadius(102_420, 102_420, true)).toBeGreaterThan(typeRadius(3, 102_420, true))
+})
+
+test('a link with no count gets the floor rather than a fabricated width', () => {
+  expect(linkWidth(0, 102_420)).toBe(0.5)
+  expect(linkWidth(1, 102_420)).toBeGreaterThan(0.5)
+  expect(linkWidth(102_420, 102_420)).toBeCloseTo(5, 5)
+  expect(linkWidth(1_760, 102_420)).toBeGreaterThan(linkWidth(1, 102_420))
 })

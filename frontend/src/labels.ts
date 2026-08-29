@@ -23,6 +23,8 @@ export type LabelSpec = {
   badges: string[]
   /** Bigger wins a screen cell. Node count, in practice. */
   weight: number
+  /** A supporting type's name is drawn quieter, matching its circle. */
+  dimmed?: boolean
 }
 
 /** What the overlay needs from the renderer, so it can be tested without one. */
@@ -40,32 +42,81 @@ const CELL_HEIGHT = 30
 type Placed = { slot: number; x: number; y: number }
 
 /**
- * Choose at most one label per screen cell.
+ * Cells a displaced label will try, in order, before it gives up and overlaps.
+ *
+ * Vertical first and only ±2 rows out, because a label has to stay recognisably
+ * attached to the circle it names: 30 px down is still "that one", 260 px
+ * across is a different node's name sitting next to it. Fixed order, so the
+ * choice is a function of the input and nothing else.
+ */
+const NUDGES: readonly [number, number][] = [
+  [0, -1],
+  [0, 1],
+  [0, -2],
+  [0, 2],
+  [-1, 0],
+  [1, 0],
+  [-1, -1],
+  [1, -1],
+  [-1, 1],
+  [1, 1],
+]
+
+/**
+ * Place labels, at most one per screen cell.
  *
  * Exported for its own test: the tie-break is the part that silently degrades
  * into flicker, and a flicker is not something a screenshot assert can catch.
+ *
+ * `placeAll` is the meta-graph's mode, and the meta-graph IS its labels — a
+ * type node with no name on it is a dot, which is precisely the entry screen a
+ * user reported as useless. So there, a label that loses its cell is *nudged*
+ * into a free neighbour rather than dropped, and if nothing near it is free it
+ * is drawn overlapping: a hundred type names crowding each other is a legible
+ * schema, and ninety-eight dots with sixty names is not. An instance slice
+ * keeps dropping, because at the 5 000-node response bound "every label" is
+ * not a picture at any density.
  */
 export function chooseLabels(
   candidates: { slot: number; x: number; y: number; weight: number }[],
+  placeAll = false,
 ): Placed[] {
-  const winners = new Map<string, { slot: number; x: number; y: number; weight: number }>()
-  for (const candidate of candidates) {
-    const cell = `${Math.floor(candidate.x / CELL_WIDTH)}:${Math.floor(candidate.y / CELL_HEIGHT)}`
-    const held = winners.get(cell)
-    if (
-      held === undefined ||
-      candidate.weight > held.weight ||
-      // Equal weight: the lower slot wins, always. Anything derived from
-      // iteration order would reshuffle whenever the sampler's output order
-      // changed, which it does on every zoom.
-      (candidate.weight === held.weight && candidate.slot < held.slot)
-    ) {
-      winners.set(cell, candidate)
+  // Sorted rather than compared in place: the winner of a cell must not depend
+  // on the sampler's output order, which changes on every zoom. Heaviest
+  // first, and an exact tie goes to the lower slot — the one identifier that
+  // is stable across zooms, expansions and reconnects.
+  const ordered = [...candidates].sort(
+    (a, b) => b.weight - a.weight || a.slot - b.slot,
+  )
+  const taken = new Set<string>()
+  const placed: Placed[] = []
+  for (const candidate of ordered) {
+    const column = Math.floor(candidate.x / CELL_WIDTH)
+    const row = Math.floor(candidate.y / CELL_HEIGHT)
+    if (!taken.has(`${column}:${row}`)) {
+      taken.add(`${column}:${row}`)
+      placed.push({ slot: candidate.slot, x: candidate.x, y: candidate.y })
+      continue
     }
+    if (!placeAll) continue
+    const nudge = NUDGES.find(
+      ([dx, dy]) => !taken.has(`${column + dx}:${row + dy}`),
+    )
+    if (nudge === undefined) {
+      // Every neighbour is spoken for. Drawing it anyway is the deliberate
+      // choice: an unnamed type node carries no information at all.
+      placed.push({ slot: candidate.slot, x: candidate.x, y: candidate.y })
+      continue
+    }
+    const [dx, dy] = nudge
+    taken.add(`${column + dx}:${row + dy}`)
+    placed.push({
+      slot: candidate.slot,
+      x: candidate.x + dx * CELL_WIDTH,
+      y: candidate.y + dy * CELL_HEIGHT,
+    })
   }
-  return [...winners.values()]
-    .map(({ slot, x, y }) => ({ slot, x, y }))
-    .sort((a, b) => a.slot - b.slot)
+  return placed.sort((a, b) => a.slot - b.slot)
 }
 
 /**
@@ -119,7 +170,7 @@ export class LabelOverlay {
    * The sampled-points pass, and the only one a camera event runs: it touches
    * what the renderer says is on screen, not what the view holds.
    */
-  update(source: ScreenSource): void {
+  update(source: ScreenSource, placeAll = false): void {
     const sampled = source.sampledPoints()
     const candidates: { slot: number; x: number; y: number; weight: number }[] = []
     for (let i = 0; i < sampled.indices.length; i += 1) {
@@ -135,7 +186,7 @@ export class LabelOverlay {
       candidates.push({ slot, x, y: y + source.radius(slot) + 4, weight: spec.weight })
     }
 
-    const placed = chooseLabels(candidates)
+    const placed = chooseLabels(candidates, placeAll)
     const live = new Set(placed.map((p) => p.slot))
     for (const [slot, element] of this.elements) {
       if (!live.has(slot)) {
@@ -163,7 +214,7 @@ export class LabelOverlay {
 
   private render(spec: LabelSpec): HTMLDivElement {
     const element = document.createElement('div')
-    element.className = 'kglv-label'
+    element.className = spec.dimmed === true ? 'kglv-label kglv-label-dim' : 'kglv-label'
     element.dataset['slot'] = String(spec.slot)
 
     const name = document.createElement('span')

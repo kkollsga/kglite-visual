@@ -30,10 +30,24 @@ export type SlotLabel = {
   weight: number
   /** True for a meta-graph type node. */
   isType: boolean
+  /**
+   * True when this type has a parent in kglite's `is_a` forest.
+   *
+   * Carried through to the appearance because it is the one classification the
+   * server already makes about *importance*: a graph with 98 types where 63 are
+   * supporting is really a graph of 35, and drawing all 98 at equal weight is
+   * why the entry screen reads as a cloud.
+   */
+  supporting: boolean
   /** kglite node id, for an instance node. */
   nodeId: number | null
   /** Node type, for an instance node. */
   nodeType: string | null
+}
+
+/** Undirected key for a slot pair. */
+function pairKey(a: number, b: number): string {
+  return a <= b ? `${a},${b}` : `${b},${a}`
 }
 
 export class SlotView {
@@ -45,6 +59,16 @@ export class SlotView {
   private readonly labels = new Map<number, SlotLabel>()
   private readonly slotOfNode = new Map<number, number>()
   private readonly tombstones = new Set<number>()
+  /**
+   * Edges between two type slots, summed over relationship names.
+   *
+   * Keyed by the slot pair rather than carried alongside `links`, because the
+   * link array is re-sent whole on every slice (D4) and a parallel weight array
+   * would have to be re-derived from it anyway. Two type nodes can be joined by
+   * several relationship types; the width channel is answering "how much
+   * traffic is there between these two", so they add.
+   */
+  private readonly typeLinkEdges = new Map<string, number>()
 
   /** Slots allocated, tombstones included. */
   get slotCount(): number {
@@ -77,6 +101,16 @@ export class SlotView {
     return this.slotOfNode.get(nodeId)
   }
 
+  /**
+   * Edges between two type slots, or 0 when the pair is not a meta-graph link.
+   *
+   * Order-insensitive: the meta-graph draws one line per pair and the width
+   * channel is about the pair, not about a direction the line cannot show.
+   */
+  typeLinkWeight(source: number, target: number): number {
+    return this.typeLinkEdges.get(pairKey(source, target)) ?? 0
+  }
+
   /** Seed from the meta-graph: the entry screen owns slots 0..n. */
   setMetaGraph(meta: MetaGraphMeta, points: Float32Array, links: Float32Array): void {
     this.positions = new Float32Array(points)
@@ -84,15 +118,21 @@ export class SlotView {
     this.labels.clear()
     this.slotOfNode.clear()
     this.tombstones.clear()
+    this.typeLinkEdges.clear()
     for (const node of meta.nodes) {
       this.labels.set(node.slot, {
         text: node.name,
         badges: node.capabilities,
         weight: node.count,
         isType: true,
+        supporting: node.supporting,
         nodeId: null,
         nodeType: node.name,
       })
+    }
+    for (const edge of meta.edges) {
+      const key = pairKey(edge.source_slot, edge.target_slot)
+      this.typeLinkEdges.set(key, (this.typeLinkEdges.get(key) ?? 0) + edge.count)
     }
   }
 
@@ -121,6 +161,7 @@ export class SlotView {
         badges: [],
         weight: 1,
         isType: false,
+        supporting: false,
         nodeId: node.node_id,
         nodeType: node.node_type,
       })
@@ -177,6 +218,21 @@ export class SlotView {
     this.slotOfNode.clear()
     for (const [nodeId, slot] of slotOfNode) this.slotOfNode.set(nodeId, slot)
     this.tombstones.clear()
+
+    // The type-link weights are keyed by slot, so they are as stale as any
+    // other slot-keyed map after a remap. A pair whose either end was
+    // reclaimed no longer names a link and is dropped, exactly as its labels
+    // were.
+    const weights = new Map<string, number>()
+    for (const [key, count] of this.typeLinkEdges) {
+      const [oldSource, oldTarget] = key.split(',').map(Number) as [number, number]
+      const source = oldToNew[oldSource]
+      const target = oldToNew[oldTarget]
+      if (source == null || target == null) continue
+      weights.set(pairKey(source, target), count)
+    }
+    this.typeLinkEdges.clear()
+    for (const [key, count] of weights) this.typeLinkEdges.set(key, count)
   }
 
   private splicePositions(firstSlot: number, points: Float32Array): void {
