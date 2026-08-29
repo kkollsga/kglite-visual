@@ -450,9 +450,9 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     })
 }
 
-/// Gap between a folded fan's parent and the wedge standing for its children,
-/// in pixels — long enough that the connector is a visible line and short
-/// enough that the two read as one object.
+/// Gap between a folded fan's outermost drawn sibling and the wedge standing for
+/// the children that were not drawn, in pixels — long enough that the connector
+/// is a visible line and short enough that the two read as one object.
 const WEDGE_TETHER_PX: f64 = 26.0;
 
 /// Move every folded fan next to the node it hangs off.
@@ -464,6 +464,16 @@ const WEDGE_TETHER_PX: f64 = 26.0;
 /// ordinary node, so it can settle a third of the frame away with its
 /// connector lost among four hundred other lines. Nothing about the fold is
 /// legible at that distance.
+///
+/// **And the tether clears the fan it hangs off** (P11 round 3). Round 2's reach
+/// was `parent radius + tether + glyph radius`, which is adjacent to the
+/// parent's *circle* — and a folded parent is, by construction, a hub with a
+/// ring of drawn siblings around it, so that put the wedge inside the ring,
+/// sitting on the very nodes it is standing beside. The reach is measured to the
+/// far edge of the parent's own drawn neighbourhood instead, so the wedge lands
+/// outside the fan and its connector crosses the ring as one visible line. A
+/// parent with no other drawn neighbour keeps the round-2 reach, because then
+/// there is no ring to clear.
 ///
 /// The direction is the one the layout chose (parent -> glyph, normalised); only
 /// the distance is overridden, so the wedge still opens into whatever space the
@@ -518,7 +528,29 @@ fn moor_folded_fans(scene: &Scene, positions: &mut layout::Positions, width: f64
                 (dx, dy, length) = (1.0, 0.0, 1.0);
             }
         }
-        let reach = scene.nodes[parent].radius + WEDGE_TETHER_PX + scene.nodes[index].radius;
+        // How far the parent's drawn fan reaches — the far edge of the furthest
+        // sibling's circle, never the parent's own.
+        let mut fan = scene.nodes[parent].radius;
+        for link in &scene.links {
+            let sibling = if link.source == parent {
+                link.target
+            } else if link.target == parent {
+                link.source
+            } else {
+                continue;
+            };
+            if sibling == index {
+                continue;
+            }
+            let (Some(&(sx, sy)), Some(node)) =
+                (positions.xy.get(sibling), scene.nodes.get(sibling))
+            else {
+                continue;
+            };
+            let (dx, dy) = (sx - px, sy - py);
+            fan = fan.max((dx * dx + dy * dy).sqrt() + node.radius);
+        }
+        let reach = fan + WEDGE_TETHER_PX + scene.nodes[index].radius;
         let radius = scene.nodes[index].radius;
         let x = (px + dx / length * reach).clamp(radius, (width - radius).max(radius));
         let y = (py + dy / length * reach).clamp(radius, (height - radius).max(radius));
@@ -1326,6 +1358,74 @@ mod tests {
             positions.label_side[1],
             layout::LabelSide::Right,
             "its count is drawn away from the parent's own name"
+        );
+    }
+
+    /// And it sits **outside** the fan, not inside it.
+    ///
+    /// The failure this fixes also has a picture: every folded parent is by
+    /// construction a hub with a ring of drawn siblings around it, so a reach
+    /// measured from the parent's own circle put the wedge in among the very
+    /// nodes it stands beside — three of them in the round-2 truncated discovery
+    /// render, each overlapping the ring it was moored inside.
+    #[test]
+    fn a_folded_fan_sits_outside_the_ring_it_hangs_off() {
+        let siblings = 8usize;
+        let mut nodes = vec![node("hub", 12.0, None)];
+        let mut links = Vec::new();
+        // A ring of siblings 180 px out, and the glyph the layout parked at 40.
+        let mut xy = vec![(500.0f64, 400.0f64)];
+        for i in 0..siblings {
+            nodes.push(node("leaf", 7.0, None));
+            links.push(SceneLink {
+                source: 0,
+                target: nodes.len() - 1,
+                width: 1.0,
+            });
+            let angle = std::f64::consts::TAU * i as f64 / siblings as f64;
+            xy.push((500.0 + 180.0 * angle.cos(), 400.0 + 180.0 * angle.sin()));
+        }
+        let glyph = nodes.len();
+        nodes.push(node("T x 33", 18.0, Some(33)));
+        links.push(SceneLink {
+            source: 0,
+            target: glyph,
+            width: 1.0,
+        });
+        xy.push((540.0, 400.0));
+
+        let scene = Scene {
+            nodes,
+            links,
+            status: Vec::new(),
+            banners: Vec::new(),
+            place_all_labels: false,
+            seeds: Vec::new(),
+        };
+        let count = scene.nodes.len();
+        let mut positions = layout::Positions {
+            xy,
+            label_side: vec![layout::LabelSide::Below; count],
+            islands: Vec::new(),
+        };
+        moor_folded_fans(&scene, &mut positions, 1400.0, 900.0);
+
+        let (gx, gy) = positions.xy[glyph];
+        for sibling in 1..glyph {
+            let (sx, sy) = positions.xy[sibling];
+            let gap = ((gx - sx).powi(2) + (gy - sy).powi(2)).sqrt()
+                - scene.nodes[glyph].radius
+                - scene.nodes[sibling].radius;
+            assert!(
+                gap > 0.0,
+                "the wedge overlaps drawn sibling {sibling} by {:.1} px",
+                -gap
+            );
+        }
+        let reach = ((gx - 500.0f64).powi(2) + (gy - 400.0f64).powi(2)).sqrt();
+        assert!(
+            reach > 180.0 + 7.0,
+            "the wedge must clear the ring's far edge, not sit at {reach:.1}"
         );
     }
 
