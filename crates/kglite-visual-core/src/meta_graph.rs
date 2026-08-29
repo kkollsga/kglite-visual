@@ -189,8 +189,10 @@ pub struct MetaGraphResponse {
 /// kglite's four per-type capability flags, recomputed here because
 /// `TypeCapabilities` is still `pub(super)` inside kglite's introspection
 /// module — re-checked against the 0.16.14 sources on 2026-08-29, whose
-/// fourteen new facade exports do not include it. This is the one upstream
-/// mirror in this crate that the 0.16.14 exports did not retire.
+/// fourteen new facade exports do not include it, and against the 0.16.15
+/// sources on 2026-08-30. This is the one upstream mirror in this crate that
+/// the facade's growth has not retired; delete it in the change that sees the
+/// type exported, not before.
 ///
 /// Every source below is a `DirGraph` field the engine already maintains —
 /// three config maps and the embedding store's keys — so the whole scan is
