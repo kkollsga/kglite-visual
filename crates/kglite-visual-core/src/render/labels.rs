@@ -7,6 +7,18 @@
 //! otherwise identical; here it is what makes the golden SVG a baseline rather
 //! than a sample.
 //!
+//! **Two deliberate divergences, both P11 round 2, both because an image has no
+//! camera.** [`budget`] caps how many labels are placed at all, and
+//! [`LabelSpec::degree`] orders the survivors. The app needs neither: a
+//! contested cell there is resolved by the user zooming, and the overlay runs
+//! over *sampled* points that change every frame, so a hard cap would make a
+//! name appear and vanish on a pan. Degree is also not a quantity the overlay
+//! holds — `View.links` is an array of point indices, not slots — so mirroring
+//! it would mean giving the browser a second edge index for a tie-break it
+//! never reaches. What still mirrors constant-for-constant is
+//! [`estimate_width`], which is the one that must agree or the two sides
+//! resolve collisions differently.
+//!
 //! The estimate-don't-measure rule ports too, and for a second reason. In the
 //! app, measuring means laying out every candidate on every camera event, which
 //! the overlay's whole design forbids. Here there is no camera and no DOM at
@@ -32,6 +44,15 @@ pub struct LabelSpec {
     pub badges: Vec<String>,
     /// Bigger wins a screen cell. Node count, in practice.
     pub weight: u64,
+    /// Links this node has in *this picture* — the tie-break under `weight`.
+    ///
+    /// **What decides "top N" on an instance slice** (P11 round 2). Every
+    /// instance node carries `weight: 1`, so before this the sort fell straight
+    /// through to the slot id and "the labels that fit" meant "the ones that
+    /// happened to arrive first". Degree is the picture's own answer to which
+    /// nodes a reader is trying to find: the hub a fan hangs off, not the
+    /// forty-third leaf on it.
+    pub degree: u32,
     /// Whether the count chip is drawn at all.
     ///
     /// **False for a plain instance node, whose count is always 1** (P11). The
@@ -88,6 +109,41 @@ pub fn estimate_width(spec: &LabelSpec) -> f64 {
     14.0 + spec.text.chars().count() as f64 * 6.9 + count + spec.badges.len() as f64 * 34.0
 }
 
+/// Cells one legible label needs, counting its neighbours.
+///
+/// A chip is ~1.6 cells wide at sodir's type names, and a row of chips with the
+/// rows above and below also full is a wall of text rather than a labelled
+/// graph. Three cells per label is the density at which the 1600x1000
+/// meta-graph render reads, measured on that image: it puts the budget at 116
+/// for 98 types (no thinning) and at 24 for the same graph at 800x500, where
+/// round 1 forced all 98 into about 96 cells and produced an image the
+/// coordinator called unusable.
+const CELLS_PER_LABEL: usize = 3;
+
+/// Rows held back for the status block.
+///
+/// A fixed allowance rather than the block's real height, and deliberately: the
+/// budget decides whether a "not every name is shown" line is added, that line
+/// changes the block's height, and a budget derived from the height would be
+/// deciding its own input. Four rows is the block at its tallest — path, tier,
+/// counts, fold line, banner — rounded up.
+const STATUS_ROWS: usize = 4;
+
+/// How many labels a `width` x `height` canvas can hold legibly.
+///
+/// **The failure this answers has a picture.** The meta-graph promises every
+/// type is named, and at 800x500 that meant 98 chips forced into roughly 96
+/// cells: names on top of names, nothing readable, and no way for a reader to
+/// tell which name belonged to which circle. A promise a canvas cannot keep is
+/// not honesty, it is noise — the honest version keeps the names a reader can
+/// use and *says* how many it dropped, which is what `super::render::draw`
+/// adds to the status block when this bites.
+pub fn budget(width: u32, height: u32) -> usize {
+    let columns = (f64::from(width) / CELL_WIDTH).floor().max(1.0) as usize;
+    let rows = (f64::from(height) / CELL_HEIGHT).floor().max(1.0) as usize;
+    (columns * rows.saturating_sub(STATUS_ROWS) / CELLS_PER_LABEL).max(1)
+}
+
 /// Cells a displaced label will try, in order, before it gives up and overlaps.
 ///
 /// Mirrors `NUDGES` in `frontend/src/labels.ts`. Vertical first and only ±2
@@ -136,22 +192,37 @@ fn claim(taken: &mut std::collections::HashSet<(i64, i64)>, from: i64, to: i64, 
 /// schema, and ninety-eight dots with sixty names is not. An instance slice
 /// keeps dropping, because at the 5 000-node response bound "every label" is
 /// not a picture at any density.
-pub fn choose(specs: &[LabelSpec], place_all: bool) -> Vec<PlacedLabel> {
+///
+/// `budget` caps how many labels may be placed at all, however much room the
+/// grid finds — see [`budget`]. A pinned label is never dropped by it: the
+/// aggregate glyph's count and the ego centre's name are the two labels a
+/// picture cannot be read without, and a cap that silenced them would be
+/// trading legibility for honesty rather than buying both.
+pub fn choose(specs: &[LabelSpec], place_all: bool, budget: usize) -> Vec<PlacedLabel> {
     // Sorted rather than compared in place: the winner of a cell must not
-    // depend on the caller's output order. Pinned first, then heaviest, and an
-    // exact tie goes to the lower slot — the one identifier that is stable
-    // across zooms, expansions and reconnects.
+    // depend on the caller's output order. Pinned first, then heaviest, then
+    // best connected, and an exact tie goes to the lower slot — the one
+    // identifier that is stable across zooms, expansions and reconnects.
+    //
+    // Degree sits under weight rather than beside it because the two answer
+    // different graphs: a type node's weight is its member count, and every
+    // instance node's is 1, so degree is what actually orders an instance
+    // slice and weight is what orders a meta-graph.
     let mut ordered: Vec<&LabelSpec> = specs.iter().collect();
     ordered.sort_by(|a, b| {
         b.pinned
             .cmp(&a.pinned)
             .then_with(|| b.weight.cmp(&a.weight))
+            .then_with(|| b.degree.cmp(&a.degree))
             .then_with(|| a.slot.cmp(&b.slot))
     });
 
     let mut taken: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
     let mut placed: Vec<PlacedLabel> = Vec::new();
     for spec in ordered {
+        if placed.len() >= budget && !spec.pinned {
+            break;
+        }
         let (from, to) = columns_for(spec.x, estimate_width(spec));
         let row = (spec.y / CELL_HEIGHT).floor() as i64;
         if is_free(&taken, from, to, row) {
@@ -206,6 +277,7 @@ mod tests {
             text: "T".to_string(),
             badges: Vec::new(),
             weight,
+            degree: 0,
             show_count: true,
             dimmed: false,
             pinned: false,
@@ -219,24 +291,40 @@ mod tests {
         // The tie-break `labels.ts` calls out by name. Without it, which of two
         // equally weighted labels survives a shared cell depends on input
         // order, and the golden SVG stops being a baseline.
-        let a = choose(&[spec(9, 100, 60.0, 15.0), spec(4, 100, 60.0, 15.0)], false);
+        let a = choose(
+            &[spec(9, 100, 60.0, 15.0), spec(4, 100, 60.0, 15.0)],
+            false,
+            usize::MAX,
+        );
         assert_eq!(a.len(), 1);
         assert_eq!(a[0].slot, 4);
 
-        let reversed = choose(&[spec(4, 100, 60.0, 15.0), spec(9, 100, 60.0, 15.0)], false);
+        let reversed = choose(
+            &[spec(4, 100, 60.0, 15.0), spec(9, 100, 60.0, 15.0)],
+            false,
+            usize::MAX,
+        );
         assert_eq!(reversed, a, "input order must not decide the winner");
     }
 
     #[test]
     fn the_heavier_label_wins_a_contested_cell() {
-        let placed = choose(&[spec(0, 5, 60.0, 15.0), spec(1, 5_000, 60.0, 15.0)], false);
+        let placed = choose(
+            &[spec(0, 5, 60.0, 15.0), spec(1, 5_000, 60.0, 15.0)],
+            false,
+            usize::MAX,
+        );
         assert_eq!(placed.len(), 1);
         assert_eq!(placed[0].slot, 1);
     }
 
     #[test]
     fn place_all_nudges_the_loser_instead_of_dropping_it() {
-        let placed = choose(&[spec(0, 5, 60.0, 15.0), spec(1, 5_000, 60.0, 15.0)], true);
+        let placed = choose(
+            &[spec(0, 5, 60.0, 15.0), spec(1, 5_000, 60.0, 15.0)],
+            true,
+            usize::MAX,
+        );
         assert_eq!(placed.len(), 2, "the meta-graph names every type");
         let loser = placed.iter().find(|p| p.slot == 0).expect("slot 0 placed");
         assert_eq!(
@@ -256,7 +344,11 @@ mod tests {
             ..spec(0, 1_000_000, 200.0, 15.0)
         };
         assert!(estimate_width(&wide) > 2.0 * CELL_WIDTH);
-        let placed = choose(&[wide, spec(1, 1, 200.0 + CELL_WIDTH, 15.0)], false);
+        let placed = choose(
+            &[wide, spec(1, 1, 200.0 + CELL_WIDTH, 15.0)],
+            false,
+            usize::MAX,
+        );
         assert_eq!(placed.len(), 1, "the neighbour's cell was already claimed");
         assert_eq!(placed[0].slot, 0);
     }
@@ -271,14 +363,69 @@ mod tests {
             pinned: true,
             ..spec(0, 1, 60.0, 15.0)
         };
-        let placed = choose(&[heavy.clone(), pinned], false);
+        let placed = choose(&[heavy.clone(), pinned], false, usize::MAX);
         assert_eq!(placed.len(), 1);
         assert_eq!(placed[0].slot, 0, "the pin outranks the weight");
         // …and without the pin the same pair resolves the other way, so the
         // assertion above is testing the pin and not the sort's tie-break.
-        let unpinned = choose(&[heavy, spec(0, 1, 60.0, 15.0)], false);
+        let unpinned = choose(&[heavy, spec(0, 1, 60.0, 15.0)], false, usize::MAX);
         assert_eq!(unpinned.len(), 1);
         assert_eq!(unpinned[0].slot, 1);
+    }
+
+    #[test]
+    fn a_canvas_gets_the_labels_it_can_hold_and_no_more() {
+        // The picture that bought it: 98 type names forced into a 800x500
+        // canvas with room for about 96 cells. Asserted against the two canvas
+        // sizes the portfolio uses, so a change to either constant shows up as
+        // a change to the sizes people actually render.
+        assert!(
+            budget(1_600, 1_000) >= 98,
+            "the chat-size canvas names all 98 sodir types: {}",
+            budget(1_600, 1_000)
+        );
+        assert!(
+            budget(800, 500) < 40,
+            "the thumbnail cannot, and must not pretend: {}",
+            budget(800, 500)
+        );
+        assert!(budget(200, 200) >= 1, "a tiny canvas still names something");
+    }
+
+    #[test]
+    fn the_budget_drops_the_lightest_and_never_a_pinned_label() {
+        // Ten candidates, well spread so the grid itself would place every one:
+        // whatever is missing was dropped by the budget and by nothing else.
+        let mut specs: Vec<LabelSpec> = (0..10)
+            .map(|i| spec(i, u64::from(i), f64::from(i) * 400.0, 15.0))
+            .collect();
+        specs[0].pinned = true;
+        let placed = choose(&specs, false, 3);
+        // A pin spends a cell like anything else — the budget is the canvas's
+        // capacity, and a label that ignored it would be drawn on top of one
+        // that did not.
+        assert_eq!(placed.len(), 3, "the budget is a capacity, not a quota");
+        let slots: Vec<u32> = placed.iter().map(|p| p.slot).collect();
+        assert!(slots.contains(&0), "a pinned label outlives the budget");
+        for heavy in [9, 8] {
+            assert!(slots.contains(&heavy), "the heaviest survive: {slots:?}");
+        }
+    }
+
+    #[test]
+    fn degree_orders_labels_that_weigh_the_same() {
+        // Every instance node weighs 1, so without this the survivors are
+        // whichever slots happened to come first.
+        let mut specs: Vec<LabelSpec> = (0..4)
+            .map(|i| spec(i, 1, f64::from(i) * 400.0, 15.0))
+            .collect();
+        specs[3].degree = 40;
+        let placed = choose(&specs, false, 1);
+        assert_eq!(placed.len(), 1);
+        assert_eq!(
+            placed[0].slot, 3,
+            "the hub is named, not the lowest slot number"
+        );
     }
 
     #[test]

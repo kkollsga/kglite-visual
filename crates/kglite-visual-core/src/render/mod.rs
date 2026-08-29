@@ -367,6 +367,25 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         ));
     }
 
+    // The meta-graph promises every type is named, and a small canvas cannot
+    // keep that promise: 98 chips into a canvas with room for 24 is not
+    // honesty, it is noise, and no reader can tell which name belongs to which
+    // circle. The names a reader can use are kept, and the picture says how
+    // many it dropped — the same obligation D5 puts on a clipped result,
+    // applied to a clipped drawing.
+    //
+    // Only on the `place_all` path, because only there is the budget the whole
+    // story: an instance slice's grid also drops for collisions, so a count
+    // derived from the budget alone would be a number the picture contradicts.
+    let label_budget = labels::budget(width, height);
+    if scene.place_all_labels && scene.nodes.len() > label_budget {
+        scene.status.push(format!(
+            "{} of {} names shown",
+            encoding::group_thousands(label_budget as u64),
+            encoding::group_thousands(scene.nodes.len() as u64)
+        ));
+    }
+
     let links: Vec<(usize, usize)> = scene.links.iter().map(|l| (l.source, l.target)).collect();
     let plan = structure::plan(scene.nodes.len(), &links, &scene.seeds);
     // Before the layout nodes are built, because emphasis changes a radius and

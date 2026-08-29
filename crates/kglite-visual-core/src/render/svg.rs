@@ -460,6 +460,14 @@ fn emit_labels(
     width: u32,
     height: u32,
 ) {
+    let mut degree = vec![0u32; scene.nodes.len()];
+    for link in &scene.links {
+        for end in [link.source, link.target] {
+            if let Some(slot) = degree.get_mut(end) {
+                *slot += 1;
+            }
+        }
+    }
     let specs: Vec<LabelSpec> = scene
         .nodes
         .iter()
@@ -471,6 +479,7 @@ fn emit_labels(
                 text: node.text.clone(),
                 badges: node.badges.clone(),
                 weight: node.weight,
+                degree: degree.get(i).copied().unwrap_or(0),
                 show_count: node.show_count,
                 dimmed: node.dimmed,
                 // An aggregate's label is the only thing on the picture saying
@@ -506,7 +515,11 @@ fn emit_labels(
     // sampler — nothing is off screen and nothing is thinned by a GPU pass — so
     // the collision grid is the only thinning, which is the behaviour the app
     // has on the view that matters most and a denser one on an instance slice.
-    let placed = labels::choose(&specs, scene.place_all_labels);
+    let placed = labels::choose(
+        &specs,
+        scene.place_all_labels,
+        labels::budget(width, height),
+    );
     if placed.is_empty() {
         return;
     }

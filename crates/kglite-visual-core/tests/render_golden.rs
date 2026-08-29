@@ -369,6 +369,36 @@ fn a_dense_render_draws_quieter_lines_than_a_sparse_one() {
     );
 }
 
+/// A canvas too small to name every type says how many names it dropped.
+///
+/// The meta-graph's standing promise is that every type is named, and at
+/// 800x500 keeping it meant 98 chips in a canvas with room for about 24 — names
+/// on top of names, and no way to tell which belonged to which circle. Dropping
+/// the ones that will not fit is right; dropping them silently would make the
+/// picture claim the graph has fewer types than it does, which is the same
+/// failure D5 names for a clipped result.
+#[test]
+fn a_canvas_that_cannot_name_every_type_says_so_in_the_image() {
+    let small = render_to_string(&RenderRequest {
+        width: 300,
+        height: 250,
+        ..meta_request(Theme::Dark)
+    });
+    assert!(
+        small.contains("of 5 names shown"),
+        "a thinned meta-graph has to say so: {}",
+        small
+            .lines()
+            .filter(|line| line.starts_with("<text"))
+            .take(6)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    // …and the full-size render says nothing, because it dropped nothing. A
+    // status line that appeared unconditionally would be noise nobody reads.
+    assert!(!render_to_string(&meta_request(Theme::Dark)).contains("names shown"));
+}
+
 /// A render request that cannot produce a picture fails with a message naming
 /// what to do about it, rather than emitting an empty canvas.
 #[test]
