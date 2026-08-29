@@ -367,25 +367,6 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         ));
     }
 
-    // The meta-graph promises every type is named, and a small canvas cannot
-    // keep that promise: 98 chips into a canvas with room for 24 is not
-    // honesty, it is noise, and no reader can tell which name belongs to which
-    // circle. The names a reader can use are kept, and the picture says how
-    // many it dropped — the same obligation D5 puts on a clipped result,
-    // applied to a clipped drawing.
-    //
-    // Only on the `place_all` path, because only there is the budget the whole
-    // story: an instance slice's grid also drops for collisions, so a count
-    // derived from the budget alone would be a number the picture contradicts.
-    let label_budget = labels::budget(width, height);
-    if scene.place_all_labels && scene.nodes.len() > label_budget {
-        scene.status.push(format!(
-            "{} of {} names shown",
-            encoding::group_thousands(label_budget as u64),
-            encoding::group_thousands(scene.nodes.len() as u64)
-        ));
-    }
-
     let links: Vec<(usize, usize)> = scene.links.iter().map(|l| (l.source, l.target)).collect();
     let plan = structure::plan(scene.nodes.len(), &links, &scene.seeds);
     // Before the layout nodes are built, because emphasis changes a radius and
@@ -399,10 +380,20 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         .collect();
     // The layout is told about the status block so nothing is laid out
     // underneath it; the emitter owns that rectangle's geometry.
+    //
+    // **One row is reserved for a line that has not been written yet**, on the
+    // `place_all` path. How many names the grid seats is only known after the
+    // layout has run, and the picture owes the reader that number — but a
+    // status line added afterwards would grow the block over nodes already
+    // placed under it. Reserving the row unconditionally breaks the loop: the
+    // line's presence cannot move the picture it describes, and a render that
+    // ends up naming everything simply leaves one row of margin.
     let canvas = layout::Canvas {
         width: f64::from(width),
         height: f64::from(height),
-        reserved_top: svg::status_block_height(scene.status.len() + scene.banners.len()),
+        reserved_top: svg::status_block_height(
+            scene.status.len() + scene.banners.len() + usize::from(scene.place_all_labels),
+        ),
     };
     let groups = arc_groups(&scene);
     let started = std::time::Instant::now();
@@ -430,7 +421,20 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     // the promise is about the picture. See `layout::separate`.
     layout::separate(&mut positions.xy, &nodes, canvas);
 
-    let document = svg::emit(&scene, &positions, width, height, request.theme);
+    // The grid thins — for the canvas's capacity, and inside a contested region
+    // — so the count of names actually drawn is the only honest one to print.
+    // Deriving it from the budget alone (which is what round 2 did) reports a
+    // number the picture contradicts the moment a region thins.
+    let placed = svg::place_labels(&scene, &positions, width, height);
+    if scene.place_all_labels && placed.len() < scene.nodes.len() {
+        scene.status.push(format!(
+            "{} of {} names shown",
+            encoding::group_thousands(placed.len() as u64),
+            encoding::group_thousands(scene.nodes.len() as u64)
+        ));
+    }
+
+    let document = svg::emit(&scene, &positions, width, height, request.theme, &placed);
     let bytes = match request.format {
         RenderFormat::Svg => document.into_bytes(),
         RenderFormat::Png => raster::to_png(&document, width, height)?,

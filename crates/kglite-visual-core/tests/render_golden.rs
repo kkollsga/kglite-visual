@@ -397,6 +397,43 @@ fn a_canvas_that_cannot_name_every_type_says_so_in_the_image() {
     // …and the full-size render says nothing, because it dropped nothing. A
     // status line that appeared unconditionally would be noise nobody reads.
     assert!(!render_to_string(&meta_request(Theme::Dark)).contains("names shown"));
+
+    // The number is the count of chips actually on the picture. Round 2 printed
+    // the canvas's *capacity*, and once the grid also thins a contested region
+    // the two stop agreeing: the picture would then contradict its own status
+    // block, which is the failure this line exists to prevent.
+    for (width, height) in [(300, 250), (400, 250)] {
+        let svg = render_to_string(&RenderRequest {
+            width,
+            height,
+            ..meta_request(Theme::Dark)
+        });
+        let shown = names_shown(&svg).expect("a thinned render says how many names it shows");
+        assert_eq!(
+            shown,
+            chip_count(&svg),
+            "{width}x{height}: the status line must count the chips the emitter drew"
+        );
+    }
+}
+
+/// Label chips in an emitted document — the `rx="5"` rounded rect the label
+/// group draws, which no other element in the picture uses.
+fn chip_count(svg: &str) -> usize {
+    svg.lines()
+        .filter(|line| line.starts_with("<rect") && line.contains("rx=\"5\""))
+        .count()
+}
+
+/// The `N` of `N of M names shown`, if the picture drew that line.
+fn names_shown(svg: &str) -> Option<usize> {
+    let line = svg.lines().find(|line| line.contains(" names shown"))?;
+    let text = line.rsplit_once('>')?.0.rsplit_once('>')?.1;
+    text.split_whitespace()
+        .next()?
+        .replace(',', "")
+        .parse()
+        .ok()
 }
 
 /// A render request that cannot produce a picture fails with a message naming

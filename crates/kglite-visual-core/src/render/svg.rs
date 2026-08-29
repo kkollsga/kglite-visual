@@ -97,6 +97,7 @@ pub(crate) fn emit(
     width: u32,
     height: u32,
     theme: Theme,
+    placed: &[labels::PlacedLabel],
 ) -> String {
     let palette = theme.palette();
     let mut out = String::with_capacity(4_096 + scene.nodes.len() * 256);
@@ -119,7 +120,7 @@ pub(crate) fn emit(
     emit_islands(&mut out, scene, positions, &palette);
     emit_links(&mut out, scene, positions, &palette);
     emit_nodes(&mut out, scene, positions);
-    emit_labels(&mut out, scene, positions, &palette, width, height);
+    emit_labels(&mut out, scene, positions, &palette, width, height, placed);
     emit_status(&mut out, scene, &palette);
 
     out.push_str("</svg>\n");
@@ -452,14 +453,12 @@ fn emit_wedge(
     ));
 }
 
-fn emit_labels(
-    out: &mut String,
-    scene: &Scene,
-    positions: &Positions,
-    palette: &Palette,
-    width: u32,
-    height: u32,
-) {
+/// Every label the picture could carry, at the coordinates it would take.
+///
+/// Split out of the emitter so `super::draw` can run the collision grid over it
+/// *before* the document is written: the grid thins, and the status block has to
+/// say how many names it thinned. See [`place_labels`].
+pub(crate) fn label_specs(scene: &Scene, positions: &Positions) -> Vec<LabelSpec> {
     let mut degree = vec![0u32; scene.nodes.len()];
     for link in &scene.links {
         for end in [link.source, link.target] {
@@ -468,7 +467,7 @@ fn emit_labels(
             }
         }
     }
-    let specs: Vec<LabelSpec> = scene
+    scene
         .nodes
         .iter()
         .enumerate()
@@ -515,26 +514,47 @@ fn emit_labels(
             }
             Some(spec)
         })
-        .collect();
-    // The app offers only what cosmos.gl's point sampler returned (except on
-    // the meta-graph, where `everyPoint` bypasses it). Here there is no
-    // sampler — nothing is off screen and nothing is thinned by a GPU pass — so
-    // the collision grid is the only thinning, which is the behaviour the app
-    // has on the view that matters most and a denser one on an instance slice.
-    let placed = labels::choose(
-        &specs,
+        .collect()
+}
+
+/// Which labels the collision grid seats, given the canvas.
+///
+/// The app offers only what cosmos.gl's point sampler returned (except on the
+/// meta-graph, where `everyPoint` bypasses it). Here there is no sampler —
+/// nothing is off screen and nothing is thinned by a GPU pass — so the
+/// collision grid is the only thinning, which is the behaviour the app has on
+/// the view that matters most and a denser one on an instance slice.
+pub(crate) fn place_labels(
+    scene: &Scene,
+    positions: &Positions,
+    width: u32,
+    height: u32,
+) -> Vec<labels::PlacedLabel> {
+    labels::choose(
+        &label_specs(scene, positions),
         scene.place_all_labels,
         labels::budget(width, height),
-    );
+    )
+}
+
+fn emit_labels(
+    out: &mut String,
+    scene: &Scene,
+    positions: &Positions,
+    palette: &Palette,
+    width: u32,
+    height: u32,
+    placed: &[labels::PlacedLabel],
+) {
     if placed.is_empty() {
         return;
     }
-
+    let specs = label_specs(scene, positions);
     let by_slot: std::collections::HashMap<u32, &LabelSpec> =
         specs.iter().map(|s| (s.slot, s)).collect();
 
     out.push_str(&format!("<g font-size=\"{}\">\n", num(LABEL_FONT_PX)));
-    for label in &placed {
+    for label in placed {
         let Some(spec) = by_slot.get(&label.slot) else {
             continue;
         };

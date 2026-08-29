@@ -7,17 +7,19 @@
 //! otherwise identical; here it is what makes the golden SVG a baseline rather
 //! than a sample.
 //!
-//! **Two deliberate divergences, both P11 round 2, both because an image has no
-//! camera.** [`budget`] caps how many labels are placed at all, and
-//! [`LabelSpec::degree`] orders the survivors. The app needs neither: a
-//! contested cell there is resolved by the user zooming, and the overlay runs
-//! over *sampled* points that change every frame, so a hard cap would make a
-//! name appear and vanish on a pan. Degree is also not a quantity the overlay
-//! holds — `View.links` is an array of point indices, not slots — so mirroring
-//! it would mean giving the browser a second edge index for a tie-break it
-//! never reaches. What still mirrors constant-for-constant is
-//! [`estimate_width`], which is the one that must agree or the two sides
-//! resolve collisions differently.
+//! **Three deliberate divergences, all because an image has no camera.**
+//! [`budget`] caps how many labels are placed at all (round 2),
+//! [`LabelSpec::degree`] orders the survivors (round 2), and [`choose`] thins a
+//! `place_all` label whose region is full instead of drawing it on top of its
+//! neighbours (round 4). The app needs none of the three: a contested cell
+//! there is resolved by the user zooming, and the overlay runs over *sampled*
+//! points that change every frame, so a hard cap would make a name appear and
+//! vanish on a pan. Degree is also not a quantity the overlay holds —
+//! `View.links` is an array of point indices, not slots — so mirroring it would
+//! mean giving the browser a second edge index for a tie-break it never
+//! reaches. What still mirrors constant-for-constant is [`estimate_width`],
+//! [`columns_for`] and [`rows_for`], which are the ones that must agree or the
+//! two sides resolve collisions differently.
 //!
 //! The estimate-don't-measure rule ports too, and for a second reason. In the
 //! app, measuring means laying out every candidate on every camera event, which
@@ -220,11 +222,21 @@ fn claim(taken: &mut std::collections::HashSet<(i64, i64)>, from: i64, to: i64, 
 /// `place_all` is the meta-graph's mode, and the meta-graph IS its labels — a
 /// type node with no name on it is a dot, which is precisely the entry screen a
 /// user reported as useless. So there, a label that loses its cell is *nudged*
-/// into a free neighbour rather than dropped, and if nothing near it is free it
-/// is drawn overlapping: a hundred type names crowding each other is a legible
-/// schema, and ninety-eight dots with sixty names is not. An instance slice
-/// keeps dropping, because at the 5 000-node response bound "every label" is
-/// not a picture at any density.
+/// into a free neighbour rather than dropped: it gets its home cell and the ten
+/// [`NUDGES`] around it, eleven chances an instance slice does not get.
+///
+/// **Only once that whole region is full does it give up its name** (P11 round
+/// 4). Round 2 drew it on top of its neighbours instead, on the argument that a
+/// crowded name beats an anonymous dot, and round 3 measured what that costs on
+/// sodir: two piles, one of about seven names in the Discovery island, where no
+/// reader can tell which name belongs to which circle. Seven illegible names
+/// carry less than two legible ones and five dots — and the sort below decides
+/// which two, so what is lost is the small fry and never the hub. `super::draw`
+/// puts the number of names it dropped in the status block, because a picture
+/// that quietly stops naming things is the D5 failure with a different subject.
+///
+/// An instance slice still drops on the first collision, because at the 5 000-
+/// node response bound "every label" is not a picture at any density.
 ///
 /// `budget` caps how many labels may be placed at all, however much room the
 /// grid finds — see [`budget`]. A pinned label is never dropped by it: the
@@ -279,9 +291,14 @@ pub fn choose(specs: &[LabelSpec], place_all: bool, budget: usize) -> Vec<Placed
             .iter()
             .find(|(dx, dy)| is_free(&taken, from + dx, to + dx, (rows.0 + dy, rows.1 + dy)));
         let Some((dx, dy)) = nudge else {
-            // Every neighbour is spoken for. Drawing it anyway is the
-            // deliberate choice: an unnamed type node carries no information at
-            // all.
+            // Every cell this label can reach is spoken for, so it keeps its
+            // circle and loses its name. A pin is the exception and stays: an
+            // aggregate glyph's count and an ego centre's name are the two
+            // labels a picture cannot be read without, and dropping one would
+            // trade this honesty failure for that one.
+            if !spec.pinned {
+                continue;
+            }
             placed.push(PlacedLabel {
                 slot: spec.slot,
                 x: spec.x,
@@ -358,13 +375,49 @@ mod tests {
             true,
             usize::MAX,
         );
-        assert_eq!(placed.len(), 2, "the meta-graph names every type");
+        assert_eq!(placed.len(), 2, "the meta-graph names every type it can");
         let loser = placed.iter().find(|p| p.slot == 0).expect("slot 0 placed");
         assert_eq!(
             (loser.x, loser.y),
             (60.0, 15.0 - 2.0 * CELL_HEIGHT),
             "the first nudge with room for a whole chip is two rows up"
         );
+    }
+
+    #[test]
+    fn a_full_region_thins_instead_of_stacking_chips() {
+        // Ten names on one point. `place_all` seats the five the grid can fit —
+        // the home cell and the four NUDGES that clear a whole chip — and round
+        // 2 drew the other five at identical coordinates, which is the pile
+        // round 3 measured in the Discovery island. They are dropped now.
+        let specs: Vec<LabelSpec> = (0..10).map(|i| spec(i, u64::from(i), 60.0, 15.0)).collect();
+        let placed = choose(&specs, true, usize::MAX);
+        assert_eq!(
+            placed.len(),
+            5,
+            "the home cell and the four nudges with room for a chip"
+        );
+        // …and the survivors are the heaviest, not whoever arrived last: a hub
+        // type's name outranks the small fry sharing its cell.
+        let mut slots: Vec<u32> = placed.iter().map(|p| p.slot).collect();
+        slots.sort_unstable();
+        assert_eq!(slots, vec![5, 6, 7, 8, 9], "the five heaviest");
+    }
+
+    #[test]
+    fn a_pinned_label_survives_a_region_that_is_already_full() {
+        // Every one of them pinned, so the thinning is the only thing that
+        // could drop one — several folded fans landing in one corner is exactly
+        // the arrangement that reaches this branch, and a wedge without its
+        // count is a circle standing for forty nodes and saying nothing.
+        let specs: Vec<LabelSpec> = (0..10)
+            .map(|i| LabelSpec {
+                pinned: true,
+                ..spec(i, u64::from(i), 60.0, 15.0)
+            })
+            .collect();
+        let placed = choose(&specs, true, usize::MAX);
+        assert_eq!(placed.len(), 10, "a pin outlives a full region");
     }
 
     #[test]
