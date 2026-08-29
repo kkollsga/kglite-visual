@@ -339,9 +339,17 @@ pub fn expand(
     let mut seen: HashSet<NodeIndex> = HashSet::new();
     let mut edges: Vec<FoundEdge> = Vec::new();
     let mut bytes: usize = 0;
-    // Every edge the walk saw, whether or not both its endpoints fit. This is
-    // the `total` half of the truncation metadata: without it the UI could only
-    // say "5 000", which reads as complete.
+    // Every node this expansion WOULD have returned with no bound. It is the
+    // `total` half of the truncation metadata: without it the UI could only say
+    // "5 000", which reads as complete.
+    //
+    // A seed joins it alongside its first matching peer, never before — the
+    // same rule `admit` follows below, and for the same reason. Counting seeds
+    // eagerly made a relationship that matches nothing report itself as a
+    // *bound* failure: expanding `Field` on a relationship no Field has
+    // answered "showing 0 of 144 nodes, truncated", which sends a caller
+    // looking for a higher limit that cannot help, when the truth is that the
+    // walk found nothing. Found on sodir_graph.kgl, 2026-08-29.
     let mut total_reachable: HashSet<NodeIndex> = HashSet::new();
     let mut truncated = false;
     // Edges the walk found and did not send. Counted rather than collected: on
@@ -383,7 +391,6 @@ pub fn expand(
             truncated = true;
             break 'walk;
         }
-        total_reachable.insert(*seed);
         for dir in directions {
             // Two walks, because the relationship name has two sources. With a
             // named relationship it is known a priori, so `iter_peers_filtered`
@@ -419,6 +426,7 @@ pub fn expand(
             };
 
             for (peer, name) in found {
+                total_reachable.insert(*seed);
                 total_reachable.insert(peer);
                 // The seed is admitted lazily, alongside its first peer: a seed
                 // with no matching edges is not part of this expansion's
@@ -520,6 +528,50 @@ mod tests {
         let params = std::collections::HashMap::new();
         execute_mut(&mut graph, &script, &ExecuteOptions::eager(&params)).expect("build");
         graph
+    }
+
+    #[test]
+    fn a_relationship_that_matches_nothing_reports_nothing_found_not_a_bound() {
+        // The defect this fixes, found by driving the real thing on
+        // sodir_graph.kgl: expanding a type on a relationship none of its nodes
+        // has answered `0 of 144, truncated` — the shape of a bound firing —
+        // because every seed was counted as reachable before it was known to
+        // contribute. An agent reading that raises its limit, which cannot
+        // help, instead of correcting the relationship name, which can.
+        let graph = dense_clique(6);
+        let seeds: Vec<NodeIndex> = (0..6).map(NodeIndex::new).collect();
+        let none = expand(
+            &graph,
+            &seeds,
+            Some("NOT_A_RELATIONSHIP"),
+            EdgeDirection::Out,
+            effective_bound(Some(10)),
+            None,
+        );
+        assert_eq!(none.bound.returned, 0);
+        assert_eq!(
+            none.bound.total, 0,
+            "a seed with no matching edge is not part of the answer, so it is \
+             not part of the answer's total either"
+        );
+        assert!(
+            !none.bound.truncated,
+            "nothing was cut; the walk found nothing"
+        );
+
+        // And the seeds still count when they DO contribute, which is the half
+        // that makes "showing X of Y" true at all.
+        let some = expand(
+            &graph,
+            &seeds,
+            Some("KNOWS"),
+            EdgeDirection::Out,
+            effective_bound(Some(3)),
+            None,
+        );
+        assert_eq!(some.bound.returned, 3);
+        assert_eq!(some.bound.total, 6, "all six are reachable over KNOWS");
+        assert!(some.bound.truncated);
     }
 
     #[test]
