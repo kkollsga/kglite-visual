@@ -953,20 +953,42 @@ fn shells(
     })
 }
 
+/// How steep a node's offset must be before its name goes above or below it
+/// rather than beside it: `|dy| > SLOPE * |dx|`, a cone of about ±8° around
+/// vertical.
+///
+/// **Narrow, and measured rather than reasoned.** The obvious rule — whichever
+/// axis dominates, a 45° cut — reads well on paper and *loses* labels: a chip
+/// above its node sits on a row it shares with every other cap node's chip, and
+/// at 130 px wide against a ring's 40-odd px of horizontal slot they collide and
+/// the grid drops one. Counted on the four ring-shaped portfolio renders, at 45°
+/// (slope 1) against no vertical sector at all: wellbore 61 vs 63, Troll 52 vs
+/// 56 — a loss, not the recovery this was for. The cost falls away as the cone
+/// narrows and the gain appears: at slope 7 the same four give 66 / 57 / 89 / 92
+/// against 63 / 56 / 86 / 82. Slopes 6 through 12 all land within one label of
+/// that, so this sits in the middle of a flat region rather than on a knife
+/// edge.
+///
+/// The reason the narrow cone wins is the reason the sector exists: only at the
+/// *extreme* of the ring is a side chip drawn along the arc through its
+/// neighbours. A few degrees away the ring has already turned enough that the
+/// chip radiates, and sideways is where the width for a name is.
+const VERTICAL_SECTOR_SLOPE: f64 = 7.0;
+
 /// Which side of a node its name belongs on, given the node's offset from the
 /// centre it radiates from.
 ///
 /// **The sector is cut on the offset itself, in the ring's own — already
 /// stretched — coordinates**, so the boundary follows the shape a reader is
-/// looking at rather than an angle in an ellipse nobody drew. A node whose
-/// vertical offset beats its horizontal one is at the top or the bottom of the
-/// ring, where its neighbours are beside it and the room is above or below; at
-/// the sides it is the other way round. On a ring stretched to a 16:10 frame
-/// that puts roughly the top and bottom sixths in the vertical sectors, which is
-/// exactly the arc where round 2's side-only rule was drawing chips through
-/// their neighbours.
+/// looking at rather than an angle in an ellipse nobody drew. A node at the very
+/// top or bottom of the ring has its neighbours *beside* it, so a side chip
+/// there is drawn through them; everywhere else the side chip already radiates,
+/// and the sideways direction is the one with the width for a 130 px name.
+///
+/// **The cone is narrow, and that is a measurement rather than a taste**
+/// ([`VERTICAL_SECTOR_SLOPE`]).
 fn outward((x, y): (f64, f64)) -> LabelSide {
-    if y.abs() > x.abs() {
+    if y.abs() > VERTICAL_SECTOR_SLOPE * x.abs() {
         if y < 0.0 {
             LabelSide::Above
         } else {
@@ -2119,13 +2141,15 @@ mod tests {
             );
         }
         // And the vertical sectors are actually reached: a rule the geometry
-        // never enters is a rule nobody can see the effect of.
+        // never enters is a rule nobody can see the effect of. The cone is
+        // narrow on purpose, so this asks for the extremes and not for a third
+        // of the ring.
         let vertical = (1..24)
             .filter(|i| matches!(placed.label_side[*i], LabelSide::Above | LabelSide::Below))
             .count();
         assert!(
-            vertical >= 4,
-            "a 24-leaf ring must put some names above and below: {vertical}"
+            (1..=6).contains(&vertical),
+            "a 24-leaf ring puts its cap names above and below, and only those: {vertical}"
         );
     }
 
