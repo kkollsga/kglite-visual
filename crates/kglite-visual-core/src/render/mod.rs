@@ -401,6 +401,8 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         structure::Plan::Force => layout::run(&nodes, &links, canvas, request.seed)?,
     };
     let layout_ms = started.elapsed().as_secs_f64() * 1_000.0;
+    let mut positions = positions;
+    moor_folded_fans(&scene, &mut positions, f64::from(width), f64::from(height));
 
     let document = svg::emit(&scene, &positions, width, height, request.theme);
     let bytes = match request.format {
@@ -420,6 +422,91 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         truncated: !scene.banners.is_empty(),
         banners: scene.banners,
     })
+}
+
+/// Gap between a folded fan's parent and the wedge standing for its children,
+/// in pixels — long enough that the connector is a visible line and short
+/// enough that the two read as one object.
+const WEDGE_TETHER_PX: f64 = 26.0;
+
+/// Move every folded fan next to the node it hangs off.
+///
+/// **A wedge that floats is a lie by omission** (P11 round 2). The glyph says
+/// `Wellbore x 27`, and twenty-seven of something are attached to *what*? The
+/// fold already pins the parent's label for that reason, and the layout already
+/// draws the one link — but a general layout kernel treats the glyph as an
+/// ordinary node, so it can settle a third of the frame away with its
+/// connector lost among four hundred other lines. Nothing about the fold is
+/// legible at that distance.
+///
+/// The direction is the one the layout chose (parent -> glyph, normalised); only
+/// the distance is overridden, so the wedge still opens into whatever space the
+/// kernel found for it. A glyph the layout happened to place on top of its
+/// parent is pushed away from the picture's centre instead, which is where the
+/// room is.
+///
+/// Runs after the layout rather than inside it because it is true of all three
+/// kernels and depends on none of them: the constraint is "adjacent to a named
+/// parent", and every kernel that produced a position has already answered the
+/// question this corrects.
+fn moor_folded_fans(scene: &Scene, positions: &mut layout::Positions, width: f64, height: f64) {
+    if !scene.nodes.iter().any(|node| node.aggregate.is_some()) {
+        return;
+    }
+    let (mut sum_x, mut sum_y) = (0.0f64, 0.0f64);
+    for (x, y) in &positions.xy {
+        sum_x += x;
+        sum_y += y;
+    }
+    let divisor = positions.xy.len().max(1) as f64;
+    let centre = (sum_x / divisor, sum_y / divisor);
+
+    for index in 0..scene.nodes.len() {
+        if scene.nodes[index].aggregate.is_none() {
+            continue;
+        }
+        let parent = scene.links.iter().find_map(|link| {
+            if link.source == index {
+                Some(link.target)
+            } else if link.target == index {
+                Some(link.source)
+            } else {
+                None
+            }
+        });
+        // A fold always produces exactly one parent link. A glyph with none is
+        // not reachable today; leaving it where the layout put it is the only
+        // honest answer, since there is no parent to sit beside.
+        let (Some(parent), Some(&(px, py))) = (parent, parent.and_then(|p| positions.xy.get(p)))
+        else {
+            continue;
+        };
+        let (gx, gy) = positions.xy[index];
+        let (mut dx, mut dy) = (gx - px, gy - py);
+        let mut length = (dx * dx + dy * dy).sqrt();
+        if length <= 1e-6 {
+            dx = px - centre.0;
+            dy = py - centre.1;
+            length = (dx * dx + dy * dy).sqrt();
+            if length <= 1e-6 {
+                (dx, dy, length) = (1.0, 0.0, 1.0);
+            }
+        }
+        let reach = scene.nodes[parent].radius + WEDGE_TETHER_PX + scene.nodes[index].radius;
+        let radius = scene.nodes[index].radius;
+        let x = (px + dx / length * reach).clamp(radius, (width - radius).max(radius));
+        let y = (py + dy / length * reach).clamp(radius, (height - radius).max(radius));
+        positions.xy[index] = (x, y);
+        // Outward from the parent, so the count never sits on top of the name
+        // that makes it mean something.
+        if let Some(side) = positions.label_side.get_mut(index) {
+            *side = if x < px {
+                layout::LabelSide::Left
+            } else {
+                layout::LabelSide::Right
+            };
+        }
+    }
 }
 
 /// Smallest radius the node a layout is centred on may be drawn at.
@@ -1152,4 +1239,102 @@ fn pair_key(a: u32, b: u32) -> (u32, u32) {
 
 fn clamp_u32(value: u64) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(text: &str, radius: f64, aggregate: Option<u32>) -> SceneNode {
+        SceneNode {
+            slot: 0,
+            text: text.to_string(),
+            weight: 1,
+            radius,
+            color: encoding::INSTANCE_COLOR,
+            badges: Vec::new(),
+            dimmed: false,
+            node_type: Some("T".to_string()),
+            show_count: false,
+            pinned: false,
+            aggregate,
+            emphasis: false,
+        }
+    }
+
+    /// A folded fan sits beside the node it hangs off, whatever the layout did.
+    ///
+    /// The failure this fixes has a picture: a wedge reading `Wellbore x 27`
+    /// four hundred pixels from any parent, with its one connector lost among
+    /// the other lines, so the picture said twenty-seven of something attach to
+    /// *nothing in particular*.
+    #[test]
+    fn a_folded_fan_is_moored_to_its_parent() {
+        let scene = Scene {
+            nodes: vec![node("parent", 10.0, None), node("T x 27", 20.0, Some(27))],
+            links: vec![SceneLink {
+                source: 0,
+                target: 1,
+                width: 1.0,
+            }],
+            status: Vec::new(),
+            banners: Vec::new(),
+            place_all_labels: false,
+            seeds: Vec::new(),
+        };
+        let mut positions = layout::Positions {
+            xy: vec![(200.0, 300.0), (900.0, 300.0)],
+            label_side: vec![layout::LabelSide::Below; 2],
+            islands: Vec::new(),
+        };
+        moor_folded_fans(&scene, &mut positions, 1000.0, 600.0);
+        assert_eq!(positions.xy[0], (200.0, 300.0), "the parent does not move");
+        let (x, y) = positions.xy[1];
+        let gap = ((x - 200.0f64).powi(2) + (y - 300.0f64).powi(2)).sqrt();
+        assert!(
+            (gap - (10.0 + WEDGE_TETHER_PX + 20.0)).abs() < 1e-6,
+            "the wedge sits one tether from its parent, not {gap}"
+        );
+        assert!(y == 300.0 && x > 200.0, "and along the direction it was on");
+        assert_eq!(
+            positions.label_side[1],
+            layout::LabelSide::Right,
+            "its count is drawn away from the parent's own name"
+        );
+    }
+
+    /// A glyph the layout dropped on top of its parent still lands somewhere,
+    /// and somewhere is away from the crowd rather than at an arbitrary angle.
+    #[test]
+    fn a_coincident_fan_is_pushed_outward_rather_than_left_on_its_parent() {
+        let scene = Scene {
+            nodes: vec![
+                node("far", 6.0, None),
+                node("parent", 10.0, None),
+                node("T x 9", 15.0, Some(9)),
+            ],
+            links: vec![SceneLink {
+                source: 1,
+                target: 2,
+                width: 1.0,
+            }],
+            status: Vec::new(),
+            banners: Vec::new(),
+            place_all_labels: false,
+            seeds: Vec::new(),
+        };
+        let mut positions = layout::Positions {
+            // Centroid sits left of the parent, so "away from the centre" is
+            // rightward and the assertion below is not the default direction.
+            xy: vec![(100.0, 300.0), (700.0, 300.0), (700.0, 300.0)],
+            label_side: vec![layout::LabelSide::Below; 3],
+            islands: Vec::new(),
+        };
+        moor_folded_fans(&scene, &mut positions, 1000.0, 600.0);
+        assert!(
+            positions.xy[2].0 > 700.0,
+            "a coincident glyph goes outward: {:?}",
+            positions.xy[2]
+        );
+    }
 }
