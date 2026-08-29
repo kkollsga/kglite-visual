@@ -33,7 +33,13 @@
 }
 
 /* The container stays transparent to drags; the labels themselves are the
-   app's addressable handle on a node, so they take clicks. */
+   app's addressable handle on a node, so they take clicks.
+
+   The chip's geometry and colours below (.kglv-label, .kglv-label-dim,
+   .kglv-label-count, .kglv-badge*, .kglv-status, .kglv-warn) are ported into
+   the headless SVG emitter — crates/kglite-visual-core/src/render/svg.rs and
+   .../render/encoding.rs — so the exported image looks like the app (plan
+   D13). A colour changed here and not there is two pictures of one graph. */
 .kglv-label {
   pointer-events: auto;
   cursor: pointer;

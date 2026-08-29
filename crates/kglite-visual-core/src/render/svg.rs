@@ -1,0 +1,489 @@
+//! The SVG emitter — the native output format (plan D13).
+//!
+//! **Self-contained by construction.** No external stylesheet, no web font, no
+//! `<image href>`: an agent that hands the file to a human, a chat client that
+//! inlines it, and `resvg` rasterising it all have to see the same picture, and
+//! any of them may be offline. Text stays text, so the file is greppable and
+//! scales, which is the reason SVG is the native format and PNG the derived one.
+//!
+//! **Every number is emitted at fixed precision.** The golden baseline is an
+//! exact one (CLAUDE.md → "Gate honesty"), and a baseline that carried
+//! `f64::to_string`'s full 17 significant digits would be pinning the last bit
+//! of every accumulated sum — including the one place this pipeline touches
+//! libm, `ln_1p` in the size ramp, which the IEEE standard does not require to
+//! be correctly rounded. Two decimals is finer than a rendered pixel and
+//! coarser than any disagreement a conforming libm can produce, so the baseline
+//! describes the picture rather than the machine.
+
+use super::encoding::{self, Palette, Theme};
+use super::labels::{self, LabelSpec};
+use super::layout::Positions;
+use super::Scene;
+
+/// The font stack, mirroring `.kglv-label` in `frontend/src/styles.css`, with
+/// concrete families appended.
+///
+/// The CSS stack ends at `sans-serif`, which a browser resolves and an SVG
+/// rasteriser may not: `ui-sans-serif` and `system-ui` are CSS-only keywords,
+/// so a renderer that knew nothing else would fall off the end of the list.
+/// The named families are the ones actually present on the three platforms this
+/// ships to, and `sans-serif` remains the terminal fallback.
+const FONT_STACK: &str =
+    "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+
+/// Mirrors `.kglv-status` in `frontend/src/styles.css`.
+const MONO_STACK: &str = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace";
+
+/// Label chip geometry, mirroring `.kglv-label` in `frontend/src/styles.css`:
+/// `padding: 2px 7px`, `border-radius: 5px`, `font: 12px/1.4`, `gap: 6px`.
+const CHIP_HEIGHT: f64 = 20.0;
+const CHIP_RADIUS: f64 = 5.0;
+const CHIP_PAD_X: f64 = 7.0;
+const CHIP_GAP: f64 = 6.0;
+const LABEL_FONT_PX: f64 = 12.0;
+/// Baseline offset inside the chip, from `font: 12px/1.4` plus 2 px of padding.
+const LABEL_BASELINE: f64 = 14.0;
+/// Per-character advance for the chip's own *drawn* width.
+///
+/// **Deliberately not [`super::labels::estimate_width`]'s constants, and the two
+/// have different jobs.** That estimate is the ported collision footprint, and
+/// it must stay bit-for-bit the app's or the two sides resolve collisions
+/// differently. These decide how wide the rounded rectangle behind the text is
+/// drawn, and they are a little more generous because the app has no equivalent
+/// decision to make: a browser lays the chip out with flexbox around whatever
+/// the glyphs actually measure, and this emitter has no metrics at all. Tuned
+/// against the case that exposed it — sodir's instance titles are bold
+/// uppercase ("BALDER FM", "SHETLAND GP"), which at 12px/600 run past 6.9 px a
+/// character and pushed the count chip on top of the name's last letters.
+const NAME_ADVANCE: f64 = 7.7;
+const COUNT_ADVANCE: f64 = 7.0;
+const BADGE_WIDTH: f64 = 34.0;
+
+/// Gap between a circle's edge and the top of its label.
+///
+/// Mirrors `y: y + source.radius(slot) + 4` in `LabelOverlay.update`
+/// (`frontend/src/labels.ts`) — below the circle, never on it: a label centred
+/// on its point hides the size that encodes the count.
+const LABEL_GAP_PX: f64 = 4.0;
+
+/// The status block, mirroring `.kglv-status`: `top: 12px; left: 12px;
+/// padding: 8px 12px; font: 12px/1.6`.
+const STATUS_X: f64 = 12.0;
+const STATUS_Y: f64 = 12.0;
+const STATUS_PAD_X: f64 = 12.0;
+const STATUS_PAD_Y: f64 = 8.0;
+const STATUS_LINE_PX: f64 = 19.2;
+const STATUS_FONT_PX: f64 = 12.0;
+
+/// Keep-out from the canvas edge, for a label chip the grid pushed outward.
+const EDGE_PAD: f64 = 6.0;
+
+/// Vertical strip the status block occupies, for a block of `lines` lines.
+///
+/// Exported to the layout rather than recomputed there: two copies of one
+/// rectangle is two things that can disagree, and the way they would disagree
+/// is a type name drawn under an opaque panel.
+pub(crate) fn status_block_height(lines: usize) -> f64 {
+    if lines == 0 {
+        return 0.0;
+    }
+    STATUS_Y + lines as f64 * STATUS_LINE_PX + 2.0 * STATUS_PAD_Y + STATUS_Y
+}
+
+/// Emit the whole document.
+pub(crate) fn emit(
+    scene: &Scene,
+    positions: &Positions,
+    width: u32,
+    height: u32,
+    theme: Theme,
+) -> String {
+    let palette = theme.palette();
+    let mut out = String::with_capacity(4_096 + scene.nodes.len() * 256);
+
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    out.push_str(&format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" \
+         viewBox=\"0 0 {width} {height}\" font-family=\"{}\">\n",
+        escape(FONT_STACK)
+    ));
+    out.push_str(&format!(
+        "<title>{}</title>\n",
+        escape(scene.status.first().map(String::as_str).unwrap_or("graph"))
+    ));
+    out.push_str(&format!(
+        "<rect width=\"{width}\" height=\"{height}\" fill=\"{}\"/>\n",
+        palette.background
+    ));
+
+    emit_links(&mut out, scene, positions, &palette);
+    emit_nodes(&mut out, scene, positions);
+    emit_labels(&mut out, scene, positions, &palette, width, height);
+    emit_status(&mut out, scene, &palette);
+
+    out.push_str("</svg>\n");
+    out
+}
+
+fn emit_links(out: &mut String, scene: &Scene, positions: &Positions, palette: &Palette) {
+    if scene.links.is_empty() {
+        return;
+    }
+    out.push_str(&format!(
+        "<g stroke=\"{}\" stroke-opacity=\"{}\" stroke-linecap=\"round\">\n",
+        palette.link,
+        num(palette.link_opacity)
+    ));
+    for link in &scene.links {
+        let (Some(a), Some(b)) = (positions.xy.get(link.source), positions.xy.get(link.target))
+        else {
+            continue;
+        };
+        out.push_str(&format!(
+            "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke-width=\"{}\"/>\n",
+            num(a.0),
+            num(a.1),
+            num(b.0),
+            num(b.1),
+            num(link.width)
+        ));
+    }
+    out.push_str("</g>\n");
+}
+
+/// Circles, largest first.
+///
+/// Draw order is not part of the encoding — it is the one thing a 2D canvas has
+/// and cosmos.gl's point pass does not expose — so it is chosen for legibility:
+/// painting the big types first leaves the small ones visible on top of them
+/// instead of swallowed. Ties break on slot, so the order stays a function of
+/// the input.
+fn emit_nodes(out: &mut String, scene: &Scene, positions: &Positions) {
+    let mut order: Vec<usize> = (0..scene.nodes.len()).collect();
+    order.sort_by(|a, b| {
+        scene.nodes[*b]
+            .radius
+            .total_cmp(&scene.nodes[*a].radius)
+            .then_with(|| scene.nodes[*a].slot.cmp(&scene.nodes[*b].slot))
+    });
+
+    out.push_str("<g>\n");
+    for i in order {
+        let node = &scene.nodes[i];
+        let Some((x, y)) = positions.xy.get(i) else {
+            continue;
+        };
+        let [r, g, b, a] = node.color;
+        // A hairline of the node's OWN colour at a stronger opacity than its
+        // fill. The supporting-type dim is an alpha (`SUPPORTING_ALPHA`), and an
+        // alpha reads very differently against the two grounds: at 0.41 over
+        // `#0d1117` a circle is still a circle, and over white it is a smudge
+        // that a reader scanning for a type simply misses. The outline keeps
+        // "this one recedes" while keeping it findable, and it is drawn in both
+        // themes so the two images stay the same picture.
+        out.push_str(&format!(
+            "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\" fill-opacity=\"{}\" \
+             stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"1\"><title>{}</title></circle>\n",
+            num(*x),
+            num(*y),
+            num(node.radius),
+            rgb(r, g, b),
+            num(a),
+            rgb(r, g, b),
+            num((a * 1.9).min(1.0)),
+            escape(&node.text)
+        ));
+    }
+    out.push_str("</g>\n");
+}
+
+fn emit_labels(
+    out: &mut String,
+    scene: &Scene,
+    positions: &Positions,
+    palette: &Palette,
+    width: u32,
+    height: u32,
+) {
+    let specs: Vec<LabelSpec> = scene
+        .nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, node)| {
+            let (x, y) = positions.xy.get(i)?;
+            Some(LabelSpec {
+                slot: node.slot,
+                text: node.text.clone(),
+                badges: node.badges.clone(),
+                weight: node.weight,
+                dimmed: node.dimmed,
+                x: *x,
+                y: y + node.radius + LABEL_GAP_PX,
+            })
+        })
+        .collect();
+    // The app offers only what cosmos.gl's point sampler returned (except on
+    // the meta-graph, where `everyPoint` bypasses it). Here there is no
+    // sampler — nothing is off screen and nothing is thinned by a GPU pass — so
+    // the collision grid is the only thinning, which is the behaviour the app
+    // has on the view that matters most and a denser one on an instance slice.
+    let placed = labels::choose(&specs, scene.place_all_labels);
+    if placed.is_empty() {
+        return;
+    }
+
+    let by_slot: std::collections::HashMap<u32, &LabelSpec> =
+        specs.iter().map(|s| (s.slot, s)).collect();
+
+    out.push_str(&format!("<g font-size=\"{}\">\n", num(LABEL_FONT_PX)));
+    for label in &placed {
+        let Some(spec) = by_slot.get(&label.slot) else {
+            continue;
+        };
+        let chip_width = draw_width(spec);
+        // Clamped into the canvas. The layout already keeps every *circle*
+        // inside, but the collision grid nudges a chip up to two rows and a
+        // long name is wider than the node it names, so the last few pixels are
+        // this emitter's to defend. The app's overlay solves the same problem
+        // with `overflow: hidden`, which is the one answer an image cannot use:
+        // a clipped name is a name nobody can read, and there is no scrolling
+        // out from under it.
+        let left = (label.x - chip_width / 2.0).clamp(
+            EDGE_PAD,
+            (f64::from(width) - chip_width - EDGE_PAD).max(EDGE_PAD),
+        );
+        let top = label.y.clamp(
+            EDGE_PAD,
+            (f64::from(height) - CHIP_HEIGHT - EDGE_PAD).max(EDGE_PAD),
+        );
+        let (text_color, name_weight) = if spec.dimmed {
+            (palette.label_dim_text, "500")
+        } else {
+            (palette.label_text, "600")
+        };
+        let (fill_opacity, stroke_opacity) = if spec.dimmed {
+            // Mirrors `.kglv-label-dim`: quieter chip, quieter border.
+            (0.55, 0.18)
+        } else {
+            (palette.chip_fill_opacity, palette.chip_stroke_opacity)
+        };
+
+        out.push_str(&format!(
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" \
+             fill=\"{}\" fill-opacity=\"{}\" stroke=\"{}\" stroke-opacity=\"{}\"/>\n",
+            num(left),
+            num(top),
+            num(chip_width),
+            num(CHIP_HEIGHT),
+            num(CHIP_RADIUS),
+            palette.chip_fill,
+            num(fill_opacity),
+            palette.chip_stroke,
+            num(stroke_opacity)
+        ));
+
+        let baseline = top + LABEL_BASELINE;
+        // Name and count in ONE `<text>`, the count as a `<tspan>` with a `dx`
+        // and no `x` of its own — so the renderer advances the pen by what the
+        // glyphs actually measured and the two can never land on top of each
+        // other. Placing the count at an estimated offset is what put "1" over
+        // the "FM" of "BALDER FM" on the first sodir neighbourhood render.
+        out.push_str(&format!(
+            "<text x=\"{}\" y=\"{}\" fill=\"{}\" font-weight=\"{}\">{}\
+             <tspan fill=\"{}\" font-weight=\"400\" dx=\"{}\">{}</tspan></text>\n",
+            num(left + CHIP_PAD_X),
+            num(baseline),
+            text_color,
+            name_weight,
+            escape(&spec.text),
+            palette.label_count,
+            num(CHIP_GAP),
+            escape(&encoding::group_thousands(spec.weight))
+        ));
+
+        // Badges are rectangles, so they cannot ride the text flow; they are
+        // right-aligned inside the chip instead, which is where the app's
+        // flexbox puts them and needs no guess about where the count ended.
+        let mut cursor =
+            left + chip_width - CHIP_PAD_X - spec.badges.len() as f64 * BADGE_WIDTH + CHIP_GAP;
+        for badge in &spec.badges {
+            // Mirrors `.kglv-badge`: a pill, uppercase, 10px/700.
+            out.push_str(&format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"14\" rx=\"7\" fill=\"{}\">\
+                 <title>{}</title></rect>\n",
+                num(cursor),
+                num(top + 3.0),
+                num(BADGE_WIDTH - CHIP_GAP),
+                encoding::badge_color(badge),
+                escape(encoding::badge_title(badge))
+            ));
+            out.push_str(&format!(
+                "<text x=\"{}\" y=\"{}\" fill=\"#ffffff\" font-size=\"10\" font-weight=\"700\" \
+                 letter-spacing=\"0.4\">{}</text>\n",
+                num(cursor + 5.0),
+                num(top + 13.0),
+                escape(&badge.to_uppercase())
+            ));
+            cursor += BADGE_WIDTH;
+        }
+    }
+    out.push_str("</g>\n");
+}
+
+/// The status block and the truncation banners, top-left, mirroring
+/// `.kglv-status` and `.kglv-warn`.
+///
+/// **D5's banner is drawn INTO the image and not beside it.** An image travels
+/// without its response; a truncated render that only reported the fact in a
+/// JSON field would be a complete-looking picture the moment anyone pasted it
+/// anywhere.
+fn emit_status(out: &mut String, scene: &Scene, palette: &Palette) {
+    let lines: Vec<(&str, &str)> = scene
+        .status
+        .iter()
+        .map(|line| (line.as_str(), palette.status_text))
+        .chain(
+            scene
+                .banners
+                .iter()
+                .map(|line| (line.as_str(), palette.warn)),
+        )
+        .collect();
+    if lines.is_empty() {
+        return;
+    }
+    let longest = lines
+        .iter()
+        .map(|(line, _)| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    // A monospace advance at 12px; the block only has to be wide enough not to
+    // clip, so an estimate is what it needs (there is no text metric here, by
+    // the same argument the label widths make).
+    let box_width = longest as f64 * 7.25 + 2.0 * STATUS_PAD_X;
+    let box_height = lines.len() as f64 * STATUS_LINE_PX + 2.0 * STATUS_PAD_Y;
+
+    out.push_str(&format!(
+        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"6\" fill=\"{}\" \
+         fill-opacity=\"0.85\" stroke=\"{}\" stroke-opacity=\"0.30\"/>\n",
+        num(STATUS_X),
+        num(STATUS_Y),
+        num(box_width),
+        num(box_height),
+        palette.status_fill,
+        palette.status_stroke
+    ));
+    out.push_str(&format!(
+        "<g font-family=\"{}\" font-size=\"{}\">\n",
+        escape(MONO_STACK),
+        num(STATUS_FONT_PX)
+    ));
+    for (i, (line, color)) in lines.iter().enumerate() {
+        out.push_str(&format!(
+            "<text x=\"{}\" y=\"{}\" fill=\"{}\">{}</text>\n",
+            num(STATUS_X + STATUS_PAD_X),
+            num(STATUS_Y + STATUS_PAD_Y + (i as f64 + 0.75) * STATUS_LINE_PX),
+            color,
+            escape(line)
+        ));
+    }
+    out.push_str("</g>\n");
+}
+
+/// The chip's drawn width — see [`NAME_ADVANCE`] for why this is not
+/// [`super::labels::estimate_width`].
+fn draw_width(spec: &LabelSpec) -> f64 {
+    let count_chars = encoding::group_thousands(spec.weight).chars().count();
+    CHIP_PAD_X * 2.0
+        + spec.text.chars().count() as f64 * NAME_ADVANCE
+        + CHIP_GAP
+        + count_chars as f64 * COUNT_ADVANCE
+        + spec.badges.len() as f64 * BADGE_WIDTH
+}
+
+/// One number, at the fixed precision the module doc argues for.
+fn num(value: f64) -> String {
+    if !value.is_finite() {
+        // Not reachable from a bounded layout, but an emitter that wrote `NaN`
+        // into an attribute would produce a document no renderer will open, and
+        // the failure would surface as "the image is blank".
+        return "0".to_string();
+    }
+    let text = format!("{value:.2}");
+    // `-0.00` and `0.00` are the same point; emitting both would make the
+    // baseline depend on which side of zero a sum happened to land.
+    let text = if text == "-0.00" {
+        "0.00".to_string()
+    } else {
+        text
+    };
+    // Trailing zeros carry no information and make the document a third larger.
+    let trimmed = text.trim_end_matches('0').trim_end_matches('.');
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// An 0..1 RGBA triple as the `#rrggbb` an SVG attribute takes. Alpha rides
+/// separately in `fill-opacity`, which is how SVG 1.1 spells it.
+fn rgb(r: f64, g: f64, b: f64) -> String {
+    let channel = |v: f64| ((v.clamp(0.0, 1.0) * 255.0).round() as u32).min(255);
+    format!("#{:02x}{:02x}{:02x}", channel(r), channel(g), channel(b))
+}
+
+/// XML text and attribute escaping.
+///
+/// All five predefined entities, including the two that only matter inside
+/// attributes: a type name carrying a quote is not hypothetical on a graph
+/// built from someone else's data, and an emitter that produced malformed XML
+/// would fail as a blank image rather than as an error.
+fn escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            // A control character is not valid XML 1.0 at all, escaped or not.
+            c if (c as u32) < 0x20 && c != '\t' && c != '\n' && c != '\r' => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numbers_are_emitted_at_fixed_precision() {
+        assert_eq!(num(1.0 / 3.0), "0.33");
+        assert_eq!(num(-0.001), "0");
+        assert_eq!(num(12.0), "12");
+        assert_eq!(num(12.5), "12.5");
+        assert_eq!(num(f64::NAN), "0");
+        assert_eq!(num(f64::INFINITY), "0");
+    }
+
+    #[test]
+    fn every_xml_metacharacter_is_escaped() {
+        assert_eq!(
+            escape("a & b < c > d \" e ' f"),
+            "a &amp; b &lt; c &gt; d &quot; e &apos; f"
+        );
+        assert_eq!(escape("tab\there\u{0}"), "tab\there ");
+    }
+
+    #[test]
+    fn colours_round_to_the_hex_an_attribute_takes() {
+        assert_eq!(rgb(0.35, 0.65, 0.98), "#59a6fa");
+        assert_eq!(rgb(0.0, 0.0, 0.0), "#000000");
+        assert_eq!(rgb(1.0, 1.0, 1.0), "#ffffff");
+        assert_eq!(rgb(2.0, -1.0, 0.5), "#ff0080", "out-of-range clamps");
+    }
+}

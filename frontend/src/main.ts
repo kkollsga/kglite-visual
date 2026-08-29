@@ -379,6 +379,9 @@ function appearance(): Appearance {
 /**
  * One width per link, from the edge count the meta-graph carried.
  *
+ * **Ported to Rust** in `render::meta_scene`
+ * (`crates/kglite-visual-core/src/render/mod.rs`), pair-summing included.
+ *
  * A link between two type nodes is a summary of hundreds of thousands of real
  * edges, and drawing every one of them at the same 1 px says the schema is
  * uniform when it is not. Links that are not meta links — anything an
@@ -405,6 +408,10 @@ function linkWidths(): Float32Array {
 
 /**
  * A slot's colour before highlighting.
+ *
+ * **Ported to Rust** as `base_color` in
+ * `crates/kglite-visual-core/src/render/encoding.rs` (minus the colour-by
+ * branch, which a render request has no equivalent of).
  *
  * With no colour-by chosen, the two bits a type node carries are whether it
  * declares any capability and whether it is a *supporting* type — a type with
@@ -520,6 +527,10 @@ function refreshLabelSpecs(): void {
 /**
  * True while the view is nothing but the type-level meta-graph.
  *
+ * **Ported to Rust** as `Scene::place_all_labels` in
+ * `crates/kglite-visual-core/src/render/mod.rs`, which the render sets from the
+ * request's source rather than from a live view.
+ *
  * The meta-graph is a picture *of its labels* — a hundred type names is the
  * schema, and a hundred unlabelled dots is the "cloud" this screen was
  * reported as. So on this view every candidate is offered (the renderer's own
@@ -589,6 +600,11 @@ let truncation: { returned: number; total: number; truncated: boolean } | null =
 
 /**
  * Record what a bounded response did, and phrase the banner.
+ *
+ * **Ported to Rust** as `truncation_banner` in
+ * `crates/kglite-visual-core/src/render/encoding.rs`, wording included — the
+ * headless render draws these exact words INTO the image, because an image
+ * travels without its response (plan D13).
  *
  * D5: a truncated answer that does not say so reads as a complete one, so this
  * runs on every bounded response — not only the truncated ones — and the banner

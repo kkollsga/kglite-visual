@@ -126,6 +126,14 @@ const SPACE_SIZE = 4096
  * - `simulationFriction`, `simulationCenter`, `simulationRepulsionTheta` stay
  *   at their defaults; nothing in the picture asked them to move.
  */
+/*
+ * These five numbers are also the reference for the headless export layout's
+ * force balance — `GRAVITY`, `REPULSION_SCALE` and `ATTRACTION_SCALE` in
+ * `crates/kglite-visual-core/src/render/layout.rs` (plan D13). Different
+ * algorithm (a seeded Fruchterman–Reingold, not a GPU simulation), same graph
+ * and the same failure to avoid, so the ratios were taken from here rather than
+ * re-derived.
+ */
 const FORCE_CONFIG = {
   simulationLinkDistance: 150,
   simulationLinkSpring: 0.15,
@@ -246,6 +254,8 @@ export async function mountGraph(
     spaceSize: SPACE_SIZE,
     initialZoomLevel: zoomFor(view.positions),
     randomSeed: 'kglite-visual',
+    // Also `Palette::background` for the dark theme in
+    // `crates/kglite-visual-core/src/render/encoding.rs`.
     backgroundColor: '#0d1117',
     scalePointsOnZoom: true,
     renderLinks: true,

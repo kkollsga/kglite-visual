@@ -35,7 +35,14 @@ export type ScreenSource = {
   radius(index: number): number
 }
 
-/** Screen-space cell size, in CSS pixels. Roughly one label's footprint. */
+/**
+ * Screen-space cell size, in CSS pixels. Roughly one label's footprint.
+ *
+ * **Ported to Rust** as `CELL_WIDTH` / `CELL_HEIGHT` in
+ * `crates/kglite-visual-core/src/render/labels.rs`, where it also sets the
+ * layout's node clearance — the exported image has no camera, so the grid is
+ * the only thinning it gets (plan D13).
+ */
 const CELL_WIDTH = 130
 const CELL_HEIGHT = 30
 
@@ -43,6 +50,12 @@ type Placed = { slot: number; x: number; y: number }
 
 /**
  * A label's width in pixels, estimated from its content.
+ *
+ * **Ported to Rust** as `estimate_width` in
+ * `crates/kglite-visual-core/src/render/labels.rs`, constant for constant. The
+ * static emitter has no text metrics at all, so it needs the same estimate — and
+ * if the two estimates diverge, the two sides resolve collisions differently
+ * and the picture stops matching.
  *
  * Estimated, not measured, because measuring means laying the element out —
  * every candidate, on every camera event — and the overlay's whole design is
@@ -80,6 +93,9 @@ function claim(taken: Set<string>, from: number, to: number, row: number): void 
 /**
  * Cells a displaced label will try, in order, before it gives up and overlaps.
  *
+ * **Ported to Rust** as `NUDGES` in
+ * `crates/kglite-visual-core/src/render/labels.rs`.
+ *
  * Vertical first and only ±2 rows out, because a label has to stay recognisably
  * attached to the circle it names: 30 px down is still "that one", 260 px
  * across is a different node's name sitting next to it. Fixed order, so the
@@ -100,6 +116,11 @@ const NUDGES: readonly [number, number][] = [
 
 /**
  * Place labels, at most one per screen cell.
+ *
+ * **Ported to Rust** as `labels::choose` in
+ * `crates/kglite-visual-core/src/render/labels.rs`, tie-break included: the
+ * headless render's golden SVG is only a baseline while the winner of a cell is
+ * a function of the input (plan D13).
  *
  * Exported for its own test: the tie-break is the part that silently degrades
  * into flicker, and a flicker is not something a screenshot assert can catch.
@@ -285,7 +306,13 @@ export class LabelOverlay {
   }
 }
 
-/** kglite's own four capability flags, spelled out for a human reader. */
+/**
+ * kglite's own four capability flags, spelled out for a human reader.
+ *
+ * **Ported to Rust** as `badge_title` in
+ * `crates/kglite-visual-core/src/render/encoding.rs`, where it becomes an SVG
+ * `<title>` — a static image's version of this chip's tooltip.
+ */
 const BADGE_TITLES: Record<string, string> = {
   ts: 'has timeseries data',
   geo: 'has WKT geometry',

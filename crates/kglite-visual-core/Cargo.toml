@@ -39,6 +39,20 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # is opt-in and out of tree.
 kglite = "=0.16.14"
 
+# The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
+# MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest
+# entry: resvg re-exports the exact copy it renders through, and two independent
+# requirements on one rasteriser is a place `cargo update` can leave two of it.
+#
+# Default features minus the two this emitter cannot use: `svgz` (nothing here
+# gzips its own output) and `raster-images` (the SVG is self-contained by rule —
+# no `<image href>`, so no GIF/JPEG/WebP decoders need shipping). `text` and
+# `system-fonts` stay, and they are the whole point: without them `<text>` is
+# dropped silently. Measured cost, release binary on 2026-08-29:
+# 11 739 152 -> 14 105 184 bytes (+2.26 MiB), same tree, same profile,
+# with the PNG path the only difference.
+resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -46,3 +60,7 @@ ts-rs = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# The PNG smoke test decodes what resvg encoded, with a decoder that is not
+# resvg's: an encoder checked only by its own decoder can agree with itself
+# about a file nothing else opens.
+png = "0.18.1"

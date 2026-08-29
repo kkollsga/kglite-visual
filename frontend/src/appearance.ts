@@ -39,6 +39,13 @@ export const UNSET_COLOR: Rgba = [0.42, 0.47, 0.55, 0.75]
 /**
  * Radius range for a meta-graph type node, in graph units before zoom.
  *
+ * **Ported to Rust** as `TYPE_MIN_PX` / `TYPE_MAX_PX` in
+ * `crates/kglite-visual-core/src/render/encoding.rs`, which the headless render
+ * draws from (plan D13). Moving a number here without moving it there makes the
+ * exported image and the app show two different graphs; the golden SVG baseline
+ * (`make check-render-baseline`) goes red on the Rust half of that, and nothing
+ * catches the TypeScript half but this comment.
+ *
  * The floor is the smallest circle that still reads as a disc rather than a
  * speck and still has room for the hover ring the interaction layer draws
  * around it. The ceiling is set by the label chips: a label sits *below* its
@@ -52,6 +59,9 @@ const TYPE_MAX_PX = 36
 /**
  * Scale applied to a supporting type's radius.
  *
+ * **Ported to Rust** as `SUPPORTING_SCALE` in
+ * `crates/kglite-visual-core/src/render/encoding.rs`.
+ *
  * Not a separate ramp — the same ramp, one step quieter — so a large
  * supporting type still reads as larger than a small one. On the graph that
  * motivated this, 63 of 98 types are supporting, and drawing all 98 at equal
@@ -62,6 +72,9 @@ const SUPPORTING_SCALE = 0.6
 /**
  * Radius for a type node with `count` members, on a graph whose largest type
  * has `max`.
+ *
+ * **Ported to Rust** as `type_radius` in
+ * `crates/kglite-visual-core/src/render/encoding.rs`.
  *
  * **Log, not a root.** Type populations are log-uniform in practice — on the
  * graph this was tuned against the deciles run 3, 23, 118, 1 051, 4 249,
@@ -80,12 +93,20 @@ export function typeRadius(count: number, max: number, supporting: boolean): num
   return supporting ? radius * SUPPORTING_SCALE : radius
 }
 
-/** Width range for a meta-graph link, in the same units. */
+/**
+ * Width range for a meta-graph link, in the same units.
+ *
+ * **Ported to Rust** as `LINK_MIN_PX` / `LINK_MAX_PX` in
+ * `crates/kglite-visual-core/src/render/encoding.rs`.
+ */
 const LINK_MIN_PX = 0.5
 const LINK_MAX_PX = 5
 
 /**
  * Width for a meta-graph link carrying `count` edges.
+ *
+ * **Ported to Rust** as `link_width` in
+ * `crates/kglite-visual-core/src/render/encoding.rs`.
  *
  * Same argument as {@link typeRadius}, over the same spread: the relationship
  * counts on the tuning graph run from 1 to 102 420. A count of 0 means the

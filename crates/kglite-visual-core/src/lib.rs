@@ -15,6 +15,7 @@ pub mod loader;
 pub mod meta_graph;
 pub mod protocol;
 pub mod query;
+pub mod render;
 pub mod request;
 pub mod session;
 pub mod slots;
@@ -32,6 +33,9 @@ pub use protocol::{
     decode_frame, DecodedFrame, MessageType, ProtocolError, ResponseEncoder, PROTOCOL_VERSION,
 };
 pub use query::{QueryConfig, QueryTable, SearchResponse, QUERY_THREAD_STACK_BYTES};
+pub use render::{
+    render, ExpandSource, RenderFormat, RenderRequest, RenderSource, Rendered, Theme,
+};
 pub use request::Request;
 pub use session::{
     response_frames, DescribeResponse, ErrorMessage, GraphSlice, Response, Session, SessionInfo,

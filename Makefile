@@ -102,9 +102,10 @@ help:  ## List the targets
 gate: check-dev-docs check-skill-mirrors check-bans check-build-dirs \
       frontend-typecheck frontend-build check-bundle \
       rust-fmt rust-clippy rust-test check-generated-ts check-protocol-baseline \
+      check-render-baseline \
       e2e pytest check-packaged-consumer frontend-audit  ## Local pre-push gate
 	@echo ""
-	@echo "gate: 16 checks ran, 0 absent."
+	@echo "gate: 17 checks ran, 0 absent."
 
 lint: check-dev-docs check-skill-mirrors check-bans rust-fmt rust-clippy frontend-typecheck  ## Static checks only — no test execution
 
@@ -248,6 +249,36 @@ check-protocol-baseline:  ## FAIL if the committed protocol framing baseline mov
 	  exit 1; \
 	fi
 	@echo "check-protocol-baseline: OK"
+
+# The render's exact baseline (plan D13). Its own step rather than a widening of
+# check-protocol-baseline, and the reason is the failure message: that check
+# tells the reader to bump PROTOCOL_VERSION, which is the wrong instruction for
+# a moved circle. Same shape otherwise — `cargo test` regenerates, this asserts
+# nothing moved — and the same rule applies: a red here after a deliberate
+# encoding, layout or emitter change is regenerated in the same commit with the
+# reason stated, never to silence a diff nobody can explain (CLAUDE.md → "Gate
+# honesty").
+check-render-baseline:  ## FAIL if the committed golden SVG renders moved
+	@$(SAVE_GENERATED_MTIMES)
+	@$(CARGO) test -p kglite-visual-core --test render_golden --quiet
+	@$(RESTORE_GENERATED_MTIMES)
+	@if [ -z "$$(ls -A crates/kglite-visual-core/tests/goldens 2>/dev/null)" ]; then \
+	  echo "check-render-baseline: FAIL — the goldens directory is empty; the generator wrote nothing" >&2; \
+	  exit 1; \
+	fi
+	@untracked="$$(git ls-files --others --exclude-standard -- crates/kglite-visual-core/tests/goldens)"; \
+	if [ -n "$$untracked" ]; then \
+	  echo "check-render-baseline: FAIL — a golden is untracked, so drift is invisible:" >&2; \
+	  echo "$$untracked" >&2; \
+	  exit 1; \
+	fi
+	@if ! git diff --quiet -- crates/kglite-visual-core/tests/goldens; then \
+	  echo "check-render-baseline: FAIL — the rendered image changed:" >&2; \
+	  git diff --stat -- crates/kglite-visual-core/tests/goldens >&2; \
+	  echo "  If that was deliberate: regenerate with 'cargo test -p kglite-visual-core', stage it, and say why." >&2; \
+	  exit 1; \
+	fi
+	@echo "check-render-baseline: OK"
 
 cli-build:  ## Build the CLI binary the e2e harness drives
 	@$(CARGO) build -p kglite-visual-cli

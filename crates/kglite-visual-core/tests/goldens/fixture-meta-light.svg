@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600" font-family="ui-sans-serif, system-ui, -apple-system, &apos;Segoe UI&apos;, Roboto, &apos;Helvetica Neue&apos;, Arial, sans-serif">
+<title>meta.kgl</title>
+<rect width="900" height="600" fill="#ffffff"/>
+<g stroke="#57606a" stroke-opacity="0.45" stroke-linecap="round">
+<line x1="452.77" y1="236.31" x2="725.74" y2="345.72" stroke-width="5"/>
+<line x1="452.77" y1="236.31" x2="452.77" y2="236.31" stroke-width="5"/>
+<line x1="452.77" y1="236.31" x2="174.26" y2="135.3" stroke-width="4.43"/>
+<line x1="452.77" y1="236.31" x2="210.42" y2="432.25" stroke-width="4.06"/>
+<line x1="174.26" y1="135.3" x2="174.26" y2="135.3" stroke-width="3.25"/>
+<line x1="210.42" y1="432.25" x2="174.26" y2="135.3" stroke-width="2.95"/>
+<line x1="210.42" y1="432.25" x2="483.99" y2="553.48" stroke-width="2.4"/>
+</g>
+<g>
+<circle cx="452.77" cy="236.31" r="36" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Person</title></circle>
+<circle cx="174.26" cy="135.3" r="28.22" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Project</title></circle>
+<circle cx="725.74" cy="345.72" r="28.22" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Skill</title></circle>
+<circle cx="483.99" cy="553.48" r="23.5" fill="#fabf52" fill-opacity="0.92" stroke="#fabf52" stroke-opacity="1" stroke-width="1"><title>City</title></circle>
+<circle cx="210.42" cy="432.25" r="22.03" fill="#59a6fa" fill-opacity="0.92" stroke="#59a6fa" stroke-opacity="1" stroke-width="1"><title>Company</title></circle>
+</g>
+<g font-size="12">
+<rect x="412.67" y="276.31" width="80.2" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="419.67" y="290.31" fill="#1f2328" font-weight="600">Person<tspan fill="#656d76" font-weight="400" dx="6">60</tspan></text>
+<rect x="130.31" y="167.51" width="87.9" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="137.31" y="181.51" fill="#1f2328" font-weight="600">Project<tspan fill="#656d76" font-weight="400" dx="6">20</tspan></text>
+<rect x="689.49" y="377.93" width="72.5" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="696.49" y="391.93" fill="#1f2328" font-weight="600">Skill<tspan fill="#656d76" font-weight="400" dx="6">20</tspan></text>
+<rect x="434.59" y="574" width="98.8" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="441.59" y="588" fill="#1f2328" font-weight="600">City<tspan fill="#656d76" font-weight="400" dx="6">10</tspan></text>
+<rect x="498.39" y="577" width="28" height="14" rx="7" fill="#2ea043"><title>has lat/lon locations</title></rect>
+<text x="503.39" y="587" fill="#ffffff" font-size="10" font-weight="700" letter-spacing="0.4">LOC</text>
+<rect x="169.97" y="458.29" width="80.9" height="20" rx="5" fill="#ffffff" fill-opacity="0.82" stroke="#57606a" stroke-opacity="0.35"/>
+<text x="176.97" y="472.29" fill="#1f2328" font-weight="600">Company<tspan fill="#656d76" font-weight="400" dx="6">8</tspan></text>
+</g>
+<rect x="12" y="12" width="263.25" height="73.6" rx="6" fill="#ffffff" fill-opacity="0.85" stroke="#57606a" stroke-opacity="0.30"/>
+<g font-family="ui-monospace, SFMono-Regular, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="12">
+<text x="24" y="34.4" fill="#1f2328">meta.kgl</text>
+<text x="24" y="53.6" fill="#1f2328">tier full · 118 nodes / 560 edges</text>
+<text x="24" y="72.8" fill="#1f2328">5 types / 7 links drawn</text>
+</g>
+</svg>
