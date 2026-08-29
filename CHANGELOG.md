@@ -53,11 +53,31 @@ here. The first release promotes this block whole.
   query returns (`--cypher "…"`), or a bounded neighbourhood expansion
   (`--expand type=T rel=R dir=out`), as SVG or PNG. The picture uses the same
   visual encoding as the interactive viewer — the same size ramp, link widths,
-  capability badges, colours and label placement — so the exported image and
-  the app show the same graph. The layout is seeded and deterministic: the same
-  request produces the same bytes every time, and `--seed` picks a different
-  arrangement of the same data. `--theme light` renders for a white page.
-  The command writes the file and prints one JSON line describing it.
+  capability badges and colours — so the exported image and the app show the
+  same graph. The layout is seeded and deterministic: the same request produces
+  the same bytes every time, and `--seed` picks a different arrangement of the
+  same data. `--theme light` renders for a white page. The command writes the
+  file and prints one JSON line describing it.
+- **The image's layout is chosen from the graph's own structure, not fixed.** A
+  force layout is the right tool for a graph with no discoverable shape and the
+  wrong one for a star, a bipartite result or a schema with disconnected
+  families — and those are most of what a real graph hands it. So a
+  neighbourhood or expansion is drawn as **hop rings** around its centre, with
+  same-type siblings grouped into contiguous arcs so a branch reads as a
+  branch; a graph with community structure is drawn as **islands**, each laid
+  out on its own and packed with a quiet boundary round it; a community that is
+  two kinds of thing joined only to each other is drawn as **two concentric
+  shells**; and unattached nodes are gathered into one labelled grid rather than
+  scattered. The generic force layout remains the fallback for input with no
+  shape to find. Names radiate outward from a ring rather than sitting under
+  every circle, which the app has no equivalent of because the app's layout has
+  no centre to radiate from.
+- **A fan too big to read says how big it is.** When more than a couple of dozen
+  same-type leaves hang off one node *and* the canvas has no room for them, they
+  are drawn as one wedge reading `Type × N (showing none)`, moored outside the
+  fan it belongs to; the image's status block says how many nodes were folded
+  this way. On a canvas too small to name every node, the picture keeps the
+  names a reader can use and says how many it dropped.
 - **`POST /api/render` on the running server** answers with the image bytes and
   the right content type, so an agent attached to a live session can ask for a
   picture without a browser in the loop. It renders against a private view of
