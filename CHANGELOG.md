@@ -13,6 +13,20 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- **The engine's query advisories now reach the person who typed the query.**
+  kglite raises non-fatal warnings for an unknown label, an unknown
+  relationship type or an absent property, each with a "did you mean?" hint —
+  and until now every one of them went to the *server's* stderr while the
+  browser showed "0 rows" and nothing else. `MATCH (n:NoSuchLabel) RETURN n`
+  against a 546 850-node graph answered `200` with an empty table, which reads
+  as "the graph has no such nodes" rather than "you mistyped a label". The
+  advisories now ride the result table and are drawn above it, in kglite's own
+  wording. The one warning still filtered out is the row-limit truncation
+  notice, because the truncation banner already says that in this app's
+  wording. `QueryTable` also carries a `timed_out` flag beside them, so a
+  future engine that cancels a query at its deadline and returns the partial
+  rows cannot have them read as a complete answer.
+
 - **A load ceiling, so a graph too big for the machine is refused instead of
   swapped.** `kglite-visual --max-load-mb N`, `kglite-visual render
   --max-load-mb N` and `show(path, max_load_mb=N)` ask the engine what the

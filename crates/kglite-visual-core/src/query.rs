@@ -24,15 +24,32 @@
 //! equivalent, so [`MAX_QUERY_BYTES`] stays a second ceiling applied here over
 //! whatever survives the first.
 //!
-//! **The engine's truncation warning is deliberately not forwarded.** kglite
-//! also raises an ordinary query warning on truncation, so that a caller who
-//! reads nothing but `warnings` still learns its result was cut. This project
-//! is not that caller: [`BoundInfo`] is on every response whether the bound
-//! fired or not, the UI must display it, and the renderer draws it into the
-//! picture — so forwarding the warning would put the same fact on screen twice,
-//! in two wordings, one of which we do not control. The warning would only
-//! start carrying information the banner lacks if `returned`/`total` ever
-//! stopped being exact, and the test above is what holds that.
+//! **The engine's warnings are forwarded — except the truncation one.** kglite
+//! raises non-fatal advisories on a `CypherResult`: an unknown label, an
+//! unknown relationship type, an absent property, each with a "did you mean?"
+//! hint. It also raises one on `row_limit` truncation, so that a caller who
+//! reads nothing but `warnings` still learns its result was cut.
+//!
+//! This project is not that caller *for the truncation one*: [`BoundInfo`] is on
+//! every response whether the bound fired or not, the UI must display it, and
+//! the renderer draws it into the picture — so forwarding it too would put the
+//! same fact on screen twice, in two wordings, one of which we do not control.
+//! That paragraph used to end there, and the code implemented it as *no*
+//! warning ever crossing the wire, which is a much larger claim than the
+//! argument supports. Measured against sodir on 2026-08-30:
+//! `MATCH (n:NoSuchLabel) RETURN n LIMIT 3` answered `200` with zero rows and
+//! nothing else, while the engine's *"MATCH references unknown node label
+//! 'NoSuchLabel'"* went to the **server's** stderr — a terminal the person
+//! reading "0 rows in 2 ms" in their browser is not looking at. A typo that
+//! reads as an empty graph is the failure [`QueryTable::warnings`] now exists
+//! to prevent.
+//!
+//! [`is_row_limit_warning`] is the one place in this crate that matches on an
+//! engine message's text, and the direction of its inaccuracy is deliberate: a
+//! reworded truncation warning stops being recognised and is forwarded, costing
+//! one duplicated line beside a banner that already says it. It can never drop a
+//! warning that is not about truncation, because it also requires the engine to
+//! have reported an actual truncation.
 //!
 //! **Search is server-side, always** (plan D7). No client-side index: an index
 //! the browser builds is an index over what the browser already has, which on a
@@ -99,8 +116,10 @@ pub const MAX_QUERY_BYTES: usize = 2 * 1024 * 1024;
 /// spelling. The response bound is applied by [`to_table`] instead, where it
 /// can truncate and say so.
 ///
-/// Nothing in this crate matches on the message text, so the wording change
-/// crosses no code path here: the engine's error is forwarded verbatim.
+/// No code path here matches on an *error's* message text, so the wording
+/// change crosses none of them: the engine's error is forwarded verbatim.
+/// (The one text match in this file is [`is_row_limit_warning`], over a
+/// non-fatal *warning*, and it names the field rather than the prose.)
 ///
 /// So this number is what it says: a runaway guard. Well under kglite's own
 /// 10 000 000 unbounded backstop, because that backstop is sized for a batch
@@ -180,6 +199,33 @@ pub struct QueryTable {
     /// Whether the query was an `EXPLAIN`. The rows are a plan, not data, and a
     /// UI that offered "show in graph" for them would be offering nonsense.
     pub explain: bool,
+    /// The engine cancelled this query at its deadline, and the rows above are
+    /// whatever had been materialised when it did.
+    ///
+    /// **Always `false` against kglite 0.16.15**, and that is a fact about the
+    /// engine rather than about this field. `QueryDiagnostics::timed_out` is
+    /// declared and documented there ("the result rows are the partial set
+    /// materialised before cancellation") but never assigned `true`: grepped
+    /// across the whole crate on 2026-08-30, the only writes to any
+    /// `timed_out` are an unrelated local `AtomicBool` in
+    /// `graph/algorithms/centrality.rs`. Every deadline path in the Cypher
+    /// executor returns `Err("Query timed out")` instead, which reaches a
+    /// caller here as [`CoreError::Query`] and an HTTP 422 carrying kglite's
+    /// own message — verified against sodir at `--query-timeout-secs 1`.
+    ///
+    /// So this is carried, not derived from a symptom that exists today. The
+    /// day the engine wires the flag, a partial result would otherwise arrive
+    /// here indistinguishable from a complete one — `bound.truncated` is
+    /// `false` for it, because nothing was truncated; the query simply stopped.
+    /// Reported upstream rather than worked around: it is the engine's field.
+    pub timed_out: bool,
+    /// kglite's non-fatal advisories for this query, in the engine's own
+    /// wording — an unknown label, an unknown relationship type, an absent
+    /// property, each with its "did you mean?" hint.
+    ///
+    /// The engine's truncation warning is filtered out here; see the module
+    /// header for why that one, and only that one.
+    pub warnings: Vec<String>,
 }
 
 /// Run a read-only Cypher query.
@@ -218,11 +264,18 @@ pub fn run_cypher(
     )?;
     let elapsed_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
 
-    let total_rows = outcome
-        .result
-        .diagnostics
-        .as_ref()
-        .and_then(|d| d.total_rows);
+    let diagnostics = outcome.result.diagnostics.as_ref();
+    let total_rows = diagnostics.and_then(|d| d.total_rows);
+    let timed_out = diagnostics.is_some_and(|d| d.timed_out);
+    // The engine's `elapsed_ms` is deliberately not adopted: it times parse +
+    // plan + execute, and `elapsed_ms` here is what the *caller* waited for,
+    // which is that plus the transpose and the byte bound. Two numbers under
+    // one name would be a field that means something different depending on
+    // which side of the call you read it from.
+    let warnings = diagnostics
+        .map(|d| forwarded_warnings(&d.warnings, total_rows.is_some()))
+        .unwrap_or_default();
+
     let mut table = to_table(
         outcome.result.columns,
         outcome.result.rows,
@@ -231,7 +284,33 @@ pub fn run_cypher(
     );
     table.elapsed_ms = elapsed_ms;
     table.explain = outcome.explain;
+    table.timed_out = timed_out;
+    table.warnings = warnings;
     Ok(table)
+}
+
+/// kglite's advisories, minus the one this project already draws itself.
+///
+/// `truncated` is the engine's own report that `row_limit` fired
+/// (`QueryDiagnostics::total_rows.is_some()`), not our byte bound — so a
+/// warning that merely mentions `row_limit` on an untruncated query is
+/// forwarded like any other.
+fn forwarded_warnings(warnings: &[String], truncated: bool) -> Vec<String> {
+    warnings
+        .iter()
+        .filter(|warning| !(truncated && is_row_limit_warning(warning)))
+        .cloned()
+        .collect()
+}
+
+/// The truncation advisory, recognised by the public field name it quotes.
+///
+/// `row_limit` is `ExecuteOptions`' own field, so it moves only in a release
+/// that breaks the call site above; the surrounding prose is free to be
+/// reworded, and if it ever loses the name the warning is forwarded rather
+/// than dropped (see the module header).
+fn is_row_limit_warning(warning: &str) -> bool {
+    warning.contains("row_limit")
 }
 
 /// The one `ExecuteOptions` construction site in this crate.
@@ -341,6 +420,8 @@ fn to_table(
         node_ids,
         relationships,
         explain: false,
+        timed_out: false,
+        warnings: Vec::new(),
     }
 }
 
@@ -776,6 +857,104 @@ mod tests {
         )
         .expect("the query runs");
         assert_eq!(uncapped.result.rows.len(), NODES);
+    }
+
+    /// The bug this file's warning forwarding exists to fix.
+    ///
+    /// Before it, this query answered `200` with an empty table and nothing
+    /// else, while kglite's *"MATCH references unknown node label"* advisory
+    /// went to the server process's stderr — so the person reading "0 rows"
+    /// in a browser concluded the graph had no such nodes rather than that
+    /// they had mistyped a label.
+    #[test]
+    fn an_unknown_label_advisory_reaches_the_caller_instead_of_the_servers_stderr() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        execute_mut(
+            &mut graph,
+            "CREATE (:Item {n: 1})\n",
+            &ExecuteOptions::eager(&empty),
+        )
+        .expect("fixture builds");
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (n:NoSuchLabel) RETURN n".to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("an unknown label is a warning, not an error");
+
+        assert_eq!(
+            table.bound.returned, 0,
+            "the pattern really matches nothing"
+        );
+        assert!(
+            table
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("NoSuchLabel")),
+            "the engine's advisory was dropped: {:?}",
+            table.warnings
+        );
+    }
+
+    #[test]
+    fn the_truncation_advisory_is_the_only_one_the_banner_replaces() {
+        let engine = [
+            "Result truncated by row_limit: showing 5000 of 546850 rows.".to_string(),
+            "MATCH references unknown node label 'Persn' — did you mean 'Person'?".to_string(),
+        ];
+
+        // Truncated: our own BoundInfo banner already says it, in our wording.
+        let kept = forwarded_warnings(&engine, true);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!(kept[0].contains("Persn"));
+
+        // Not truncated: nothing here is a duplicate of anything, so nothing is
+        // dropped — including a message that merely names the field.
+        assert_eq!(forwarded_warnings(&engine, false).len(), 2);
+    }
+
+    /// Two additive fields whose absence is the failure, not their value.
+    ///
+    /// `timed_out` is `false` on every real result kglite 0.16.15 produces
+    /// (see the field's own doc), so nothing in this crate can observe it
+    /// firing. What *can* be observed — and what breaks the moment someone
+    /// adds `skip_serializing_if` or renames a field to match a Rust-side
+    /// tidy-up — is that both reach the wire at all, beside a `bound` that
+    /// reports a cancelled query as untruncated.
+    #[test]
+    fn the_diagnostic_fields_are_on_the_wire_and_the_bound_does_not_cover_them() {
+        let mut table = to_table(
+            vec!["n".into()],
+            vec![vec![Value::Int64(1)]],
+            Bound {
+                max_items: 10,
+                max_bytes: 10_000,
+            },
+            None,
+        );
+        table.timed_out = true;
+        table.warnings = vec!["absent property 'titel'".to_string()];
+
+        assert!(
+            !table.bound.truncated,
+            "a cancelled query is not a truncated one, which is why timed_out exists"
+        );
+        let json = serde_json::to_value(&table).expect("serializes");
+        assert_eq!(json["timed_out"], serde_json::json!(true));
+        assert_eq!(
+            json["warnings"],
+            serde_json::json!(["absent property 'titel'"])
+        );
     }
 
     #[test]

@@ -326,6 +326,12 @@
   white-space: nowrap;
 }
 
+.kglv-diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .kglv-results {
   max-height: 220px;
   overflow: auto;

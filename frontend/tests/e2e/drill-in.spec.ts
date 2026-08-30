@@ -169,6 +169,22 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
     await expect(table.locator('tr').nth(1)).toContainText('12')
     await expect(page.getByTestId('query-status')).toContainText('3 rows')
     expect((await state(page)).queryRows).toBe(3)
+    // A clean query says nothing extra. Asserted so the advisory check below
+    // cannot pass by the panel simply always showing a line.
+    await expect(page.getByTestId('query-warning')).toHaveCount(0)
+
+    // ── a mistyped label is an advisory, not an empty graph ─────────────
+    // kglite raises this one and it used to reach only the SERVER's stderr, so
+    // the panel showed "0 rows" and the user read it as "no such nodes".
+    await page.getByTestId('query-input').fill('MATCH (n:Persn) RETURN n LIMIT 3')
+    await page.getByTestId('query-run').click()
+    await expect(page.getByTestId('query-status')).toContainText('0 rows')
+    await expect(page.getByTestId('query-warning').first()).toContainText('Persn')
+    // Back to a query that works, so the collapse below acts on the same view
+    // the assertions above described.
+    await page.getByTestId('query-input').fill('MATCH (p:Person) RETURN p.title LIMIT 3')
+    await page.getByTestId('query-run').click()
+    await expect(page.getByTestId('query-warning')).toHaveCount(0)
 
     // ── collapse back to the meta-graph ─────────────────────────────────
     await page.getByTestId('collapse').click()

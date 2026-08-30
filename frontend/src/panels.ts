@@ -60,6 +60,7 @@ export class Panels {
   private readonly queryInput: HTMLTextAreaElement
   private readonly queryAsGraph: HTMLInputElement
   private readonly queryStatus: HTMLDivElement
+  private readonly queryDiagnostics: HTMLDivElement
   private readonly queryResults: HTMLDivElement
   private readonly selection: HTMLDivElement
   private readonly expandLimit: HTMLInputElement
@@ -163,8 +164,18 @@ export class Panels {
     queryRow.append(run, asGraphLabel)
     this.queryStatus = element('div', 'kglv-hint')
     this.queryStatus.setAttribute('data-testid', 'query-status')
+    // The engine's own diagnostics, between the count and the rows: a warning
+    // printed under the table is a warning read after the conclusion was drawn.
+    this.queryDiagnostics = element('div', 'kglv-diagnostics')
+    this.queryDiagnostics.setAttribute('data-testid', 'query-diagnostics')
     this.queryResults = element('div', 'kglv-results')
-    query.append(this.queryInput, queryRow, this.queryStatus, this.queryResults)
+    query.append(
+      this.queryInput,
+      queryRow,
+      this.queryStatus,
+      this.queryDiagnostics,
+      this.queryResults,
+    )
     this.root.appendChild(this.section('Cypher', query))
   }
 
@@ -282,9 +293,41 @@ export class Panels {
     )
   }
 
+  /**
+   * What the engine said about the query, beside what it answered.
+   *
+   * Two separate facts, and neither is the response bound: `truncated` means
+   * "there is more of this answer", `timed_out` means "this is not the answer",
+   * and a warning means "the answer may not be to the question you typed". The
+   * last one is the reason this block exists at all — kglite's unknown-label
+   * advisory used to reach only the *server's* stderr, so a mistyped label
+   * rendered as an empty result and read as an empty graph.
+   */
+  private showQueryDiagnostics(table: QueryTable): void {
+    this.queryDiagnostics.replaceChildren()
+    if (table.timed_out) {
+      const line = element(
+        'div',
+        'kglv-hint kglv-error',
+        'the engine cancelled this query at its time limit — the rows below are ' +
+          'a partial answer, not a short one',
+      )
+      line.setAttribute('data-testid', 'query-timed-out')
+      this.queryDiagnostics.appendChild(line)
+    }
+    for (const warning of table.warnings) {
+      // kglite's own wording, verbatim: it carries the offending name and a
+      // "did you mean?" hint, which is the whole of what the user can act on.
+      const line = element('div', 'kglv-hint kglv-warn', warning)
+      line.setAttribute('data-testid', 'query-warning')
+      this.queryDiagnostics.appendChild(line)
+    }
+  }
+
   /** The results table. Rows are already bounded by the server (D5). */
   showQueryTable(table: QueryTable): number {
     this.queryResults.replaceChildren()
+    this.showQueryDiagnostics(table)
     const rows = table.data[0]?.length ?? 0
     const bound = table.bound.truncated
       ? `showing ${count(table.bound.returned)} of ${count(table.bound.total)} rows`
@@ -310,6 +353,9 @@ export class Panels {
 
   showQueryError(message: string): void {
     this.queryResults.replaceChildren()
+    // The previous run's advisories described the previous query. Left up, they
+    // would read as an explanation of this failure.
+    this.queryDiagnostics.replaceChildren()
     this.queryStatus.className = 'kglv-hint kglv-error'
     // kglite's own diagnostic, verbatim: position, expected token, the schema
     // name it could not resolve. A friendlier summary would delete the only
