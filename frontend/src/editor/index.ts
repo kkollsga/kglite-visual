@@ -26,10 +26,16 @@
  * Backspace deletes, select-all selects.
  */
 
+import {
+  autocompletion,
+  completionKeymap,
+  startCompletion,
+} from '@codemirror/autocomplete'
 import { history, historyKeymap } from '@codemirror/commands'
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 
+import { cypherCompletions } from './completions'
 import type { QueryEditor, QueryEditorOptions } from './contract'
 import { cypherLanguage } from './cypher'
 import { cypherTheme } from './theme'
@@ -52,12 +58,29 @@ export function mountCypherEditor(options: QueryEditorOptions): QueryEditor {
           },
         ]),
         history(),
-        keymap.of(historyKeymap),
+        keymap.of([...historyKeymap, ...completionKeymap]),
+        // One source, replacing the defaults: there is no word-from-the-document
+        // fallback, because in a 340px panel a list of the words already on
+        // screen sits on top of the list of names that are actually in the
+        // graph. `icons: false` for the same reason — the icon column costs
+        // more width than the type it names is worth.
+        autocompletion({
+          icons: false,
+          override: [cypherCompletions(options.schema)],
+        }),
         cypherLanguage,
         cypherTheme,
         EditorView.lineWrapping,
       ],
     }),
+  })
+
+  // A property list that arrived after the list was opened is a list the user
+  // never sees. `SchemaCache` fetches a type's properties the first time
+  // completion asks for them, so the first `w.` on a fresh type is exactly that
+  // case, and re-running the query when the answer lands is what closes it.
+  options.schema.onChange(() => {
+    if (view.hasFocus) startCompletion(view)
   })
 
   return {

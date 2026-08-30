@@ -15,7 +15,7 @@
  */
 
 import { statLabel } from './appearance'
-import type { QueryEditor } from './editor/contract'
+import type { QueryEditor, SchemaSource } from './editor/contract'
 import type { EdgeDirection } from './generated/EdgeDirection'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { NodeDetail } from './generated/NodeDetail'
@@ -91,6 +91,7 @@ export class Panels {
   constructor(
     container: HTMLElement,
     private readonly handlers: PanelHandlers,
+    private readonly schema: SchemaSource,
   ) {
     this.root = element('div', 'kglv-panels')
     container.appendChild(this.root)
@@ -261,6 +262,7 @@ export class Panels {
         parent: this.queryHost,
         doc: text,
         onRun: () => this.runCurrentQuery(),
+        schema: this.schema,
       })
       this.editorNote.remove()
     } catch (err) {

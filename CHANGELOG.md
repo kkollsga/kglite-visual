@@ -21,8 +21,18 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
   multi-line editing and Ctrl/Cmd+Enter all work as before; save, load and the
   recent list still put queries into it and read them back.
 
+  It also completes from **your graph's own schema**: `:` inside a node pattern
+  offers the node labels, `:` inside brackets offers the relationship types,
+  and `alias.` offers the properties of whatever type that alias was bound to —
+  on sodir, `MATCH (w:W` offers 15 Wellbore-ish types and `w.` offers 91
+  Wellbore properties. Nothing is guessed: the labels and relationship types
+  come from the meta-graph the entry screen already loaded, and a type's
+  properties are fetched once, the first time you ask for them. An alias the
+  editor cannot bind to a label offers nothing rather than every property of
+  every type.
+
   It is CodeMirror 6 with hand-picked extensions rather than a stock setup, and
-  it arrives in **its own chunk, fetched after the page is already usable** (84
+  it arrives in **its own chunk, fetched after the page is already usable** (96
   KB gzipped, no change to the main bundle). The plain text box is what you get
   until it lands, and what you keep if it never does — in which case the panel
   says so in one line rather than quietly handing you a worse editor.

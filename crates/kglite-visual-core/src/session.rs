@@ -79,6 +79,13 @@ pub struct ErrorMessage {
 /// schema document is byte-identical. Generating a TypeScript type for it here
 /// would be this crate claiming ownership of a shape kglite owns. The frontend
 /// does not consume this endpoint; agents and `curl` do.
+///
+/// The editor's schema-aware completions are the obvious counter-example and
+/// deliberately are not one: they feed from the meta-graph, which the entry
+/// screen already carries, and from `property-stats` per type, fetched lazily
+/// (plan E2). Reversing this decision because a browser feature would have
+/// found it convenient would leave the note above describing an endpoint the
+/// frontend depends on.
 #[derive(Debug, Clone, Serialize)]
 pub struct DescribeResponse {
     pub protocol_version: u32,

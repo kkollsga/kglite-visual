@@ -40,6 +40,7 @@ import { LabelOverlay } from './labels'
 import { Panels } from './panels'
 import { assertLittleEndian, fnv1a, ResponseAssembler, type Completed } from './protocol'
 import * as store from './queries'
+import { SchemaCache } from './schema'
 import { axesFor, layoutModeFromSearch, mountGraph, type Appearance, type Surface } from './render'
 import { connectedAtom } from './state'
 import { rendersGraph } from './tiers'
@@ -110,6 +111,15 @@ const appearanceValues = new Map<number, unknown>()
 /** Values for the size channel, keyed by slot. Separate array, separate query. */
 const sizeValues = new Map<number, number>()
 
+/**
+ * The schema behind the editor's completions.
+ *
+ * Filled from the meta-graph the moment it arrives — the same payload that
+ * draws the entry screen — and topped up per type, lazily, when the editor asks
+ * for a label's properties (plan E2).
+ */
+const schema = new SchemaCache()
+
 const panels = new Panels(root, {
   runQuery: (query, asGraph) => {
     if (query.trim() === '') return
@@ -158,7 +168,7 @@ const panels = new Panels(root, {
   setSizeBy: (property) => applySizeBy(property),
   saveQuery: (name, query) => void refreshQueries(store.saveQuery(name, query)),
   deleteQuery: (name) => void refreshQueries(store.deleteQuery(name)),
-})
+}, schema)
 
 /**
  * Run a store mutation, then re-read the store and redraw the list.
@@ -417,6 +427,7 @@ async function showMetaGraph(message: {
   debugState.protocolVersion = message.meta.protocol_version
   debugState.positionsHash = fnv1a(message.points)
   panels.setNodeTypes(message.meta.nodes.map((node) => node.name))
+  schema.setMetaGraph(message.meta)
   renderStatus()
 
   if (!rendersGraph(message.meta.tier)) {

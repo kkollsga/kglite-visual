@@ -88,3 +88,56 @@ test('the query editor: CodeMirror replaces the textarea and keeps its contract'
     server?.process.kill()
   }
 })
+
+/** Type at the caret and read back whatever the completion list is offering. */
+async function offered(page: Page, typed: string): Promise<string[]> {
+  await fillQuery(page, '')
+  await page.locator(`${HOST} .cm-content`).click()
+  await page.keyboard.type(typed, { delay: 20 })
+  await page.locator('.cm-tooltip-autocomplete').waitFor({ timeout: 10_000 })
+  // The label span, not the whole row: a property row also carries the type it
+  // belongs to as detail text, so `li.textContent` reads "titlePerson".
+  return page
+    .locator('.cm-tooltip-autocomplete li .cm-completionLabel')
+    .evaluateAll((items) => items.map((item) => item.textContent ?? ''))
+}
+
+test('completions come from this graph, not from a word list', async ({ page }) => {
+  let server: Launched | null = null
+  try {
+    server = await launch()
+    await page.goto(appUrl(server.info))
+    await ready(page)
+    await expect(page.locator(`${HOST} .cm-content`)).toBeVisible()
+
+    // ── ':' in a node pattern offers the fixture's node labels ───────────
+    const labels = await offered(page, 'MATCH (p:Pe')
+    expect(labels).toContain('Person')
+    // Never the relationship vocabulary: the two are different halves of the
+    // schema and offering both would make the list useless in both positions.
+    expect(labels).not.toContain('KNOWS')
+
+    // ── ':' inside brackets offers relationship types ────────────────────
+    const relationships = await offered(page, 'MATCH (p)-[:KN')
+    expect(relationships).toContain('KNOWS')
+    expect(relationships).not.toContain('Person')
+
+    // ── '.' after an alias offers that type's properties ─────────────────
+    // These are not in hand when the editor opens: the type's `property-stats`
+    // are fetched on the first ask, so this also proves the re-query that lets
+    // a late answer reach an already-open list.
+    await expect
+      .poll(() => offered(page, 'MATCH (p:Person) RETURN p.ti'), { timeout: 15_000 })
+      .toContain('title')
+
+    // ── an alias the scan cannot bind offers nothing ─────────────────────
+    // Rather than every property of every type, which is a list you can only
+    // filter by already knowing the answer.
+    await fillQuery(page, '')
+    await page.locator(`${HOST} .cm-content`).click()
+    await page.keyboard.type('MATCH (p:Person) RETURN q.ti', { delay: 20 })
+    await expect(page.locator('.cm-tooltip-autocomplete')).toHaveCount(0)
+  } finally {
+    server?.process.kill()
+  }
+})

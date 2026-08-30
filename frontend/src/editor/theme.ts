@@ -77,7 +77,6 @@ const editorTheme = EditorView.theme(
       color: '#ffffff',
     },
     '.cm-completionDetail': { color: CHROME.muted, fontStyle: 'normal', marginLeft: '8px' },
-    '.cm-completionIcon': { display: 'none' },
     '.cm-diagnostic': { padding: '4px 8px', borderLeftWidth: '4px' },
     '.cm-diagnostic-error': { borderLeftColor: CHROME.error },
     '.cm-diagnostic-warning': { borderLeftColor: CHROME.warn },

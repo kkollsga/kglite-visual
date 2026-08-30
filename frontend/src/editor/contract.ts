@@ -17,6 +17,22 @@ export type QueryEditor = {
   focus(): void
 }
 
+/**
+ * What completion reads. `SchemaCache` implements it; the editor never learns
+ * where any of it came from, which is what keeps the fetching in the entry
+ * chunk and out of the editor's.
+ *
+ * Every method answers **now**, from cache. `onChange` is how a lazily fetched
+ * answer reaches an already-open completion list.
+ */
+export type SchemaSource = {
+  labels(): readonly string[]
+  relationshipTypes(): readonly string[]
+  /** Cached property names of one node label; empty until a fetch lands. */
+  propertiesFor(label: string): readonly string[]
+  onChange(listener: () => void): void
+}
+
 /** Everything the editor needs at mount time. */
 export type QueryEditorOptions = {
   /** Where the editor's DOM goes. */
@@ -25,4 +41,6 @@ export type QueryEditorOptions = {
   doc: string
   /** Ctrl/Cmd+Enter. The panel decides what running means. */
   onRun: () => void
+  /** Labels, relationship types and per-type properties, already in hand. */
+  schema: SchemaSource
 }
