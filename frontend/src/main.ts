@@ -305,19 +305,36 @@ panels.addSection('Path', pathBuilder.root)
  * what ran and can edit it into the question they actually had. It is then run
  * down the **ordinary bounded path** — the same `cypher` request the Run button
  * sends — so a table of 40 000 nodes is truncated and says so, exactly like a
- * hand-typed query. And the ids are the **slot space's**, not the graph's: this
- * is a table of what is on screen, which on a 546 850-node graph is a different
- * question from "every node of this type".
+ * hand-typed query. And the rows are only the nodes **on screen**, which on a
+ * 546 850-node graph is a different question from "every node of this type".
+ *
+ * The ids handed to the query are each node's `id` **field** (`nodeKey`), not
+ * its slot-space index. Those are two different numbers and Cypher can only see
+ * the first; sending the second is what made this table answer with no rows on
+ * one sodir type and with the wrong rows on another. See `SliceNode.key`.
  */
 function showTypeTable(nodeType: string): void {
-  const ids: number[] = []
+  const ids: unknown[] = []
+  let unnameable = 0
   for (const slot of view.liveSlots()) {
     const label = view.label(slot)
     if (label?.isType === false && label.nodeType === nodeType && label.nodeId !== null) {
-      ids.push(label.nodeId)
+      // A node with no `id` field cannot be named by any generated query. It is
+      // counted and reported rather than dropped, because a table that quietly
+      // omits rows is a table that lies about being "of what is on screen".
+      if (label.nodeKey === null || label.nodeKey === undefined) unnameable += 1
+      else ids.push(label.nodeKey)
     }
   }
-  if (ids.length === 0) return
+  if (ids.length === 0) {
+    panels.showQueryError(
+      unnameable > 0
+        ? `none of the ${unnameable} ${nodeType} nodes on screen carry an id field, so no ` +
+            'query can name them — select them in the graph instead'
+        : `no ${nodeType} nodes are on screen`,
+    )
+    return
+  }
 
   const columns = tableColumns([...lastStats.values()])
   let generated
@@ -331,17 +348,22 @@ function showTypeTable(nodeType: string): void {
     return
   }
   panels.loadGeneratedQuery(generated.query)
-  const dropped = lastStats.size - columns.length
-  if (dropped > 0) {
+  const notes: string[] = []
+  if (lastStats.size > columns.length) {
     // The cap is a fact about the table, so it is said before the rows arrive
     // rather than left for the user to notice a missing column.
-    panels.showTableNote(
+    notes.push(
       `${columns.length} of ${lastStats.size} properties, the ones most ${nodeType} nodes ` +
         'carry — edit the RETURN clause above for the rest',
     )
-  } else {
-    panels.showTableNote(null)
   }
+  if (unnameable > 0) {
+    notes.push(
+      `${unnameable} of ${ids.length + unnameable} on screen have no id field and cannot be ` +
+        'named by a query — they are not in these rows',
+    )
+  }
+  panels.showTableNote(notes.length > 0 ? notes.join(' · ') : null)
   send({
     type: 'cypher',
     query: generated.query,

@@ -1002,3 +1002,70 @@ fn exporting_the_live_view_writes_the_view_and_never_the_whole_graph() {
         exported.filename
     );
 }
+
+/// A slice's `key` is the handle a generated query can name the node by, and it
+/// is **not** `node_id`.
+///
+/// This is the regression test for a shipped defect: the type-table action
+/// generated `MATCH (n:T) WHERE id(n) IN $ids` and filled `$ids` with
+/// `node_id`, the engine's internal `NodeIndex`. Cypher's `id(n)` reads
+/// kglite's `id` *field* instead — the source data's own key — so on sodir the
+/// table answered 0 rows for `FieldReserves` (keys 1..2 329 against indices
+/// ~41 000) and the **wrong** rows for `Wellbore`, whose ranges overlap.
+///
+/// The assertion is end-to-end on purpose: it runs the query the panel
+/// generates, against the keys the slice actually carried, and it fails for any
+/// key that does not name its node.
+///
+/// **What it cannot catch, stated because a gate's blind spot is part of the
+/// gate**: on *this fixture* the two spaces coincide — every Person's `id`
+/// field equals its `NodeIndex` (58, 59, 60 …), because the generator writes
+/// them in order — so a `key` copied from `node_id` would still pass here. The
+/// confusion was found by measuring against sodir, where `FieldReserves` keys
+/// run 1..2 329 against indices near 41 000, and only a fixture with two
+/// genuinely different id spaces would catch it locally. Making it one means
+/// regenerating the committed fixture and every exact number in this file,
+/// which is its own change.
+#[test]
+fn a_slices_key_is_what_a_generated_query_can_name_the_node_by() {
+    let session = open_fixture();
+    let Response::Slice(slice) = session
+        .handle(&expand_request("KNOWS", EdgeDirection::Out, Some(40)))
+        .expect("the expansion runs")
+    else {
+        panic!("expected a slice");
+    };
+
+    let keys: Vec<serde_json::Value> = slice
+        .meta
+        .nodes
+        .iter()
+        .filter(|node| node.node_type == "Person")
+        .map(|node| {
+            node.key
+                .clone()
+                .expect("the fixture's Person carries an id field")
+        })
+        .collect();
+    assert!(
+        !keys.is_empty(),
+        "the expansion must have added Person nodes"
+    );
+
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("ids".to_string(), serde_json::json!(keys));
+    let request = Request::Cypher(CypherRequest {
+        query: "MATCH (n:Person) WHERE id(n) IN $ids RETURN count(n) AS found".to_string(),
+        params,
+        limit: None,
+        as_graph: false,
+    });
+    let Response::Query(table) = session.handle(&request).expect("the count runs") else {
+        panic!("expected a table");
+    };
+    assert_eq!(
+        table.data[0][0],
+        serde_json::json!(keys.len()),
+        "every key the slice carried must name exactly one node of that type"
+    );
+}

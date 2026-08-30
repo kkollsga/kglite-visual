@@ -41,6 +41,16 @@ export type SlotLabel = {
   supporting: boolean
   /** kglite node id, for an instance node. */
   nodeId: number | null
+  /**
+   * The node's `id` **field** — what Cypher's `id(n)` evaluates to.
+   *
+   * Not {@link nodeId}, which is the engine's internal index and what every
+   * request in this app names a node by. The two are different values and a
+   * generated query needs this one; see `SliceNode.key` for the defect that
+   * bought the distinction. `null` when the node has no `id` field, and for a
+   * type node, which is not a node in the graph at all.
+   */
+  nodeKey: unknown
   /** Node type, for an instance node. */
   nodeType: string | null
 }
@@ -139,6 +149,7 @@ export class SlotView {
         isType: true,
         supporting: node.supporting,
         nodeId: null,
+        nodeKey: null,
         nodeType: node.name,
       })
     }
@@ -175,6 +186,7 @@ export class SlotView {
         isType: false,
         supporting: false,
         nodeId: node.node_id,
+        nodeKey: node.key ?? null,
         nodeType: node.node_type,
       })
       this.slotOfNode.set(node.node_id, node.slot)

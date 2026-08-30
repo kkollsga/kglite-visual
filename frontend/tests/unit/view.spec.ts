@@ -66,9 +66,9 @@ function seeded(): SlotView {
     slice({
       first_slot: 2,
       nodes: [
-        { slot: 2, node_id: 100, node_type: 'Person', title: 'ada' },
-        { slot: 3, node_id: 101, node_type: 'Person', title: 'linus' },
-        { slot: 4, node_id: 102, node_type: 'Person', title: '' },
+        { slot: 2, node_id: 100, node_type: 'Person', title: 'ada', key: null },
+        { slot: 3, node_id: 101, node_type: 'Person', title: 'linus', key: null },
+        { slot: 4, node_id: 102, node_type: 'Person', title: '', key: null },
       ],
       slot_count: 5,
     }),
@@ -184,7 +184,7 @@ test('re-expanding after a collapse revives the slot the server chose', () => {
   view.applySlice(
     slice({
       first_slot: 5,
-      nodes: [{ slot: 5, node_id: 100, node_type: 'Person', title: 'ada' }],
+      nodes: [{ slot: 5, node_id: 100, node_type: 'Person', title: 'ada', key: null }],
       slot_count: 6,
       tombstone_count: 1,
     }),
@@ -216,8 +216,8 @@ test('a slice that both adds nodes and compacts lands them at their new slots', 
     slice({
       first_slot: 5,
       nodes: [
-        { slot: 5, node_id: 200, node_type: 'Person', title: 'grace' },
-        { slot: 6, node_id: 201, node_type: 'Person', title: 'alan' },
+        { slot: 5, node_id: 200, node_type: 'Person', title: 'grace', key: null },
+        { slot: 6, node_id: 201, node_type: 'Person', title: 'alan', key: null },
       ],
       slot_count: 5,
       tombstone_count: 0,

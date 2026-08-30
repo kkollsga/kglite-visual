@@ -33,7 +33,7 @@ use crate::request::{
 };
 use crate::stats::{self, NodeDetail, PropertyStatsResponse};
 use crate::validate::{validate_query, ValidateResponse};
-use crate::values::value_to_display;
+use crate::values::{value_to_display, value_to_json};
 use crate::view::{Compaction, GraphSliceMeta, SliceKind, SliceNode, SlotEntry, View, ViewEdge};
 use crate::{bound::BoundInfo, layout};
 
@@ -618,10 +618,11 @@ impl Session {
         let mut added: Vec<SliceNode> = Vec::new();
 
         for index in nodes {
-            let (node_type, title) = match self.graph.node_view(*index) {
+            let (node_type, title, key) = match self.graph.node_view(*index) {
                 Some(node) => (
                     node.node_type_str(&self.graph.interner).to_string(),
                     value_to_display(&node.title()),
+                    node_key(&node.id()),
                 ),
                 None => continue,
             };
@@ -633,6 +634,7 @@ impl Session {
                     node_id,
                     node_type,
                     title,
+                    key,
                 });
             }
         }
@@ -893,6 +895,16 @@ impl Session {
                     node_id: *node_id,
                     node_type: node_type.clone(),
                     title: title.clone(),
+                    // Re-read from the graph rather than stored in the slot
+                    // entry. A resync is bounded by the slot space and happens
+                    // when a browser attaches, so one `node_view` per slot is
+                    // cheaper than carrying a second copy of the key through
+                    // every intern and every compaction — where it would be one
+                    // more thing that can fall out of step with the node.
+                    key: self
+                        .graph
+                        .node_view(NodeIndex::new(*node_id as usize))
+                        .and_then(|node| node_key(&node.id())),
                 }),
                 SlotEntry::Tombstone => tombstones.push(slot),
                 // The type nodes are already this client's: they arrived in the
@@ -1126,6 +1138,19 @@ pub fn response_frames(response: &Response) -> Vec<Vec<u8>> {
         }
     }
     enc.finish()
+}
+
+/// The `id` field of one node, as a Cypher-comparable JSON value.
+///
+/// `Value::Null` becomes `None` rather than JSON `null`, and the distinction is
+/// the whole point: a node with no `id` cannot be named by `WHERE id(n) IN
+/// $ids` at all, and sending `null` would put a value in that list which
+/// matches nothing while looking like an identifier.
+fn node_key(id: &kglite::api::Value) -> Option<serde_json::Value> {
+    match id {
+        kglite::api::Value::Null => None,
+        value => Some(value_to_json(value)),
+    }
 }
 
 fn json_of<T: Serialize>(value: &T) -> String {

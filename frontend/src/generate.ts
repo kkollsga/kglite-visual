@@ -88,6 +88,15 @@ export function identifier(name: string, what: string): string {
  * The ids are a parameter, so a hundred of them cost one bind rather than a
  * hundred concatenations.
  *
+ * **`ids` are the nodes' `id` FIELDS, never their slot-space node indices**,
+ * and getting that wrong is the defect this signature now exists to prevent.
+ * kglite's `id(n)` reads one of its four builtin *fields* — whatever the source
+ * data called its key — not an internal index. Passing indices made this query
+ * return 0 rows for sodir's `FieldReserves` (keys 1..2 329, indices ~41 000)
+ * and, worse, the **wrong** rows for `Wellbore`, whose key range overlaps its
+ * index range so the count came out right. `unknown[]`, not `number[]`,
+ * because an `id` field can be a string.
+ *
  * `id(n)` leads the columns because it is the one value that identifies a row
  * back to the graph — the label may repeat, and a table of forty `Ærfugl` rows
  * with no id is a table you cannot act on.
@@ -95,7 +104,7 @@ export function identifier(name: string, what: string): string {
 export function typeTableQuery(
   nodeType: string,
   properties: string[],
-  ids: number[],
+  ids: unknown[],
 ): Generated {
   const label = identifier(nodeType, 'node type')
   const columns = properties.map((name) => identifier(name, 'property'))
@@ -120,10 +129,12 @@ export function typeTableQuery(
  * id` turns the table action into a syntax error on the very first type
  * somebody clicks. Found by running it, not by reading the grammar.
  *
- * Prefixing rather than dropping either column, because they are different
- * facts: `id(n)` is the handle every other request in this app names a node by,
- * and `n.id` is whatever the data calls its own identifier. A user comparing
- * the two is doing something reasonable.
+ * They are the same fact read two ways: `id(n)` is the builtin field and
+ * `n.id` is the stored property of that name, and a type carrying both gets
+ * two columns showing it. (This comment used to say `id(n)` was "the handle
+ * every other request in this app names a node by". It is not — that is the
+ * engine's internal index, which Cypher cannot see — and believing it was is
+ * what put the wrong values in `$ids`.)
  */
 function nodeIdAlias(columns: readonly string[]): string {
   const taken = new Set(columns)

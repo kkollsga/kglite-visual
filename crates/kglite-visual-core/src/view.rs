@@ -112,12 +112,37 @@ pub enum SliceKind {
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct SliceNode {
     pub slot: u32,
-    /// kglite's own node index — the id every later request names this node by.
+    /// kglite's own node index — the id every later request *of this app's*
+    /// names this node by: `expand`, `collapse`, `node`, `export`, the slot
+    /// space, all of it.
+    ///
+    /// **It is not what Cypher's `id(n)` returns**, and conflating the two was
+    /// a shipped defect. See [`SliceNode::key`].
     pub node_id: u32,
     pub node_type: String,
     /// The node's title field, for the label overlay. Empty when the type has
     /// no title: an empty label is honest, a fabricated one is not.
     pub title: String,
+    /// The node's `id` **field** — what kglite's Cypher `id(n)` evaluates to,
+    /// and the only handle a generated query can name this node by.
+    ///
+    /// **A separate value from [`SliceNode::node_id`], because they are
+    /// separate things.** kglite is a property graph over records: `id` is one
+    /// of its four builtin *fields* (`id`, `title`, `name`, `type`), carrying
+    /// whatever the source data called its key, and `id(n)` reads that field.
+    /// `node_id` above is the engine's internal `NodeIndex`. On a graph where
+    /// nothing carries an `id`, or where the two coincide by luck, they look
+    /// interchangeable — which is exactly how `MATCH (n:T) WHERE id(n) IN
+    /// $ids` shipped with `NodeIndex` values in `$ids`, answering **0 rows for
+    /// sodir's `FieldReserves`** (ids 1..2 329 against indices ~41 000) and,
+    /// worse, answering with the **wrong rows** for `Wellbore`, whose `id`
+    /// range happens to overlap the index range. Measured 2026-08-30.
+    ///
+    /// `None` where the node has no `id` field. Such a node cannot be named in
+    /// a generated query at all, and the caller says so rather than quietly
+    /// leaving it out of a table that claims to be of what is on screen.
+    #[ts(type = "unknown")]
+    pub key: Option<serde_json::Value>,
 }
 
 /// The metadata half of a graph slice.
