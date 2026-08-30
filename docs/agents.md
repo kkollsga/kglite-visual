@@ -81,11 +81,12 @@ curl -s -XPOST $B/api/validate       -H "$C" -d '{"query":"MATCH (n:Persn) RETRN
 curl -s -XPOST $B/api/layout         -H "$C" -d '{"kernel":"islands"}'
 curl -s -XPOST $B/api/render         -H "$C" -d '{"source":{"type":"meta"},"format":"png"}' -o m.png
 
-# steering — these answer with {"clients":n}
+# steering — these three answer with {"clients":n}
 curl -s -XPOST $B/api/focus      -H "$C" -d '{"slots":[3,4,5]}'
 curl -s -XPOST $B/api/highlight  -H "$C" -d '{"slots":[3],"concept":"selected"}'
 curl -s -XPOST $B/api/appearance -H "$C" -d '{"color_by":"city","size_by":"age"}'
-curl -s -XPOST $B/api/reset      -H "$C" -d '{}'
+# reset takes no body and answers with the slice it collapsed back to
+curl -s -XPOST $B/api/reset
 
 # the saved-query store
 curl -s       $B/api/queries
@@ -108,8 +109,10 @@ Three rules hold across all of it:
 - **A query the engine rejected is a `422` carrying kglite's own diagnostic
   verbatim.** Quote it; do not summarise it.
 
-The steering endpoints answer `{"clients":n}`, because a command that reached
-nobody is otherwise indistinguishable from one that reached the user.
+The steering endpoints — `focus`, `highlight`, `appearance` — answer
+`{"clients":n}`, because a command that reached nobody is otherwise
+indistinguishable from one that reached the user. Every MCP steering tool
+carries the same number as `connected_viewers`.
 
 ## MCP at `/mcp`
 

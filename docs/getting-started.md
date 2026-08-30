@@ -68,9 +68,10 @@ Everything on that screen is proportional to something real:
 - Link width is the number of edges the relationship type stands for.
 - A **supporting** type — one that hangs off another in the graph's own type
   hierarchy — is drawn quieter than the types the graph is about.
-- The `GEO` and `TS` badges say which types carry coordinates or timeseries.
-  A `GEO` badge is also what makes the {ref}`map layout <geo>`
-  available.
+- The `GEO` and `TS` badges say which types declare a lat/lon location or a
+  WKT geometry, and which declare a timeseries. `GEO` is what tells you that
+  *instances* of that type can go on the {ref}`map layout <geo>` — a type
+  itself is not anywhere, so the entry screen never offers the map.
 
 The status block in the top-left is the honest header: which file is open, the
 schema detail tier, the graph's totals, and how many nodes are actually drawn.
