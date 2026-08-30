@@ -93,15 +93,16 @@ The static render draws the world's coastline and a graticule under the graph,
 from **vendored TopoJSON at three scales, chosen by how much of the world the
 frame covers**:
 
-| Frame covers | Scale |
-|---|---|
-| A hemisphere or more | 1:110M |
-| A shelf | 1:50M |
-| Tighter than 25° | 1:10M |
+| Frame spans | Scale | Why |
+|---|---|---|
+| 120° or more | 1:110M — 130 arcs, 5,129 points | At 180° the finer outline's extra points land inside a pixel |
+| 25° to 120° | 1:50M | At 55° — a whole continental shelf — 110M draws Norway as a lump and loses Svalbard entirely |
+| Under 25° | 1:10M | Below 25° it is the only one that draws a coast at all: the fjords are structure a reader uses, not texture |
 
 So a North Sea crop gets the fjords and a world map does not carry 400,000
 points nothing can resolve. Each ring is cut to the segments the frame can see.
-**No network, no tiles** — the data ships in the binary.
+**No network, no tiles** — the data ships in the binary, gzipped, because the
+1:10M file alone is 3.1 MB of JSON.
 
 The live view gets the **positions only**, not the coastline, and the picker
 says so.
