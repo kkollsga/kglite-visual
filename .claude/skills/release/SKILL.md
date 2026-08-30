@@ -178,7 +178,11 @@ to the user, up front.)*
    0.15.13 engine that way, having checked the six sites documented for its
    *own* version while the floor lived in 15 places across 8 files.
 
-6. **Refresh captured constants and baselines.** This project HAS exact
+6. **Refresh captured constants and baselines — after `make prune-target`
+   first** (doctrine 0.1.9): this step carries the flow's heaviest builds,
+   and pruning before it rather than only in the end-of-run cleanup is what
+   prevents the mid-build ENOSPC the estate paid for four times in one day.
+   This project HAS exact
    committed baselines — the protocol framing baseline (P2,
    `crates/kglite-visual-core/tests/baselines/`) and the perf record (P4,
    `dev-docs/bench/results/results.csv`) — so every rule below is live, not

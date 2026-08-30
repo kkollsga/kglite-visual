@@ -233,7 +233,14 @@ For every phase, in order:
 3. Update `CHANGELOG.md` `[Unreleased]` for user-visible changes (not the
    version block).
 4. **Commit** the phase (`feat(...)` / `refactor(...)` / `fix(...)`), one
-   commit per phase.
+   commit per phase. **Then run `make prune-target`** (doctrine 0.1.9): a
+   bound checked only at milestones is not a bound — one heavy day of
+   feature-variant builds grew an estate repo's `target/` by ~95 GiB and
+   killed an agent's shell with ENOSPC before the release-time prune ever
+   ran. The gate makes it a free no-op on a lean tree; a mid-plan cold
+   rebuild is cheaper than a mid-phase ENOSPC. Know the meter lies low:
+   `du` under-reports what a clean actually frees (measured here: du said
+   12.0 GB, the clean removed 14.8 GiB).
 5. **Push at checkpoints, not per commit.** Every branch push starts a full CI
    run; batch every 2–3 quick phases, at a risky milestone worth CI
    confirmation, or before stepping away — and always once at plan

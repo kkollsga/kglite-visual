@@ -388,3 +388,19 @@ self-test: wheel  ## Prove the gate's checks can actually fail
 	@$(PYTHON) scripts/check_bundle.py --self-test
 	@$(PYTHON) scripts/check_wheel.py --self-test
 	@$(PYTHON) scripts/prune.py --self-test
+
+# Size-gated target prune (doctrine 0.1.9): a bound checked only at
+# milestones is not a bound. Free no-op on a lean tree; a mid-plan cold
+# rebuild is cheaper than a mid-phase ENOSPC. The phased-plan loop runs
+# this after every phase commit; the release runs it before its heaviest
+# build. Ceiling shared with the advisory check (TARGET_WARN_MB).
+prune-target:  ## cargo clean iff target/ exceeds TARGET_WARN_MB
+	@if [ -d target ]; then \
+	  mb=$$(du -sm target 2>/dev/null | cut -f1); \
+	  if [ "$$mb" -gt $(TARGET_WARN_MB) ]; then \
+	    echo "prune-target: target/ is $${mb} MB (> $(TARGET_WARN_MB)) — running cargo clean"; \
+	    $(CARGO) clean; \
+	  else \
+	    echo "prune-target: OK — target/ is $${mb} MB (ceiling $(TARGET_WARN_MB))"; \
+	  fi; \
+	else echo "prune-target: OK — no target/"; fi
