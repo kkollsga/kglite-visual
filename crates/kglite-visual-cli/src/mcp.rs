@@ -9,8 +9,11 @@
 //!
 //! **The tool surface is small on purpose.** Data-heavy querying belongs to
 //! `kglite-mcp-server`, which owns the schema, the Cypher reference and the
-//! result formatting. These nine tools do the one thing that server cannot:
-//! move a *shared* view. Every one of them is a verb about the screen.
+//! result formatting. These eleven tools do the one thing that server cannot:
+//! move a *shared* view. Nine of them are verbs about the screen; the two
+//! saved-query tools are the exception that proves the rule — they read a
+//! store that belongs to *this* window and to the human who filled it, which
+//! is not a fact any other server has.
 //!
 //! **Two callers, one view, last writer wins** (D14, v1). The human and the
 //! agent are collaborators on one slot space, not two tenants of two. An
@@ -64,6 +67,9 @@ pub const MCP_PATH: &str = "/mcp";
 ///   which is a claim about a screen it has never seen.
 /// - *data querying belongs elsewhere* — otherwise this becomes a worse
 ///   `kglite-mcp-server`, one tool at a time.
+/// - *look at the saved queries first* — otherwise an agent writes its own
+///   Cypher over a schema it has just met, while the person beside it has a
+///   query for that exact question saved under a name they chose.
 const INSTRUCTIONS: &str = "\
 You are attached to a RUNNING kglite-visual window: an interactive graph view \
 that a human being is looking at right now, in their browser. These tools move \
@@ -93,6 +99,12 @@ Scope: this server steers a picture. It is not the place to mine the graph. \
 Bulk querying, schema exploration and result tables belong to the graph's own \
 MCP server (kglite-mcp-server); `show_cypher` here exists to put a result \
 ON SCREEN, not to read it back.
+
+The one thing here that is not about the screen: `list_saved_queries` and \
+`run_saved_query` read the queries THIS USER saved for THIS graph. Start there \
+before writing Cypher of your own — a saved query is what the person you are \
+working with already decided was worth keeping, and running one shows them a \
+result they will recognise.
 
 Every response is bounded in core and says so. A truncated answer is reported \
 as truncated in `view_state.last_slice` and drawn into the banner of any \
@@ -256,6 +268,12 @@ struct AppearanceArgs {
     /// Property driving the size channel. Same rules as `color_by`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct SavedQueryArgs {
+    /// The saved query's name, exactly as `list_saved_queries` reports it.
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
@@ -605,6 +623,78 @@ impl ViewControl {
         ]))
     }
 
+    #[tool(
+        description = "The Cypher this user has SAVED for this graph, plus the queries recently \
+                       run from the panel. Read it before writing a query of your own: a saved \
+                       query is what the person you are working with already decided was worth \
+                       keeping, and it will use their names for things. Returns names and query \
+                       text; run one with `run_saved_query`."
+    )]
+    async fn list_saved_queries(&self) -> Result<CallToolResult, McpError> {
+        let store = Arc::clone(&self.state.queries);
+        let file = match tokio::task::spawn_blocking(move || store.list())
+            .await
+            .map_err(|err| McpError::internal_error(format!("store task failed: {err}"), None))?
+        {
+            Ok(file) => file,
+            Err(err) => return Ok(refused_text(&err.to_string())),
+        };
+        ok_json(&serde_json::json!({
+            "graph": file.graph_label,
+            "saved": file.saved,
+            // Recent, not exhaustive, and capped — say so rather than let a
+            // short list read as "this is everything that ran".
+            "recent": file.history,
+            "recent_cap": crate::queries::MAX_HISTORY,
+        }))
+    }
+
+    #[tool(
+        description = "Run one of this user's saved queries by name and put its nodes and \
+                       relationships INTO the shared view — `show_cypher` with the text taken \
+                       from the store instead of from you, so it executes by exactly the same \
+                       path and is bounded in core exactly the same way. `list_saved_queries` \
+                       has the names. The run is added to the user's recent list, because they \
+                       are watching it happen."
+    )]
+    async fn run_saved_query(
+        &self,
+        Parameters(args): Parameters<SavedQueryArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let store = Arc::clone(&self.state.queries);
+        let name = args.name.clone();
+        let found = match tokio::task::spawn_blocking(move || store.get(&name))
+            .await
+            .map_err(|err| McpError::internal_error(format!("store task failed: {err}"), None))?
+        {
+            Ok(found) => found,
+            Err(err) => return Ok(refused_text(&err.to_string())),
+        };
+        let Some(query) = found else {
+            return Ok(refused_text(&format!(
+                "this graph has no saved query named {:?}. `list_saved_queries` names them.",
+                args.name
+            )));
+        };
+
+        // Recorded before the run, not after: history is "what was asked for",
+        // and a query that failed is exactly the one a user wants back in the
+        // editor to fix. A store failure here must not stop the run.
+        let store = Arc::clone(&self.state.queries);
+        let recorded = query.clone();
+        if let Ok(Err(err)) = tokio::task::spawn_blocking(move || store.record(&recorded)).await {
+            eprintln!("kglite-visual: could not record query history: {err}");
+        }
+
+        self.mutate(Request::Cypher(CypherRequest {
+            query,
+            params: Default::default(),
+            limit: None,
+            as_graph: true,
+        }))
+        .await
+    }
+
     /// Run a view-mutating request, broadcast it, and report what it did.
     async fn mutate(&self, request: Request) -> Result<CallToolResult, McpError> {
         let response = match self.run(request).await? {
@@ -713,6 +803,15 @@ fn refused(err: &CoreError) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(err.to_string())])
 }
 
+/// The same shape as [`refused`], for a failure that is not a [`CoreError`].
+///
+/// The saved-query store's refusals are ceilings and missing names, which an
+/// agent can act on the same way it acts on a bad slot — so they take the same
+/// route, into the client's face rather than into the protocol.
+fn refused_text(message: &str) -> CallToolResult {
+    CallToolResult::error(vec![ContentBlock::text(message.to_string())])
+}
+
 fn ok_json(value: &serde_json::Value) -> Result<CallToolResult, McpError> {
     Ok(CallToolResult::success(vec![ContentBlock::text(
         value.to_string(),
@@ -729,18 +828,20 @@ fn into_params(
 mod tests {
     use super::*;
 
-    /// The nine tools D14 fixed, by name.
+    /// The tool surface, by name: D14's nine, plus E4's two saved-query tools.
     ///
-    /// A list, not a count: "nine tools" would still pass if `focus` were
+    /// A list, not a count: "eleven tools" would still pass if `focus` were
     /// renamed to `zoom`, and the name is the API — an agent's prompt refers to
     /// it and a rename breaks every conversation that mentions one.
-    const EXPECTED: [&str; 9] = [
+    const EXPECTED: [&str; 11] = [
         "collapse",
         "expand",
         "focus",
         "highlight",
+        "list_saved_queries",
         "render",
         "reset_view",
+        "run_saved_query",
         "set_appearance",
         "show_cypher",
         "view_state",
@@ -751,7 +852,7 @@ mod tests {
     }
 
     #[test]
-    fn the_surface_is_exactly_the_nine_tools_the_design_fixed() {
+    fn the_surface_is_exactly_the_tools_the_design_fixed() {
         let mut names: Vec<String> = router()
             .list_all()
             .iter()

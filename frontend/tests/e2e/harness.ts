@@ -8,7 +8,8 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
 import { createInterface } from 'node:readline'
 import path from 'node:path'
 
@@ -67,12 +68,28 @@ export function resolveBinary(): string {
   ).trim()
 }
 
+/**
+ * A throwaway saved-query store for the whole run.
+ *
+ * The server writes saved queries and recent history under the *developer's*
+ * config directory by default. A suite that ran there would read whatever the
+ * machine happened to hold and leave its own rows behind — a test with a side
+ * effect on the person running it, and assertions that pass or fail depending
+ * on what they saved last week. The env override exists for exactly this.
+ *
+ * In the OS temp directory rather than under the repo, so it needs no
+ * accumulation bound of its own, and removed when this process exits.
+ */
+const QUERY_STORE = mkdtempSync(path.join(os.tmpdir(), 'kglv-e2e-queries-'))
+process.on('exit', () => rmSync(QUERY_STORE, { recursive: true, force: true }))
+
 export async function launch(): Promise<Launched> {
   if (!existsSync(path.join(REPO, FIXTURE))) {
     throw new Error(`fixture ${FIXTURE} not found under ${REPO}`)
   }
   const child = spawn(resolveBinary(), [FIXTURE, '--no-open', '--port', '0'], {
     cwd: REPO,
+    env: { ...process.env, KGLITE_VISUAL_CONFIG_DIR: QUERY_STORE },
   })
   const stderr: string[] = []
   createInterface({ input: child.stderr }).on('line', (line) => stderr.push(line))

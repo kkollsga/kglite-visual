@@ -13,6 +13,23 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- **Saved queries, kept by the server and shared by every face.** A query
+  panel that saves what you wrote, a picker to load it back, and a recent list
+  of the last 20 you ran. The store is a small JSON file per graph under your
+  config directory (`$KGLITE_VISUAL_CONFIG_DIR` overrides it), keyed by the
+  graph's absolute path, with one shared file for graphs handed over as bytes.
+  Not the browser's storage, deliberately: an origin includes the port, and
+  `--port 0` is the documented default, so `localStorage` would hand a
+  different store to every launch. Because the store lives beside the session
+  rather than in a handler, `kglite_visual.show()` gets the same one — and so
+  does an agent: two new MCP tools, `list_saved_queries` and `run_saved_query`,
+  read what you saved and run it through the ordinary Cypher path, so the
+  result appears on the screen you are both looking at. Every ceiling is a
+  refusal that names its number — 64 saved queries per graph, 64 KB per query,
+  256 KB per file, 512 graphs — and nothing is ever deleted on your behalf:
+  `kglite-visual queries list`, `… rm <file>` and `… prune` are the owner, and
+  `prune` only offers the stores whose graph is gone from disk.
+
 - **`EXPLAIN` results are drawn as a plan.** The rows have always arrived and
   the panel rendered them as three columns of data — a `step` column counting
   1..n beside an `operation` column is a numbered list wearing a grid, and

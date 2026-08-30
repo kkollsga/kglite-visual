@@ -394,6 +394,21 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The saved-query picker owns its row's slack: it holds a name a user chose,
+   and a name clipped to five characters is not a picker. */
+.kglv-row > .kglv-select[data-testid='saved-list'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kglv-history {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 96px;
+  overflow: auto;
+}
+
 .kglv-hits {
   display: flex;
   flex-direction: column;

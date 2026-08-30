@@ -58,6 +58,16 @@ schemars = "1"
 # rmcp; a second major would be a second copy of one encoder.
 base64 = "0.22"
 
+# The saved-query store's home and its filenames. Both are already in this
+# tree — `dirs` through rust-embed's proc macro, `sha2` through kglite AND
+# rust-embed-utils — so promoting either to a runtime dependency adds no crate,
+# no licence and no lockfile entry. `dirs` for `config_dir()`; `sha2` for the
+# 16-hex filename a graph's absolute path hashes to. The plan named blake3,
+# which is NOT in this tree; the property wanted is a stable filename, not a
+# security boundary, and SHA-256 already present beats a new dependency for it.
+dirs = "6"
+sha2 = "0.11"
+
 [dev-dependencies]
 # The render subcommand's tests drive the real binary and need somewhere to
 # write to that is not the repo.

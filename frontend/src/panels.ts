@@ -20,6 +20,7 @@ import type { NodeDetail } from './generated/NodeDetail'
 import type { PropertyStat } from './generated/PropertyStat'
 import type { PropertyStatsResponse } from './generated/PropertyStatsResponse'
 import type { QueryTable } from './generated/QueryTable'
+import type { SavedQueries } from './queries'
 import type { SearchResponse } from './generated/SearchResponse'
 
 /** What the panels ask the app to do. */
@@ -37,6 +38,10 @@ export type PanelHandlers = {
   focusSlot(slot: number): void
   setColorBy(property: string | null): void
   setSizeBy(property: string | null): void
+  /** Keep this query under this name. The store's ceilings answer as refusals. */
+  saveQuery(name: string, query: string): void
+  /** Forget a saved query. */
+  deleteQuery(name: string): void
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -70,7 +75,11 @@ export class Panels {
   private readonly colorBy: HTMLSelectElement
   private readonly sizeBy: HTMLSelectElement
   private readonly appearanceNote: HTMLDivElement
+  private readonly savedList: HTMLSelectElement
+  private readonly savedNote: HTMLDivElement
+  private readonly historyList: HTMLDivElement
   private lastHits: SearchResponse | null = null
+  private lastSaved: SavedQueries | null = null
 
   constructor(
     container: HTMLElement,
@@ -161,7 +170,33 @@ export class Panels {
         this.handlers.runQuery(this.queryInput.value, this.queryAsGraph.checked)
       }
     })
+
+    // ── saved queries + recent ────────────────────────────────────────────
+    // Above the results and below the run row, because they are things to put
+    // INTO the editor: reading down the card is write, run, read.
+    this.savedList = element('select', 'kglv-select')
+    this.savedList.setAttribute('data-testid', 'saved-list')
+    this.savedList.addEventListener('change', () => this.loadSaved())
+    const save = element('button', 'kglv-button kglv-button-small', 'save')
+    save.setAttribute('data-testid', 'query-save')
+    save.addEventListener('click', () => this.emitSave())
+    const forget = element('button', 'kglv-button kglv-button-small', 'forget')
+    forget.setAttribute('data-testid', 'query-delete')
+    forget.addEventListener('click', () => {
+      if (this.savedList.value !== '') this.handlers.deleteQuery(this.savedList.value)
+    })
+    // Its own row, not appended to the run row: five controls on one line left
+    // the picker too narrow to read a query's name in, which is the one thing
+    // the picker is for.
+    const savedRow = element('div', 'kglv-row')
+    savedRow.append(this.savedList, save, forget)
     queryRow.append(run, asGraphLabel)
+
+    this.savedNote = element('div', 'kglv-hint')
+    this.savedNote.setAttribute('data-testid', 'saved-note')
+    this.historyList = element('div', 'kglv-history')
+    this.historyList.setAttribute('data-testid', 'query-history')
+
     this.queryStatus = element('div', 'kglv-hint')
     this.queryStatus.setAttribute('data-testid', 'query-status')
     // The engine's own diagnostics, between the count and the rows: a warning
@@ -172,6 +207,9 @@ export class Panels {
     query.append(
       this.queryInput,
       queryRow,
+      savedRow,
+      this.savedNote,
+      this.historyList,
       this.queryStatus,
       this.queryDiagnostics,
       this.queryResults,
@@ -200,6 +238,88 @@ export class Panels {
   private emitSearch(): void {
     const type = this.searchType.value === '' ? null : this.searchType.value
     this.handlers.search(this.searchInput.value, type)
+  }
+
+  /** The query text currently in the editor. */
+  queryText(): string {
+    return this.queryInput.value
+  }
+
+  /**
+   * Put a query in the editor without running it.
+   *
+   * Loading and running are deliberately two actions. A saved query is
+   * somebody's Cypher against a graph that may have moved on since; showing it
+   * first is what lets them read it before it executes, and it keeps one Run
+   * button as the only thing that runs anything.
+   */
+  private setQueryText(query: string): void {
+    this.queryInput.value = query
+    this.queryInput.focus()
+  }
+
+  private loadSaved(): void {
+    const chosen = this.lastSaved?.saved.find((saved) => saved.name === this.savedList.value)
+    if (chosen !== undefined) this.setQueryText(chosen.query)
+  }
+
+  private emitSave(): void {
+    const query = this.queryInput.value.trim()
+    if (query === '') return
+    // The selected name is the default, so re-saving an edited query is one
+    // click; a fresh name is one word.
+    const suggested = this.savedList.value
+    const name = window.prompt('Save this query as:', suggested)
+    if (name === null || name.trim() === '') return
+    this.handlers.saveQuery(name.trim(), query)
+  }
+
+  /**
+   * Draw the store: saved queries in a picker, recent runs as a list.
+   *
+   * Called after every read AND every write, because the store is the server's
+   * and a `curl`, another tab or an agent's `run_saved_query` may have moved it
+   * since. Nothing here is authoritative — this renders what the server said.
+   */
+  showSavedQueries(store: SavedQueries): void {
+    this.lastSaved = store
+    const selected = this.savedList.value
+
+    this.savedList.replaceChildren()
+    const blank = element('option', undefined, `saved (${store.saved.length})`)
+    blank.value = ''
+    this.savedList.appendChild(blank)
+    for (const saved of store.saved) {
+      const option = element('option', undefined, saved.name)
+      option.value = saved.name
+      this.savedList.appendChild(option)
+    }
+    // Keep the user's selection across a refresh they did not ask for — unless
+    // what they had selected is what just got deleted.
+    this.savedList.value = store.saved.some((saved) => saved.name === selected) ? selected : ''
+
+    this.savedNote.className = 'kglv-hint'
+    this.savedNote.textContent =
+      store.store === null
+        ? 'saved queries are unavailable: this machine has no config directory'
+        : `${store.saved.length} of ${store.max_saved} saved for ${store.graph_label}`
+
+    this.historyList.replaceChildren()
+    for (const entry of store.history) {
+      const row = element('button', 'kglv-hit')
+      // One line, whatever the query's own line breaks say: this is a list to
+      // pick from, not a place to read Cypher.
+      row.textContent = entry.query.replace(/\s+/g, ' ').slice(0, 120)
+      row.title = entry.query
+      row.addEventListener('click', () => this.setQueryText(entry.query))
+      this.historyList.appendChild(row)
+    }
+  }
+
+  /** A store refusal, in the store's own words. */
+  showQueriesError(message: string): void {
+    this.savedNote.className = 'kglv-hint kglv-error'
+    this.savedNote.textContent = message
   }
 
   /** Populate the type filter from the meta-graph. */

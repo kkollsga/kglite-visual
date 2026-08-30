@@ -1,20 +1,23 @@
 //! `kglite-visual <file>` — the localhost viewer's argument parsing and run
 //! sequence.
 //!
-//! **stdout discipline:** stdout carries exactly one line, the `LaunchInfo`
-//! JSON, and nothing else — ever. Diagnostics, warnings and errors go to
-//! stderr. An agent parses that line; a stray `println!` here breaks every
-//! harness at once, which is why the rule is stated at the top of the file
-//! rather than at the one call site that currently obeys it.
+//! **stdout discipline:** stdout carries JSON and nothing else — ever. For the
+//! serving form that is exactly one line, the `LaunchInfo` JSON. Diagnostics,
+//! warnings and errors go to stderr. An agent parses stdout; a stray
+//! `println!` here breaks every harness at once, which is why the rule is
+//! stated at the top of the file rather than at the call sites that obey it.
 //!
 //! Two callers: `main.rs`, and the wheel's `kglite-visual` console script,
 //! which reaches [`run_from`] through PyO3. Both get the same parser, the same
 //! stdout line and the same exit codes, because there is one of each.
 //!
-//! **Two modes, one stdout rule.** `kglite-visual <file>` serves; `kglite-visual
-//! render <file> …` draws one image and exits (plan D13). Each prints exactly
-//! one JSON line — the launch contract, or the render summary — so "read one
-//! line of stdout" stays the whole agent-facing protocol.
+//! **Three modes, one stdout rule.** `kglite-visual <file>` serves;
+//! `kglite-visual render <file> …` draws one image and exits (plan D13);
+//! `kglite-visual queries …` owns the saved-query store and touches no graph.
+//! The first two print exactly one JSON line — the launch contract, or the
+//! render summary. `queries list` prints one JSON object per store file,
+//! because a listing is the one thing here with more than one answer, and JSON
+//! Lines says so without inventing a second format. Everything else is stderr.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -26,7 +29,7 @@ use kglite_visual_core::{
 };
 
 use crate::render_cmd::{self, RenderArgs};
-use crate::{assets, server};
+use crate::{assets, queries, server};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -85,6 +88,36 @@ struct Cli {
 enum Command {
     /// Draw one image of this graph and exit — no server, no browser.
     Render(RenderArgs),
+    /// Inspect and collect the saved-query store — no server, no graph.
+    Queries {
+        #[command(subcommand)]
+        action: QueriesAction,
+    },
+}
+
+/// The saved-query store's human owner.
+///
+/// It exists because the store is a **durable** tier: `make prune` sweeps the
+/// tiers that declare a lifetime, and a saved query declares none — an age
+/// sweep over somebody's saved work is a scheduled data loss with a date on it
+/// (doctrine R4). So collection is a person running this, and even `prune`
+/// only offers the files whose graph is gone from disk.
+#[derive(clap::Subcommand, Debug)]
+enum QueriesAction {
+    /// One JSON line per store file: what graph it belongs to, how much it
+    /// holds, and whether that graph still exists.
+    List,
+    /// Delete one store file, by the `file` name `list` printed.
+    Rm {
+        /// The store file's own name, e.g. `4f2a….json` or `_unbound.json`.
+        file: String,
+    },
+    /// Delete the store files whose graph is no longer on disk.
+    Prune {
+        /// List what would go without taking it.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Parse `args` and run to completion, returning the process exit code.
@@ -119,6 +152,7 @@ where
     }
     let outcome = match &cli.command {
         Some(Command::Render(args)) => render_cmd::run(args),
+        Some(Command::Queries { action }) => run_queries(action),
         None => run(&cli),
     };
     match outcome {
@@ -128,6 +162,74 @@ where
             1
         }
     }
+}
+
+/// `kglite-visual queries …` — the store's human owner, in one place.
+///
+/// **stdout discipline, extended rather than broken.** The serving form prints
+/// exactly one JSON line and so does `render`; this prints one JSON line *per
+/// store file* for `list`, and one summarising line for `rm` and `prune`. The
+/// rule a harness relies on is "stdout is JSON, one object per line, and
+/// diagnostics are on stderr" — a listing is the one command here with more
+/// than one thing to say, and JSON Lines says it without inventing a second
+/// format.
+fn run_queries(action: &QueriesAction) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write as _;
+
+    let root = queries::store_root().ok_or_else(|| {
+        format!(
+            "no saved-query store on this machine: no config directory could be resolved. \
+             Set {} to a writable directory.",
+            queries::CONFIG_DIR_ENV
+        )
+    })?;
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+
+    match action {
+        QueriesAction::List => {
+            let files = queries::list_store(&root)?;
+            eprintln!(
+                "kglite-visual: {} store file(s) in {}",
+                files.len(),
+                root.display()
+            );
+            for report in files {
+                writeln!(out, "{}", serde_json::to_string(&report)?)?;
+            }
+        }
+        QueriesAction::Rm { file } => {
+            let removed = queries::remove_store_file(&root, file)?;
+            if !removed {
+                // Not an error exit: "there is no such file" is the state the
+                // caller asked for. It is reported so a typo is visible.
+                eprintln!(
+                    "kglite-visual: no store file named {file:?} in {} — \
+                     `kglite-visual queries list` names them",
+                    root.display()
+                );
+            }
+            writeln!(
+                out,
+                "{}",
+                serde_json::json!({ "file": file, "removed": removed })
+            )?;
+        }
+        QueriesAction::Prune { dry_run } => {
+            let removed = queries::prune_store(&root, *dry_run)?;
+            writeln!(
+                out,
+                "{}",
+                serde_json::json!({
+                    "dry_run": dry_run,
+                    "removed": removed.len(),
+                    "files": removed,
+                })
+            )?;
+        }
+    }
+    out.flush()?;
+    Ok(())
 }
 
 fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
@@ -278,6 +380,44 @@ mod tests {
             crate::render_cmd::ThemeArg::Dark,
             "dark is app parity"
         );
+    }
+
+    #[test]
+    fn the_queries_subcommand_needs_no_graph_and_still_leaves_the_serve_form_alone() {
+        // A second subcommand is the second chance to break `kglite-visual
+        // g.kgl`, and this one takes no FILE at all — so both halves are
+        // asserted together, as the render pairing above does.
+        let Some(Command::Queries { action }) =
+            Cli::parse_from(["kglite-visual", "queries", "list"]).command
+        else {
+            panic!("the subcommand did not dispatch");
+        };
+        assert!(matches!(action, QueriesAction::List));
+
+        let Some(Command::Queries { action }) =
+            Cli::parse_from(["kglite-visual", "queries", "prune", "--dry-run"]).command
+        else {
+            panic!("prune did not dispatch");
+        };
+        assert!(matches!(action, QueriesAction::Prune { dry_run: true }));
+
+        let Some(Command::Queries { action }) =
+            Cli::parse_from(["kglite-visual", "queries", "rm", "_unbound.json"]).command
+        else {
+            panic!("rm did not dispatch");
+        };
+        let QueriesAction::Rm { file } = action else {
+            panic!("rm lost its argument");
+        };
+        assert_eq!(file, "_unbound.json");
+
+        // `queries` with no action is a usage error, not a silent default:
+        // guessing between list, rm and prune is guessing about a delete.
+        assert!(Cli::try_parse_from(["kglite-visual", "queries"]).is_err());
+
+        let serve = Cli::parse_from(["kglite-visual", "g.kgl"]);
+        assert!(serve.command.is_none());
+        assert_eq!(serve.file, Some(PathBuf::from("g.kgl")));
     }
 
     #[test]

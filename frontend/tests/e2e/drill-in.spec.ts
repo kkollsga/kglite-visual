@@ -198,6 +198,31 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
     await expect(page.getByTestId('query-warning')).toHaveCount(0)
     await expect(page.getByTestId('query-plan')).toHaveCount(0)
 
+    // ── saved queries and recent, through the store ─────────────────────
+    // The run above is the newest thing in the recent list, and clicking it
+    // puts it back in the editor. History is a list to pick from, so the
+    // assertion is that picking works, not that a row exists.
+    await expect(page.getByTestId('query-history').locator('button').first()).toContainText(
+      'MATCH (p:Person) RETURN p.title LIMIT 3',
+    )
+    await page.getByTestId('query-input').fill('')
+    await page.getByTestId('query-history').locator('button').first().click()
+    await expect(page.getByTestId('query-input')).toHaveValue(
+      'MATCH (p:Person) RETURN p.title LIMIT 3',
+    )
+
+    // Save it, reload the editor from somewhere else, and load it back.
+    page.once('dialog', (dialog) => void dialog.accept('people'))
+    await page.getByTestId('query-save').click()
+    await expect(page.getByTestId('saved-note')).toContainText('1 of 64 saved')
+    await page.getByTestId('query-input').fill('RETURN 1')
+    await page.getByTestId('saved-list').selectOption('people')
+    await expect(page.getByTestId('query-input')).toHaveValue(
+      'MATCH (p:Person) RETURN p.title LIMIT 3',
+    )
+    await page.getByTestId('query-delete').click()
+    await expect(page.getByTestId('saved-note')).toContainText('0 of 64 saved')
+
     // ── collapse back to the meta-graph ─────────────────────────────────
     await page.getByTestId('collapse').click()
     await page.waitForFunction(() => window.__kglv.lastSliceKind === 'collapse', undefined, {

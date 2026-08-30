@@ -30,6 +30,8 @@ use std::sync::Arc;
 use kglite_visual_core::control::{control_frames, Command};
 use kglite_visual_core::session::{response_frames, Response};
 use kglite_visual_core::Session;
+
+use crate::queries::QueryStore;
 use tokio::sync::broadcast;
 
 /// One already-framed response, shared by every socket that receives it.
@@ -150,13 +152,21 @@ impl Bus {
 pub struct AppState {
     pub session: Arc<Session>,
     pub bus: Bus,
+    /// This graph's saved queries, keyed by the graph the session was launched
+    /// with. Shared by every face — the twin, the WebSocket and MCP — for the
+    /// same reason the bus is: two of them holding two stores is two answers to
+    /// "what have I saved".
+    pub queries: Arc<QueryStore>,
 }
 
 impl AppState {
-    pub fn new(session: Arc<Session>) -> Self {
+    /// `graph_label` is the launch contract's `graph` field. See
+    /// [`QueryStore::open`] for what it does with a label that is not a path.
+    pub fn new(session: Arc<Session>, graph_label: &str) -> Self {
         Self {
             session,
             bus: Bus::new(),
+            queries: Arc::new(QueryStore::open(graph_label)),
         }
     }
 }

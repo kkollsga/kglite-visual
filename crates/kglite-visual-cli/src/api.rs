@@ -34,6 +34,7 @@ use kglite_visual_core::request::{
 };
 
 use crate::broadcast::AppState;
+use crate::queries;
 
 /// `GET /api/meta-graph` — the entry screen, positions and links included.
 pub async fn meta_graph(State(state): State<AppState>) -> Response {
@@ -233,6 +234,107 @@ fn steered(clients: usize) -> Response {
 /// `POST /api/property-stats` — `{"node_type": "..."}`.
 pub async fn property_stats(state: State<AppState>, Json(body): Json<TypeRequest>) -> Response {
     dispatch(state, Request::PropertyStats(body)).await
+}
+
+/// `GET /api/queries` — this graph's saved queries and recent history.
+///
+/// Includes the store's own path, because a store that silently went nowhere —
+/// a machine with no config directory — must be distinguishable from one that
+/// is simply empty.
+pub async fn saved_queries(State(state): State<AppState>) -> Response {
+    let store = Arc::clone(&state.queries);
+    // A read, a write and a delete are all small file operations, but they are
+    // still blocking file operations on the runtime that feeds the renderer.
+    match tokio::task::spawn_blocking(move || store.list()).await {
+        Ok(Ok(file)) => Json(serde_json::json!({
+            "store": state.queries.path().map(|p| p.display().to_string()),
+            "graph_path": file.graph_path,
+            "graph_label": file.graph_label,
+            "saved": file.saved,
+            "history": file.history,
+            "max_saved": queries::MAX_SAVED_PER_GRAPH,
+            "max_history": queries::MAX_HISTORY,
+        }))
+        .into_response(),
+        Ok(Err(err)) => store_error(&err),
+        Err(err) => task_failed("saved-queries", &err),
+    }
+}
+
+/// What the three saved-query mutations take. One body shape, because `name`
+/// and `query` are the only two things any of them needs.
+#[derive(serde::Deserialize)]
+pub struct SavedQueryRequest {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub query: String,
+}
+
+/// `POST /api/queries/save` — `{"name": "...", "query": "..."}`.
+///
+/// Bounds are refusals here, not truncations: a save that silently dropped the
+/// oldest entry to make room would be a store that loses work without saying
+/// so. Every ceiling comes back as a `400` naming the number it hit.
+pub async fn save_query(
+    State(state): State<AppState>,
+    Json(body): Json<SavedQueryRequest>,
+) -> Response {
+    let store = Arc::clone(&state.queries);
+    match tokio::task::spawn_blocking(move || store.save(&body.name, &body.query)).await {
+        Ok(Ok(saved)) => Json(saved).into_response(),
+        Ok(Err(err)) => store_error(&err),
+        Err(err) => task_failed("save-query", &err),
+    }
+}
+
+/// `POST /api/queries/delete` — `{"name": "..."}`.
+///
+/// POST rather than DELETE, matching the rest of this vocabulary: every
+/// mutation here carries a JSON body and reads as a verb in a `curl` line.
+pub async fn delete_query(
+    State(state): State<AppState>,
+    Json(body): Json<SavedQueryRequest>,
+) -> Response {
+    let store = Arc::clone(&state.queries);
+    match tokio::task::spawn_blocking(move || store.delete(&body.name)).await {
+        Ok(Ok(removed)) => Json(serde_json::json!({ "removed": removed })).into_response(),
+        Ok(Err(err)) => store_error(&err),
+        Err(err) => task_failed("delete-query", &err),
+    }
+}
+
+/// `POST /api/queries/history` — `{"query": "..."}`.
+///
+/// **Called explicitly, by the two places a query is somebody's question**: the
+/// panel's Run button and the `run_saved_query` MCP tool. Recording history
+/// from the dispatch path instead would fill it with the queries the app runs
+/// on its own behalf — the per-node values behind a colour-by choice, the id
+/// list behind "load into view" — which is machine noise in a list a human
+/// reads. See `queries::QueryStore::record`.
+pub async fn record_query(
+    State(state): State<AppState>,
+    Json(body): Json<SavedQueryRequest>,
+) -> Response {
+    let store = Arc::clone(&state.queries);
+    match tokio::task::spawn_blocking(move || store.record(&body.query)).await {
+        Ok(Ok(())) => Json(serde_json::json!({ "recorded": true })).into_response(),
+        Ok(Err(err)) => store_error(&err),
+        Err(err) => task_failed("record-query", &err),
+    }
+}
+
+/// A store refusal is the caller's request being wrong; an I/O failure is not.
+fn store_error(err: &queries::StoreError) -> Response {
+    let status = match err {
+        queries::StoreError::Refused(_) => StatusCode::BAD_REQUEST,
+        queries::StoreError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (
+        status,
+        Json(serde_json::json!({ "error": err.to_string() })),
+    )
+        .into_response()
 }
 
 /// The one place a request becomes a response on the HTTP side.

@@ -61,8 +61,10 @@ test('MCP protocol: initialize, list_tools, call_tool over streamable HTTP', asy
       'expand',
       'focus',
       'highlight',
+      'list_saved_queries',
       'render',
       'reset_view',
+      'run_saved_query',
       'set_appearance',
       'show_cypher',
       'view_state',
@@ -83,6 +85,39 @@ test('MCP protocol: initialize, list_tools, call_tool over streamable HTTP', asy
     expect(bounds.isError).toBe(true)
     expect(bounds.text).toContain('slot 4000 is not in this view')
     expect(bounds.text).toContain(`holds slots 0..${META_POINTS}`)
+
+    // ── one store, two faces ─────────────────────────────────────────────
+    // Saved over the JSON twin, read back over MCP. The two are not two
+    // stores agreeing: they are one file, reached through the same AppState,
+    // which is why `show()` gets the same one without arranging anything.
+    const saved = await fetch(`${server.info.url}api/queries/save`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'people', query: 'MATCH (p:Person) RETURN p LIMIT 2' }),
+    })
+    expect(saved.status).toBe(200)
+
+    const listed = await mcp.call('list_saved_queries')
+    expect(listed.isError).toBe(false)
+    expect(listed.json<{ saved: { name: string }[] }>().saved.map((q) => q.name)).toEqual([
+      'people',
+    ])
+
+    // Running it goes through the ordinary Cypher path, so the answer is an
+    // ordinary slice report.
+    const ran = await mcp.call('run_saved_query', { name: 'people' })
+    expect(ran.isError).toBe(false)
+    expect(ran.json<{ added: unknown[] }>().added).toHaveLength(2)
+
+    // ...and the run is in the recent list, which is the same store again.
+    const after = await mcp.call('list_saved_queries')
+    expect(after.json<{ recent: { query: string }[] }>().recent[0]?.query).toBe(
+      'MATCH (p:Person) RETURN p LIMIT 2',
+    )
+
+    const missing = await mcp.call('run_saved_query', { name: 'nope' })
+    expect(missing.isError).toBe(true)
+    expect(missing.text).toContain('no saved query named')
   } finally {
     server?.process.kill()
   }

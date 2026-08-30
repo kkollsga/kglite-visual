@@ -39,6 +39,7 @@ import { InteractionState } from './interaction'
 import { LabelOverlay } from './labels'
 import { Panels } from './panels'
 import { assertLittleEndian, fnv1a, ResponseAssembler, type Completed } from './protocol'
+import * as store from './queries'
 import { axesFor, layoutModeFromSearch, mountGraph, type Appearance, type Surface } from './render'
 import { connectedAtom } from './state'
 import { rendersGraph } from './tiers'
@@ -113,6 +114,10 @@ const panels = new Panels(root, {
   runQuery: (query, asGraph) => {
     if (query.trim() === '') return
     send({ type: 'cypher', query, params: {}, limit: null, as_graph: asGraph })
+    // The one place a user-typed query is recorded. The app's own queries —
+    // appearance values, "load into view" — go through `send` directly and are
+    // deliberately not history.
+    void refreshQueries(store.recordQuery(query))
   },
   expand: (slot, relationship, direction, limit) =>
     send({ type: 'expand', slot, relationship, direction, limit }),
@@ -151,7 +156,31 @@ const panels = new Panels(root, {
   },
   setColorBy: (property) => applyColorBy(property),
   setSizeBy: (property) => applySizeBy(property),
+  saveQuery: (name, query) => void refreshQueries(store.saveQuery(name, query)),
+  deleteQuery: (name) => void refreshQueries(store.deleteQuery(name)),
 })
+
+/**
+ * Run a store mutation, then re-read the store and redraw the list.
+ *
+ * Always a re-read, never a local edit of what the panel is holding: the store
+ * is a file on the server, and a `curl`, a second tab or an agent's
+ * `run_saved_query` may have moved it since this page last looked. A panel that
+ * patched its own copy would drift from the file it claims to show.
+ *
+ * A refusal — a ceiling, a name that is not there — is the store's own sentence
+ * and goes to the panel verbatim; the number it names is the whole point.
+ */
+async function refreshQueries(mutation?: Promise<unknown>): Promise<void> {
+  try {
+    if (mutation !== undefined) await mutation
+    panels.showSavedQueries(await store.listQueries())
+  } catch (err) {
+    panels.showQueriesError(err instanceof Error ? err.message : String(err))
+  }
+}
+
+void refreshQueries()
 
 /**
  * The colour channel, from either driver.

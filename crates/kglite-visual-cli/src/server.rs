@@ -36,12 +36,12 @@ pub fn bind(session: Session, requested_port: u16, graph: String) -> std::io::Re
 
     Ok(Bound {
         listener,
-        state: AppState::new(Arc::new(session)),
+        state: AppState::new(Arc::new(session), &graph),
         info: LaunchInfo {
             url: format!("http://127.0.0.1:{port}/"),
             port,
             pid: std::process::id(),
-            graph,
+            graph: graph.clone(),
             mcp: format!("http://127.0.0.1:{port}{MCP_PATH}"),
         },
     })
@@ -195,6 +195,15 @@ fn router(state: AppState) -> Router {
         .route("/api/collapse", post(api::collapse))
         .route("/api/node", post(api::node_detail))
         .route("/api/property-stats", post(api::property_stats))
+        // Saved queries (E4). A GET to read, POSTs to mutate — the store is a
+        // file on this machine, so the read is idempotent and the writes carry
+        // bodies. There is deliberately NO `/api/queries/run`: a saved query is
+        // run by putting its text into the ordinary Cypher path, so there stays
+        // exactly one place a query executes.
+        .route("/api/queries", get(api::saved_queries))
+        .route("/api/queries/save", post(api::save_query))
+        .route("/api/queries/delete", post(api::delete_query))
+        .route("/api/queries/history", post(api::record_query))
         // The three steering commands (D14). They mutate nothing and answer
         // with the size of the audience that heard them, so a caller learns
         // whether anybody is actually watching.
