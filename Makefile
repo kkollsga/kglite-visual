@@ -74,7 +74,7 @@ WHEEL_DIR = target/wheels
 WHEEL_PROFILE ?=
 
 .PHONY: help gate lint self-test clean-build prune \
-        check-dev-docs check-skill-mirrors check-bans check-build-dirs \
+        check-dev-docs check-skill-mirrors check-bans check-licenses check-build-dirs \
         check-generated-ts check-protocol-baseline check-bundle sync-agents \
         rust-fmt rust-clippy rust-test cli-build fixture e2e \
         frontend-install frontend-typecheck frontend-build frontend-audit \
@@ -100,14 +100,14 @@ help:  ## List the targets
 # (CLAUDE.md → "Two toolchains, one gate") unreachable instead of merely
 # documented.
 gate: check-dev-docs check-skill-mirrors check-bans check-build-dirs \
-      frontend-typecheck frontend-build check-bundle \
+      check-licenses frontend-typecheck frontend-build check-bundle \
       rust-fmt rust-clippy rust-test check-generated-ts check-protocol-baseline \
       check-render-baseline \
       e2e pytest check-packaged-consumer frontend-audit  ## Local pre-push gate
 	@echo ""
-	@echo "gate: 17 checks ran, 0 absent."
+	@echo "gate: 18 checks ran, 0 absent."
 
-lint: check-dev-docs check-skill-mirrors check-bans rust-fmt rust-clippy frontend-typecheck  ## Static checks only — no test execution
+lint: check-dev-docs check-skill-mirrors check-bans check-licenses rust-fmt rust-clippy frontend-typecheck  ## Static checks only — no test execution
 
 # The R4 bound. Reports, never deletes: deciding whether something is
 # reproducible, and which tier it belongs in, is a judgement the script must
@@ -126,6 +126,17 @@ check-skill-mirrors:  ## Assert .agents/ is an unmodified adapter of the authori
 # something, so a moved crate cannot turn either into a vacuous pass.
 check-bans:  ## FAIL on an @cosmograph/* dependency or a #[global_allocator] in the py crate
 	@$(PYTHON) scripts/check_bans.py
+
+# The other half of the licence question, and the half a name ban structurally
+# cannot ask: does each package whose bytes we ship actually CARRY its licence
+# text? `check-bans` refuses one family by name; a package declaring MIT and
+# shipping no grant looks fine to it. Scope is the frontend's PRODUCTION npm
+# dependencies — the tree Vite inlines into the bundle rust-embed bakes into the
+# binary — and NOT the cargo dependencies, which ship too and are a separate
+# mechanism (see the script's header). Needs `npm ci` to have run; refuses to
+# report a pass without the installed tree.
+check-licenses:  ## FAIL if a bundled npm dependency is non-permissive or ships no licence text
+	@$(PYTHON) scripts/check_licenses.py
 
 # The three paths this project writes outside git that nothing ever collects
 # (a 2026-07 estate audit found 503 GB of cargo target dirs). `.venv/` joined
@@ -385,6 +396,7 @@ self-test: wheel  ## Prove the gate's checks can actually fail
 	@$(PYTHON) scripts/check_dev_docs.py --self-test
 	@$(PYTHON) scripts/check_skill_mirrors.py --self-test
 	@$(PYTHON) scripts/check_bans.py --self-test
+	@$(PYTHON) scripts/check_licenses.py --self-test
 	@$(PYTHON) scripts/check_bundle.py --self-test
 	@$(PYTHON) scripts/check_wheel.py --self-test
 	@$(PYTHON) scripts/prune.py --self-test

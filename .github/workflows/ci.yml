@@ -77,6 +77,12 @@ jobs:
         run: make frontend-install
       - name: Typecheck
         run: make frontend-typecheck
+      # Needs the installed tree, not just the lockfile: the question is
+      # whether each shipped package carries its licence TEXT, which only the
+      # unpacked package can answer. That is why it lives in this job rather
+      # than beside the structural bans.
+      - name: Bundled-dependency licences
+        run: make check-licenses
       # PRODUCTION build, not a dev build: this bundle is what rust-embed bakes
       # into the binary and what every downstream job compiles against, so a
       # dev-mode bundle here would make every Rust job test something the
