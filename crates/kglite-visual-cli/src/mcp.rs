@@ -301,8 +301,10 @@ enum KernelArg {
     Islands,
     /// A seeded force layout, computed here and held still.
     Force,
-    /// A geographic projection. Not implemented yet — asking for it is refused
-    /// with a sentence rather than silently served something else.
+    /// A geographic projection: every node with a lat/lon location or a WKT
+    /// geometry is drawn where it actually is, and anything without one goes
+    /// into a labelled tray rather than being hidden. Refused with a sentence
+    /// when nothing in the view has a coordinate.
     Geo,
     /// Hand the arrangement back to the viewer's own GPU simulation, which is
     /// where every session starts. After this you can no longer know where
@@ -359,6 +361,11 @@ struct RenderArgs {
     /// Canvas height in pixels. Defaults to 1250.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
+    /// Force one arrangement instead of letting the structure choose. Unset
+    /// reads the scene. `simulation` is not a rendering — there is no viewer's
+    /// GPU behind an image — and is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<KernelArg>,
 }
 
 // ---------------------------------------------------------------------------
@@ -681,6 +688,17 @@ impl ViewControl {
             theme: match args.theme {
                 ThemeArg::Dark => Theme::Dark,
                 ThemeArg::Light => Theme::Light,
+            },
+            kernel: match args.layout {
+                Some(KernelArg::Simulation) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(
+                        "`layout: simulation` hands the arrangement to the viewer's GPU, \
+                         and an image has no viewer. Use the `layout` tool for that, or \
+                         name a kernel this render can compute: auto, radial, islands, \
+                         force, geo.",
+                    )]))
+                }
+                other => other.map(Into::into),
             },
         };
 

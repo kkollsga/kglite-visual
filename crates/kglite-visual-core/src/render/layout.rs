@@ -230,6 +230,13 @@ pub struct Positions {
     /// The packed communities, in packing order — empty for every layout that
     /// did not pack any. See [`Island`].
     pub islands: Vec<Island>,
+    /// How this arrangement's coordinates relate to longitude and latitude.
+    ///
+    /// `Some` only for [`super::geo`]'s kernel, and carried because the
+    /// coastline and the graticule are drawn by the emitter and must land in
+    /// the same frame the nodes did. `None` for every other kernel, which is
+    /// the honest answer: a force layout's coordinates are not places.
+    pub geo: Option<super::geo::GeoFrame>,
 }
 
 impl Positions {
@@ -241,6 +248,7 @@ impl Positions {
             xy,
             label_side,
             islands: Vec::new(),
+            geo: None,
         }
     }
 }
@@ -735,6 +743,7 @@ pub fn radial(
         xy: fit(&xy, nodes, width, height, reserved_top, side_room).0,
         label_side,
         islands: Vec::new(),
+        geo: None,
     })
 }
 
@@ -950,6 +959,7 @@ fn shells(
         xy: fit(&xy, nodes, width, height, reserved_top, 0.0).0,
         label_side,
         islands: Vec::new(),
+        geo: None,
     })
 }
 
@@ -1063,6 +1073,11 @@ pub struct Island {
     /// True for the one island that is a *tray* of communities of one rather
     /// than a community.
     pub orphans: bool,
+    /// What the boundary says it is, drawn above it. `None` where the shape
+    /// speaks for itself — a packed community is a group of linked nodes and a
+    /// word for that would be noise. `Some` for a tray whose membership is a
+    /// *negative* fact the reader cannot see: [`super::geo`]'s "no coordinate".
+    pub caption: Option<String>,
 }
 
 /// Lay each community out on its own and pack the results (P11 direction (c)).
@@ -1216,6 +1231,9 @@ pub fn islands(
             Island {
                 members,
                 orphans: orphan_island && index == last,
+                // A packed community's boundary needs no word: the shape is
+                // the claim. See `Island::caption`.
+                caption: None,
             }
         })
         .collect();
@@ -1224,6 +1242,7 @@ pub fn islands(
         xy,
         label_side,
         islands: reported,
+        geo: None,
     })
 }
 
@@ -1861,6 +1880,21 @@ impl SpiralWalker {
 /// it: [`islands`] re-solves at a spacing the canvas can wear when it comes back
 /// below 1, and [`separate`] holds the actual no-interpenetration invariant
 /// afterwards, in final pixels, for every kernel.
+/// The affine map [`fit`] solved, with the parameters as well as the result.
+///
+/// Split out for [`super::geo`], which has to reproject a coastline into the
+/// same frame the nodes landed in — a second copy of this arithmetic there
+/// would be a second answer to a question with one, and the failure would be a
+/// shoreline a few pixels off the wellbores standing on it.
+pub(super) struct Fitted {
+    pub xy: Vec<(f64, f64)>,
+    pub scale: f64,
+    pub min_x: f64,
+    pub min_y: f64,
+    pub offset_x: f64,
+    pub offset_y: f64,
+}
+
 fn fit(
     xy: &[(f64, f64)],
     nodes: &[LayoutNode],
@@ -1869,6 +1903,18 @@ fn fit(
     reserved_top: f64,
     side_room: f64,
 ) -> (Vec<(f64, f64)>, f64) {
+    let fitted = fit_detail(xy, nodes, width, height, reserved_top, side_room);
+    (fitted.xy, fitted.scale)
+}
+
+pub(super) fn fit_detail(
+    xy: &[(f64, f64)],
+    nodes: &[LayoutNode],
+    width: f64,
+    height: f64,
+    reserved_top: f64,
+    side_room: f64,
+) -> Fitted {
     // Room for the label chip that hangs below the widest circle.
     const LABEL_ROOM_PX: f64 = 26.0;
 
@@ -1909,7 +1955,14 @@ fn fit(
             )
         })
         .collect();
-    (placed, scale)
+    Fitted {
+        xy: placed,
+        scale,
+        min_x,
+        min_y,
+        offset_x,
+        offset_y,
+    }
 }
 
 #[cfg(test)]

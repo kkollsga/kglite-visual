@@ -131,6 +131,11 @@ pub async fn render(State(state): State<AppState>, Json(body): Json<RenderReques
                 ("x-kglv-nodes", rendered.nodes.to_string()),
                 ("x-kglv-links", rendered.links.to_string()),
                 ("x-kglv-truncated", rendered.truncated.to_string()),
+                // Which arrangement ran, for the same reason the live view's
+                // `LayoutMeta` carries it: `auto` reads the scene and a forced
+                // kernel can fall back, so a caller holding the bytes cannot
+                // otherwise tell which picture it got.
+                ("x-kglv-layout", rendered.layout_kernel.as_str().to_string()),
                 ("x-kglv-banner", banners),
             ] {
                 // A header value has to be ASCII-safe, and a banner is built

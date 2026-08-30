@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use kglite_visual_core::render::{ExpandSource, RenderFormat, RenderRequest, RenderSource, Theme};
-use kglite_visual_core::request::{CypherRequest, EdgeDirection};
+use kglite_visual_core::request::{CypherRequest, EdgeDirection, LayoutKernel};
 use kglite_visual_core::{load_graph_with, render, GraphSource, LoadLimits, QueryConfig};
 use serde::Serialize;
 
@@ -53,6 +53,33 @@ impl From<ThemeArg> for Theme {
         match arg {
             ThemeArg::Dark => Theme::Dark,
             ThemeArg::Light => Theme::Light,
+        }
+    }
+}
+
+/// `--layout`. Same argument as [`FormatArg`]: the core enum stays free of
+/// `clap`.
+///
+/// `simulation` is deliberately absent. It means "hand the geometry back to the
+/// viewer's GPU", and a headless render has no viewer — offering it here would
+/// be a flag whose only possible answer is an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum LayoutArg {
+    Auto,
+    Radial,
+    Islands,
+    Force,
+    Geo,
+}
+
+impl From<LayoutArg> for LayoutKernel {
+    fn from(arg: LayoutArg) -> Self {
+        match arg {
+            LayoutArg::Auto => LayoutKernel::Auto,
+            LayoutArg::Radial => LayoutKernel::Radial,
+            LayoutArg::Islands => LayoutKernel::Islands,
+            LayoutArg::Force => LayoutKernel::Force,
+            LayoutArg::Geo => LayoutKernel::Geo,
         }
     }
 }
@@ -105,6 +132,16 @@ pub struct RenderArgs {
     #[arg(long, value_enum, default_value = "dark")]
     pub theme: ThemeArg,
 
+    /// Force one arrangement instead of letting the structure choose.
+    ///
+    /// Unset is `auto`, which reads the scene: hop rings around an ego centre,
+    /// packed islands where there are communities, a map where the nodes carry
+    /// coordinates, and a seeded force pass otherwise. `geo` asks for the map
+    /// explicitly, and answers with an error rather than a picture when nothing
+    /// in the slice has a coordinate.
+    #[arg(long, value_enum)]
+    pub layout: Option<LayoutArg>,
+
     /// Rows (for `--cypher`) or nodes (for `--expand`) wanted. Clamped in core
     /// to the response bound, whatever is asked for.
     #[arg(long)]
@@ -142,6 +179,10 @@ struct RenderSummary<'a> {
     folded: u32,
     /// Milliseconds the layout pass took, so a slow image says which half.
     layout_ms: f64,
+    /// The arrangement that actually ran, which can differ from `--layout`:
+    /// `auto` reads the scene, and a forced kernel with nothing to work with
+    /// falls back. A caller reading only this line learns which picture it got.
+    layout_kernel: &'a str,
     /// Type nodes drawn / carried, when the canvas could not hold the whole
     /// schema and the render kept the largest (P11 round 4). Absent when the
     /// picture has every type on it, and absent for every non-meta source.
@@ -177,6 +218,7 @@ pub fn run(args: &RenderArgs) -> Result<(), Box<dyn std::error::Error>> {
         height: args.height,
         seed: args.seed,
         theme: args.theme.into(),
+        kernel: args.layout.map(Into::into),
     };
     let out = args
         .out
@@ -209,6 +251,7 @@ pub fn run(args: &RenderArgs) -> Result<(), Box<dyn std::error::Error>> {
         links: rendered.links,
         folded: rendered.folded,
         layout_ms: (rendered.layout_ms * 100.0).round() / 100.0,
+        layout_kernel: rendered.layout_kernel.as_str(),
         types_shown: rendered.types_shown,
         types_total: rendered.types_total,
         names_shown: rendered.names_shown,
@@ -345,6 +388,7 @@ mod tests {
             width: 800,
             height: 600,
             theme: ThemeArg::Dark,
+            layout: None,
             limit: None,
             query_timeout_secs: 30,
             max_load_mb: None,

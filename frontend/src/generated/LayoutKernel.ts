@@ -5,9 +5,9 @@
  *
  * **A vocabulary, not a string**, so a kernel this build does not implement is
  * refused by name — `serde` reports the value it could not read — rather than
- * silently falling through to the default. [`LayoutKernel::Geo`] is the case
- * that makes the distinction load-bearing: it is a *named* kernel with no
- * implementation until G4, and a caller asking for it deserves the sentence
- * saying so instead of a force layout it did not ask for.
+ * silently falling through to the default. That mattered most while
+ * [`LayoutKernel::Geo`] was named here and not yet built; it still matters,
+ * because a caller that asks for an arrangement this build cannot make must
+ * hear so rather than be handed a force layout it did not ask for.
  */
 export type LayoutKernel = "auto" | "radial" | "islands" | "force" | "geo" | "simulation";

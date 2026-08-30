@@ -691,8 +691,42 @@ function redraw(authority?: SeedAuthority): void {
   positionLabels(surface)
   legend.update(legendSections())
   debugState.legendEntries = legend.entryCount
+  panels.setGeoAvailable(viewHasPlaceableNodes())
   syncCounts()
   renderStatus()
+}
+
+/**
+ * True while something on screen has somewhere to be.
+ *
+ * **Instances only, and that is the whole distinction.** A *type* is not
+ * anywhere — its nodes are — so the entry screen, which is nothing but type
+ * nodes, never offers the map however many of those types carry coordinates.
+ * The moment an expansion or a Cypher result puts instances of such a type on
+ * screen, it does.
+ *
+ * The test is kglite's own capability flag, read off the meta-graph the entry
+ * screen already loaded: `geo` for a type with a WKT geometry, `loc` for one
+ * with a lat/lon pair. They are two spellings of "this type declares where its
+ * nodes are" — kglite suppresses `loc` whenever `geo` is present, so a type
+ * with both reports only `geo`, and testing for either is the only way to catch
+ * both. It is a *type-level* claim, so it can be true for a node whose own
+ * fields turn out to be null; the server draws those in its tray and says how
+ * many, which is the honest place for that count to appear.
+ */
+function viewHasPlaceableNodes(): boolean {
+  const placeable = new Set(
+    (lastMeta?.nodes ?? [])
+      .filter((node) => node.capabilities.includes('geo') || node.capabilities.includes('loc'))
+      .map((node) => node.name),
+  )
+  if (placeable.size === 0) return false
+  return view.liveSlots().some((slot) => {
+    const label = view.label(slot)
+    return label !== undefined && !label.isType && label.nodeType !== null
+      ? placeable.has(label.nodeType)
+      : false
+  })
 }
 
 function appearance(): Appearance {

@@ -40,7 +40,7 @@ use crate::protocol::PROTOCOL_VERSION;
 use crate::request::{LayoutKernel, LayoutRequest};
 use crate::session::Session;
 
-use super::{layout, structure, DEFAULT_HEIGHT, DEFAULT_WIDTH};
+use super::{geo, layout, structure, DEFAULT_HEIGHT, DEFAULT_WIDTH};
 
 /// What a client needs to know about an arrangement it did not compute.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -50,8 +50,8 @@ pub struct LayoutMeta {
     /// What the caller asked for — `auto` included, so a reader can tell a
     /// chosen kernel from a requested one.
     pub kernel_requested: LayoutKernel,
-    /// What actually ran. Never `auto` (that is a question, not an answer) and
-    /// never `geo` (refused until G4). It can differ from `kernel_requested`
+    /// What actually ran. Never `auto` (that is a question, not an answer). It
+    /// can differ from `kernel_requested`
     /// for a reason the caller cannot predict: `islands` over a scene with no
     /// community structure has no islands to pack, and falling back to `force`
     /// while *saying* `force` is the honest outcome — a caller that reads this
@@ -64,7 +64,7 @@ pub struct LayoutMeta {
     /// Slots that got a real position. `slot_count - live_count` are the NaNs.
     pub live_count: u32,
     /// Wall-clock milliseconds the kernel took, for the same reason
-    /// [`super::Rendered::layout_ms`] carries it: the three kernels have very
+    /// [`super::Rendered::layout_ms`] carries it: the kernels have very
     /// different costs and a caller that suddenly waits needs the number.
     pub layout_ms: f64,
 }
@@ -88,18 +88,6 @@ pub fn layout_live_view(
     session: &Session,
     request: &LayoutRequest,
 ) -> Result<LayoutResult, CoreError> {
-    if request.kernel == LayoutKernel::Geo {
-        // Named in the vocabulary and not implemented yet. A polite refusal
-        // beats a silent fallback: a caller that asked for a map and got a
-        // force layout would report the map as working.
-        return Err(CoreError::Request(
-            "kernel 'geo' lands in G4, together with the projection and the \
-             coastline it needs. The kernels this build can run are 'auto', \
-             'radial', 'islands' and 'force'."
-                .to_string(),
-        ));
-    }
-
     let slot_count = session.view_read().slot_count();
     if request.kernel == LayoutKernel::Simulation {
         // Handing the view back is a *message*, not an arrangement: there are
@@ -137,7 +125,17 @@ pub fn layout_live_view(
             .filter(|index| *index < count)
     });
 
-    let plan = choose_plan(request.kernel, count, &links, seed_hint);
+    // **The geographic question is asked of the scene, not of the topology.**
+    // `structure::plan` reads links; whether these nodes are anywhere is a fact
+    // about their properties, which is why the decision sits here rather than
+    // inside the kernel chooser.
+    let geo_points: Vec<Option<geo::LonLat>> = scene.nodes.iter().map(|n| n.geo).collect();
+    let use_geo = match request.kernel {
+        LayoutKernel::Geo => true,
+        LayoutKernel::Auto => geo::auto_eligible(&geo_points),
+        _ => false,
+    };
+    let plan = choose_plan(request.kernel, count, &links, seed_hint.as_slice());
     let nodes: Vec<layout::LayoutNode> = scene
         .nodes
         .iter()
@@ -153,18 +151,29 @@ pub fn layout_live_view(
     let groups = super::arc_groups(&scene);
 
     let started = std::time::Instant::now();
-    let positions = match &plan {
-        structure::Plan::Radial { seed } => layout::radial(&nodes, &links, *seed, &groups, canvas)?,
-        structure::Plan::Islands { community, count } => layout::islands(
-            &nodes,
-            &links,
-            community,
-            *count,
-            &groups,
-            canvas,
-            LAYOUT_SEED,
-        )?,
-        structure::Plan::Force => layout::run(&nodes, &links, canvas, LAYOUT_SEED)?,
+    let positions = if use_geo {
+        // The coastline stays behind. cosmos.gl draws points and links and has
+        // no background layer, so what crosses the wire here is what crosses it
+        // for every other kernel: one position per slot. The map picture — coast,
+        // graticule, tray boundary — is the static render's, and the picker says
+        // so in as many words.
+        geo::layout(&geo_points, &nodes, canvas)?.0
+    } else {
+        match &plan {
+            structure::Plan::Radial { seed } => {
+                layout::radial(&nodes, &links, *seed, &groups, canvas)?
+            }
+            structure::Plan::Islands { community, count } => layout::islands(
+                &nodes,
+                &links,
+                community,
+                *count,
+                &groups,
+                canvas,
+                LAYOUT_SEED,
+            )?,
+            structure::Plan::Force => layout::run(&nodes, &links, canvas, LAYOUT_SEED)?,
+        }
     };
     let layout_ms = started.elapsed().as_secs_f64() * 1_000.0;
 
@@ -195,9 +204,15 @@ pub fn layout_live_view(
         meta: LayoutMeta {
             protocol_version: PROTOCOL_VERSION,
             kernel_requested: request.kernel,
-            kernel_chosen: kernel_of(&plan),
+            kernel_chosen: if use_geo {
+                LayoutKernel::Geo
+            } else {
+                kernel_of(&plan)
+            },
             seed_slot: match &plan {
-                structure::Plan::Radial { seed } => scene.nodes.get(*seed).map(|node| node.slot),
+                structure::Plan::Radial { seed } if !use_geo => {
+                    scene.nodes.get(*seed).map(|node| node.slot)
+                }
                 _ => None,
             },
             slot_count,
@@ -224,20 +239,28 @@ const LAYOUT_SEED: u64 = 0;
 /// failing — `islands` over a scene with one community, `radial` over an empty
 /// scene — and the fallback is reported through
 /// [`LayoutMeta::kernel_chosen`], never hidden.
-fn choose_plan(
+pub(super) fn choose_plan(
     kernel: LayoutKernel,
     count: usize,
     links: &[(usize, usize)],
-    seed_hint: Option<usize>,
+    seed_hint: &[usize],
 ) -> structure::Plan {
+    // One hint is a centre the caller named; more than one is an expansion from
+    // a whole type, which names no centre. Same rule `structure::plan` states.
+    let one_hint = match seed_hint {
+        [seed] if *seed < count => Some(*seed),
+        _ => None,
+    };
     match kernel {
-        // `Geo` is refused and `Simulation` returns before this is reached;
-        // giving either a second answer here would be a decision made twice.
+        // `Geo` is decided by the geographic reader, which has data this
+        // function does not; `Simulation` returns before the live path reaches
+        // here. Both fall through to structure so a caller that got neither
+        // still gets an arrangement rather than a panic.
         LayoutKernel::Auto | LayoutKernel::Geo | LayoutKernel::Simulation => {
-            structure::plan(count, links, seed_hint.as_slice())
+            structure::plan(count, links, seed_hint)
         }
         LayoutKernel::Force => structure::Plan::Force,
-        LayoutKernel::Radial => match radial_seed(count, links, seed_hint) {
+        LayoutKernel::Radial => match radial_seed(count, links, one_hint) {
             Some(seed) => structure::Plan::Radial { seed },
             None => structure::Plan::Force,
         },
@@ -288,7 +311,7 @@ fn radial_seed(count: usize, links: &[(usize, usize)], seed_hint: Option<usize>)
 }
 
 /// The kernel name a plan corresponds to.
-fn kernel_of(plan: &structure::Plan) -> LayoutKernel {
+pub(super) fn kernel_of(plan: &structure::Plan) -> LayoutKernel {
     match plan {
         structure::Plan::Radial { .. } => LayoutKernel::Radial,
         structure::Plan::Islands { .. } => LayoutKernel::Islands,
@@ -309,12 +332,12 @@ mod tests {
     fn a_forced_kernel_is_the_kernel_that_runs() {
         let (count, links) = star(10);
         assert_eq!(
-            kernel_of(&choose_plan(LayoutKernel::Force, count, &links, None)),
+            kernel_of(&choose_plan(LayoutKernel::Force, count, &links, &[])),
             LayoutKernel::Force,
             "a star would have been chosen as radial by `auto`, and `force` overrides that"
         );
         assert_eq!(
-            kernel_of(&choose_plan(LayoutKernel::Auto, count, &links, None)),
+            kernel_of(&choose_plan(LayoutKernel::Auto, count, &links, &[])),
             LayoutKernel::Radial
         );
     }
@@ -323,7 +346,7 @@ mod tests {
     fn a_seed_hint_decides_the_centre() {
         let (count, links) = star(10);
         let structure::Plan::Radial { seed } =
-            choose_plan(LayoutKernel::Radial, count, &links, Some(7))
+            choose_plan(LayoutKernel::Radial, count, &links, &[7])
         else {
             panic!("a forced radial must produce a radial plan");
         };
@@ -336,7 +359,7 @@ mod tests {
         // have, and the answer must not be "islands" over a picture with one.
         let (count, links) = star(20);
         assert_eq!(
-            kernel_of(&choose_plan(LayoutKernel::Islands, count, &links, None)),
+            kernel_of(&choose_plan(LayoutKernel::Islands, count, &links, &[])),
             LayoutKernel::Force
         );
     }
@@ -350,7 +373,7 @@ mod tests {
             LayoutKernel::Force,
         ] {
             assert_eq!(
-                kernel_of(&choose_plan(kernel, 0, &[], None)),
+                kernel_of(&choose_plan(kernel, 0, &[], &[])),
                 LayoutKernel::Force,
                 "{kernel:?} over an empty scene"
             );

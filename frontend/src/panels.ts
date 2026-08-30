@@ -85,10 +85,7 @@ function count(value: number): string {
  * The layout picker's entries, in the order a user reads them.
  *
  * `simulation` is first and is the one the session starts in, so the list
- * reads as "the live one, then the ones that hold still". `geo` is deliberately
- * absent: it exists in the wire vocabulary and the server refuses it until G4,
- * and an entry that always answers with an error is worse than no entry —
- * offering it would be this panel promising something the build cannot do.
+ * reads as "the live one, then the ones that hold still".
  */
 const LAYOUT_CHOICES: readonly (readonly [LayoutKernel, string])[] = [
   ['simulation', 'live force (GPU)'],
@@ -97,6 +94,31 @@ const LAYOUT_CHOICES: readonly (readonly [LayoutKernel, string])[] = [
   ['islands', 'packed islands'],
   ['force', 'force, held still'],
 ]
+
+/**
+ * The `geo` entry, added and removed as the view gains and loses nodes that
+ * have somewhere to be.
+ *
+ * **Conditional rather than always present, and that is the same decision as
+ * before with a new answer.** While the server refused `geo` outright, an entry
+ * that always errored was worse than no entry; now that it computes, an entry
+ * that errors *on this view* is still worse than no entry — so it appears
+ * exactly when the view holds instances of a type with coordinates and
+ * disappears when it does not. The condition is the app's, not a guess: it
+ * reads the same `geo` / `loc` capability flags the meta-graph already sends
+ * and the legend already explains.
+ */
+const GEO_CHOICE: readonly [LayoutKernel, string] = ['geo', 'map — where they are']
+
+/**
+ * What the live map is and is not, said where the choice is made.
+ *
+ * cosmos.gl draws points and links and has no background layer, so the live
+ * view gets positions and nothing else — no coastline, no graticule. Saying so
+ * here is cheaper than a user concluding the map is broken, and the render is
+ * one sentence away.
+ */
+const GEO_HINT = 'positions only — render for the map picture'
 
 /**
  * What the filter box is for, said where the two boxes sit together.
@@ -851,6 +873,36 @@ export class Panels {
   }
 
   /**
+   * Offer — or withdraw — the map, as the view gains and loses placeable nodes.
+   *
+   * See {@link GEO_CHOICE}. Withdrawing is the half that has to be right: a
+   * user who selected `geo` and then collapsed every wellbore is left with a
+   * picker naming an arrangement the current view cannot be drawn in, so the
+   * option goes and the note says what happened rather than leaving a dead
+   * entry selected.
+   */
+  setGeoAvailable(available: boolean): void {
+    const [value, text] = GEO_CHOICE
+    const existing = [...this.layoutKernel.options].find((option) => option.value === value)
+    if (available === (existing !== undefined)) return
+    if (available) {
+      const option = element('option', undefined, text)
+      option.value = value
+      this.layoutKernel.appendChild(option)
+      return
+    }
+    const wasChosen = this.layoutKernel.value === value
+    existing?.remove()
+    if (wasChosen) {
+      // The select falls back to its first option on its own; the note is what
+      // stops that looking like the server changed its mind.
+      this.layoutNote.className = 'kglv-hint kglv-warn'
+      this.layoutNote.textContent =
+        'nothing in this view has a coordinate any more, so the map is not on offer'
+    }
+  }
+
+  /**
    * Show the arrangement the shared view is actually in.
    *
    * Driven from the server's answer, never from the click that asked for it:
@@ -870,9 +922,11 @@ export class Panels {
       requested === chosen || requested === 'auto'
         ? ''
         : ` (${requested} had nothing to work with here)`
+    const aside = chosen === 'geo' ? ` — ${GEO_HINT}` : ''
     this.layoutNote.textContent =
       `${count(placed)} nodes placed by the server's ${chosen} layout${fellBack}` +
-      ' — held still, so dragging is off'
+      ' — held still, so dragging is off' +
+      aside
   }
 
   /** A layout request the server refused, in its own words. */

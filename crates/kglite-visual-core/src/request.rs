@@ -51,10 +51,10 @@ pub enum SearchMode {
 ///
 /// **A vocabulary, not a string**, so a kernel this build does not implement is
 /// refused by name — `serde` reports the value it could not read — rather than
-/// silently falling through to the default. [`LayoutKernel::Geo`] is the case
-/// that makes the distinction load-bearing: it is a *named* kernel with no
-/// implementation until G4, and a caller asking for it deserves the sentence
-/// saying so instead of a force layout it did not ask for.
+/// silently falling through to the default. That mattered most while
+/// [`LayoutKernel::Geo`] was named here and not yet built; it still matters,
+/// because a caller that asks for an arrangement this build cannot make must
+/// hear so rather than be handed a force layout it did not ask for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 #[serde(rename_all = "kebab-case")]
@@ -70,8 +70,10 @@ pub enum LayoutKernel {
     Islands,
     /// The seeded Fruchterman–Reingold fallback.
     Force,
-    /// Geographic projection. Named here and refused until G4 lands it, so the
-    /// refusal is a sentence rather than a parse error.
+    /// Equirectangular projection: every node with a declared lat/lon location
+    /// or a WKT geometry is placed where it actually is, and anything without
+    /// one goes into a labelled tray. Refused with a sentence — never a silent
+    /// fallback — when nothing in the scene has a coordinate at all.
     Geo,
     /// **Not a kernel: the absence of one.** Hand the geometry back to the
     /// viewer's GPU force simulation, which is where it starts.

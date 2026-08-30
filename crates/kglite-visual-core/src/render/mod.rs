@@ -30,7 +30,9 @@
 //! is the sentence every face repeats about that, and it is one constant so it
 //! cannot be repeated differently.
 
+pub mod coastline;
 pub mod encoding;
+pub mod geo;
 pub mod labels;
 pub mod layout;
 pub mod live_layout;
@@ -169,6 +171,19 @@ pub struct RenderRequest {
     pub seed: u64,
     #[serde(default)]
     pub theme: Theme,
+    /// Force one arrangement instead of letting the structure choose.
+    ///
+    /// The same vocabulary the live view's [`crate::request::LayoutRequest`]
+    /// uses, and deliberately the same enum rather than a parallel one: "which
+    /// kernel" is one question, and two spellings of it would drift the day a
+    /// kernel is added. `None` is `auto` — read the scene and decide, which is
+    /// what every render did before this field existed and still does by
+    /// default.
+    ///
+    /// [`crate::request::LayoutKernel::Simulation`] is refused here: there is
+    /// no viewer's GPU behind a headless render to hand the geometry back to.
+    #[serde(default)]
+    pub kernel: Option<crate::request::LayoutKernel>,
 }
 
 fn default_width() -> u32 {
@@ -189,6 +204,7 @@ impl RenderRequest {
             height: DEFAULT_HEIGHT,
             seed: 0,
             theme: Theme::default(),
+            kernel: None,
         }
     }
 }
@@ -221,10 +237,20 @@ pub struct Rendered {
     pub folded: u32,
     /// Wall-clock milliseconds the layout pass took.
     ///
-    /// Reported because the layout is now chosen per scene and the three
-    /// kernels have different costs; a caller that suddenly waits seconds for
-    /// an image needs the number that says which half is slow.
+    /// Reported because the layout is now chosen per scene and the kernels have
+    /// different costs; a caller that suddenly waits seconds for an image needs
+    /// the number that says which half is slow.
     pub layout_ms: f64,
+    /// The arrangement that actually ran.
+    ///
+    /// Never `auto` (that is a question, not an answer) and never `simulation`
+    /// (there is no viewer's GPU behind a headless render). It can differ from
+    /// what a caller asked for: `islands` over a scene with no communities falls
+    /// back to `force`, and a caller who reads this field learns the picture it
+    /// is holding is not the one it named. Same contract, same words, as
+    /// [`live_layout::LayoutMeta::kernel_chosen`] — the live view and the
+    /// headless render answer "which arrangement is this" identically.
+    pub layout_kernel: crate::request::LayoutKernel,
     /// Type nodes drawn, and type nodes the meta-graph carried.
     ///
     /// `Some` only on a meta-graph render whose canvas could not hold every
@@ -278,6 +304,14 @@ pub(crate) struct SceneNode {
     /// known, never by a scene builder — a builder cannot know which layout
     /// kernel the structure will choose.
     pub emphasis: bool,
+    /// Where this node is on the Earth, as `(longitude, latitude)` in degrees.
+    ///
+    /// Read by the scene builder, because that is the only place with the graph
+    /// and the node id in hand; `None` for a type node (a *type* has no
+    /// position — only its instances do), for an aggregate wedge, and for any
+    /// instance whose type declares no spatial config or whose declared fields
+    /// are null. See [`geo::position_of`].
+    pub geo: Option<geo::LonLat>,
 }
 
 /// One link, ready to draw.
@@ -384,7 +418,23 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     // much of it a reader can count.
     let slice_nodes = scene.nodes.len() as u32;
     let slice_links = scene.links.len() as u32;
-    let folded = fold_leaf_fans(&mut scene, f64::from(width) * f64::from(height));
+
+    // **The geographic question is asked before the fold, and settles it.** A
+    // fold replaces a fan of nodes with one wedge, and a wedge standing for
+    // twenty wellbores in twenty places has no place of its own — folding under
+    // a map would move real coordinates into the tray. So a scene that is about
+    // to be drawn as a map is never folded, and `folded` is honestly zero.
+    let geo_points: Vec<Option<geo::LonLat>> = scene.nodes.iter().map(|n| n.geo).collect();
+    let use_geo = match request.kernel {
+        Some(crate::request::LayoutKernel::Geo) => true,
+        Some(_) => false,
+        None => geo::auto_eligible(&geo_points),
+    };
+    let folded = if use_geo {
+        0
+    } else {
+        fold_leaf_fans(&mut scene, f64::from(width) * f64::from(height))
+    };
     if folded > 0 {
         // Drawn INTO the image, beside the truncation banner and for the same
         // reason (D5): a picture with a fan glyph in it and nothing saying how
@@ -396,11 +446,36 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         ));
     }
 
+    if use_geo {
+        // Pushed here rather than after the layout, because the status block's
+        // height is what `reserved_top` below is computed from: a line added
+        // afterwards would grow the block over nodes already placed under it.
+        // Same argument as the reserved row on the `place_all` path.
+        if let Some(line) = geo::tray_line(
+            geo_points.iter().filter(|p| p.is_none()).count(),
+            geo_points.len(),
+        ) {
+            scene.status.push(line);
+        }
+    }
+
     let links: Vec<(usize, usize)> = scene.links.iter().map(|l| (l.source, l.target)).collect();
-    let plan = structure::plan(scene.nodes.len(), &links, &scene.seeds);
-    // Before the layout nodes are built, because emphasis changes a radius and
-    // a ring is sized from the radii it has to hold.
-    emphasise_centres(&mut scene, &plan, &links);
+    let plan = live_layout::choose_plan(
+        request.kernel.unwrap_or_default(),
+        scene.nodes.len(),
+        &links,
+        &scene.seeds,
+    );
+    if !use_geo {
+        // Before the layout nodes are built, because emphasis changes a radius
+        // and a ring is sized from the radii it has to hold.
+        //
+        // **A map has no centre to emphasise.** The halo says "this is the node
+        // everything else is arranged around", and on a map nothing is: the
+        // arrangement is the Earth's. Drawing one anyway would make a reader
+        // look for a meaning the picture does not carry.
+        emphasise_centres(&mut scene, &plan, &links);
+    }
 
     let nodes: Vec<layout::LayoutNode> = scene
         .nodes
@@ -426,29 +501,44 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     };
     let groups = arc_groups(&scene);
     let started = std::time::Instant::now();
-    let positions = match plan {
-        structure::Plan::Radial { seed } => layout::radial(&nodes, &links, seed, &groups, canvas)?,
-        structure::Plan::Islands { community, count } => layout::islands(
-            &nodes,
-            &links,
-            &community,
-            count,
-            &groups,
-            canvas,
-            request.seed,
-        )?,
-        structure::Plan::Force => layout::run(&nodes, &links, canvas, request.seed)?,
+    let mut positions = if use_geo {
+        geo::layout(&geo_points, &nodes, canvas)?.0
+    } else {
+        match &plan {
+            structure::Plan::Radial { seed } => {
+                layout::radial(&nodes, &links, *seed, &groups, canvas)?
+            }
+            structure::Plan::Islands { community, count } => layout::islands(
+                &nodes,
+                &links,
+                community,
+                *count,
+                &groups,
+                canvas,
+                request.seed,
+            )?,
+            structure::Plan::Force => layout::run(&nodes, &links, canvas, request.seed)?,
+        }
     };
     let layout_ms = started.elapsed().as_secs_f64() * 1_000.0;
-    let mut positions = positions;
     moor_folded_fans(&scene, &mut positions, canvas);
-    // Last, on the coordinates that are about to be drawn, and after the fold
-    // wedges have been moored: `layout::fit` scales positions and not radii, so
-    // no kernel can promise on its own that two circles clear each other in
-    // final pixels, and the wedge mooring places a glyph the kernels never saw
-    // in that arrangement. One pass over the finished picture is the only place
-    // the promise is about the picture. See `layout::separate`.
-    layout::separate(&mut positions.xy, &nodes, canvas);
+    if !use_geo {
+        // Last, on the coordinates that are about to be drawn, and after the
+        // fold wedges have been moored: `layout::fit` scales positions and not
+        // radii, so no kernel can promise on its own that two circles clear each
+        // other in final pixels, and the wedge mooring places a glyph the
+        // kernels never saw in that arrangement. One pass over the finished
+        // picture is the only place the promise is about the picture. See
+        // `layout::separate`.
+        //
+        // **Never on a map.** Every coordinate here is a claim about where
+        // something is, and a pass whose whole job is to move overlapping
+        // circles apart would answer "two platforms 300 m apart" by drawing them
+        // 14 px apart and calling it geography. Coincidence is handled where it
+        // is true — `geo::jitter_offsets`, on exactly-equal coordinates only —
+        // and the rest of the overlap is the honest picture of a dense field.
+        layout::separate(&mut positions.xy, &nodes, canvas);
+    }
 
     // The grid thins — for the canvas's capacity, and inside a contested region
     // — so the count of names actually drawn is the only honest one to print.
@@ -476,6 +566,11 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         links: slice_links,
         folded,
         layout_ms,
+        layout_kernel: if use_geo {
+            crate::request::LayoutKernel::Geo
+        } else {
+            live_layout::kernel_of(&plan)
+        },
         types_shown: scene
             .canvas_tier
             .map(|_| clamp_u32(scene.nodes.len() as u64)),
@@ -828,6 +923,10 @@ fn fold_leaf_fans(scene: &mut Scene, canvas_area: f64) -> u32 {
             pinned: true,
             aggregate: Some(total),
             emphasis: false,
+            // A wedge stands for many nodes in many places, so it is not in
+            // one of them. The fold never runs under the geo kernel (see
+            // `draw`), so this is the honest value rather than a live case.
+            geo: None,
         });
     }
 
@@ -943,6 +1042,11 @@ fn build_scene(session: &Session, request: &RenderRequest) -> Result<Scene, Core
 /// seeded layout, never from the client. See
 /// [`crate::session::GEOMETRY_CAVEAT`].
 fn live_scene(session: &Session) -> Scene {
+    // The arena guard the disk backend needs for materialised property reads,
+    // held once across the whole scene rather than per node: the geo reader
+    // below asks every instance for two floats, and one guard per node would
+    // be one arena round trip per node. A no-op on memory and mapped graphs.
+    let _guard = session.graph().begin_read_pass();
     let view = session.view_read();
     let meta_by_name: std::collections::HashMap<&str, &crate::meta_graph::MetaTypeNode> = session
         .meta_graph()
@@ -989,6 +1093,8 @@ fn live_scene(session: &Session) -> Scene {
                     pinned: false,
                     aggregate: None,
                     emphasis: false,
+                    // A *type* is not anywhere; its instances are.
+                    geo: None,
                 }
             }
             SlotEntry::Node {
@@ -1020,6 +1126,7 @@ fn live_scene(session: &Session) -> Scene {
                     pinned: false,
                     aggregate: None,
                     emphasis: false,
+                    geo: geo::position_of(session.graph(), node_type, *node_id),
                 }
             }
             SlotEntry::Tombstone => unreachable!("live_entries skips tombstones"),
@@ -1165,6 +1272,8 @@ fn meta_scene(meta: &MetaGraphResponse, session: &Session, canvas_names: usize) 
             badges: n.capabilities.clone(),
             dimmed: n.supporting,
             node_type: Some(n.name.clone()),
+            // A *type* is not anywhere; its instances are.
+            geo: None,
             // A type node's count is the whole reason it is that size.
             show_count: true,
             pinned: false,
@@ -1248,6 +1357,8 @@ fn meta_scene(meta: &MetaGraphResponse, session: &Session, canvas_names: usize) 
 /// have this choice — it has one continuous view a user navigates — and an
 /// image is a snapshot of one question.
 fn slice_scene(session: &Session, slice: &GraphSlice, seed_type: Option<&str>) -> Scene {
+    // One guard for the whole scene — same argument as `live_scene`.
+    let _guard = session.graph().begin_read_pass();
     let index_of: std::collections::HashMap<u32, usize> = slice
         .meta
         .nodes
@@ -1280,6 +1391,7 @@ fn slice_scene(session: &Session, slice: &GraphSlice, seed_type: Option<&str>) -
             badges: Vec::new(),
             dimmed: false,
             node_type: Some(n.node_type.clone()),
+            geo: geo::position_of(session.graph(), &n.node_type, n.node_id),
             show_count: false,
             pinned: false,
             aggregate: None,
@@ -1461,6 +1573,7 @@ mod tests {
             badges: Vec::new(),
             dimmed: false,
             node_type: Some("T".to_string()),
+            geo: None,
             show_count: false,
             pinned: false,
             aggregate,
@@ -1493,6 +1606,7 @@ mod tests {
             xy: vec![(200.0, 300.0), (900.0, 300.0)],
             label_side: vec![layout::LabelSide::Below; 2],
             islands: Vec::new(),
+            geo: None,
         };
         moor_folded_fans(&scene, &mut positions, canvas(1000.0, 600.0));
         assert_eq!(positions.xy[0], (200.0, 300.0), "the parent does not move");
@@ -1540,6 +1654,7 @@ mod tests {
             xy: vec![(500.0, 130.0), (500.0, 40.0)],
             label_side: vec![layout::LabelSide::Below; 2],
             islands: Vec::new(),
+            geo: None,
         };
         let block = layout::Canvas {
             width: 1000.0,
@@ -1601,6 +1716,7 @@ mod tests {
             xy,
             label_side: vec![layout::LabelSide::Below; count],
             islands: Vec::new(),
+            geo: None,
         };
         moor_folded_fans(&scene, &mut positions, canvas(1400.0, 900.0));
 
@@ -1650,6 +1766,7 @@ mod tests {
             xy: vec![(100.0, 300.0), (700.0, 300.0), (700.0, 300.0)],
             label_side: vec![layout::LabelSide::Below; 3],
             islands: Vec::new(),
+            geo: None,
         };
         moor_folded_fans(&scene, &mut positions, canvas(1000.0, 600.0));
         assert!(

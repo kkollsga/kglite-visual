@@ -33,6 +33,7 @@ fn png_request(width: u32, height: u32) -> RenderRequest {
         height,
         seed: 1234,
         theme: Theme::Dark,
+        kernel: None,
     }
 }
 

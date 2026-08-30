@@ -128,6 +128,9 @@ pub(crate) fn emit(
         palette.background
     ));
 
+    // The map goes down first, under everything — it is the ground the graph
+    // stands on, not a datum. See `emit_basemap`.
+    emit_basemap(&mut out, positions, &palette);
     emit_islands(&mut out, scene, positions, &palette);
     emit_links(&mut out, scene, positions, &palette);
     emit_nodes(&mut out, scene, positions);
@@ -136,6 +139,144 @@ pub(crate) fn emit(
 
     out.push_str("</svg>\n");
     out
+}
+
+/// Ink the coastline and the graticule are allowed.
+///
+/// **Quiet is the requirement, and it is the same requirement the island
+/// boundary states**: at any weight a reader would call a map, the background
+/// becomes the loudest thing in the picture and the graph on top of it becomes
+/// decoration. The coast is a hairline at 0.30 and the graticule at 0.10 — the
+/// coast readable at a glance, the grid readable only when looked for, which is
+/// the order a reader needs them in.
+const COAST_INK: f64 = 0.3;
+const GRATICULE_INK: f64 = 0.1;
+
+/// Degrees between graticule lines, chosen from the box the map covers.
+///
+/// A grid is a *scale bar made of lines*: it is worth drawing when a reader can
+/// count a handful of cells and worthless when there are two or forty. The step
+/// is picked so the picture carries roughly four to twelve lines per axis, out
+/// of the 1-2-5 ladder every axis in every plotting library uses, because those
+/// are the intervals a reader adds up without arithmetic.
+const GRATICULE_STEPS_DEG: [f64; 10] = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 45.0];
+const GRATICULE_TARGET_LINES: f64 = 6.0;
+
+/// The geographic ground: a graticule, then the world's land outline.
+///
+/// **Nothing at all unless the layout was geographic.** `positions.geo` is
+/// `Some` only for `render::geo`'s kernel, so a force layout — whose coordinates
+/// are not places — can never acquire a coastline that would claim they were.
+///
+/// Clipped twice, and both clips are honesty rather than tidiness: to the map's
+/// canvas rectangle, so the coast never runs through the tray of nodes that have
+/// no coordinate; and to the data's own lon/lat box, so the picture shows the
+/// region the data is in rather than a world map with a dot on it.
+fn emit_basemap(out: &mut String, positions: &Positions, palette: &Palette) {
+    let Some(frame) = positions.geo else {
+        return;
+    };
+    let (clip_x, clip_y, clip_w, clip_h) = frame.clip;
+    if clip_w <= 0.0 || clip_h <= 0.0 {
+        return;
+    }
+    out.push_str(&format!(
+        "<clipPath id=\"kglv-map\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>\n",
+        num(clip_x),
+        num(clip_y),
+        num(clip_w),
+        num(clip_h)
+    ));
+    out.push_str("<g clip-path=\"url(#kglv-map)\">\n");
+    emit_graticule(out, &frame, palette);
+    emit_coast(out, &frame, palette);
+    out.push_str("</g>\n");
+}
+
+fn emit_graticule(out: &mut String, frame: &super::geo::GeoFrame, palette: &Palette) {
+    let (west, south, east, north) = frame.bbox;
+    let step = |span: f64| -> f64 {
+        *GRATICULE_STEPS_DEG
+            .iter()
+            .find(|candidate| span / **candidate <= GRATICULE_TARGET_LINES)
+            .unwrap_or(GRATICULE_STEPS_DEG.last().expect("the ladder is not empty"))
+    };
+    let lon_step = step(east - west);
+    let lat_step = step(north - south);
+    out.push_str(&format!(
+        "<g class=\"kglv-graticule\" stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"1\">\n",
+        palette.island,
+        num(GRATICULE_INK)
+    ));
+    // Lines land on multiples of the step, not on the box's edge: a reader who
+    // sees a line at 60°N and one at 62°N has a scale, and one at 58.37°N has a
+    // decoration.
+    let mut lon = (west / lon_step).ceil() * lon_step;
+    while lon <= east {
+        let (x, _) = frame.project(lon, north);
+        let (_, y_south) = frame.project(lon, south);
+        let (_, y_north) = frame.project(lon, north);
+        out.push_str(&format!(
+            "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"/>\n",
+            num(x),
+            num(y_north),
+            num(x),
+            num(y_south)
+        ));
+        lon += lon_step;
+    }
+    let mut lat = (south / lat_step).ceil() * lat_step;
+    while lat <= north {
+        let (x_west, y) = frame.project(west, lat);
+        let (x_east, _) = frame.project(east, lat);
+        out.push_str(&format!(
+            "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"/>\n",
+            num(x_west),
+            num(y),
+            num(x_east),
+            num(y)
+        ));
+        lat += lat_step;
+    }
+    out.push_str("</g>\n");
+}
+
+fn emit_coast(out: &mut String, frame: &super::geo::GeoFrame, palette: &Palette) {
+    let (west, south, east, north) = frame.bbox;
+    let mut paths = String::new();
+    for ring in super::coastline::land() {
+        // A ring wholly outside the box contributes nothing, and skipping it by
+        // its own extent is what keeps a Norwegian Shelf render from projecting
+        // Antarctica's 1 100 points off-canvas.
+        let outside = ring
+            .iter()
+            .all(|(lon, lat)| *lon < west || *lon > east || *lat < south || *lat > north);
+        if outside {
+            continue;
+        }
+        let mut path = String::new();
+        for (index, (lon, lat)) in ring.iter().enumerate() {
+            let (x, y) = frame.project(*lon, *lat);
+            path.push_str(&format!(
+                "{}{} {}",
+                if index == 0 { 'M' } else { 'L' },
+                num(x),
+                num(y)
+            ));
+            path.push(' ');
+        }
+        path.push('Z');
+        paths.push_str(&format!("<path d=\"{}\"/>\n", path.trim_end()));
+    }
+    if paths.is_empty() {
+        return;
+    }
+    out.push_str(&format!(
+        "<g class=\"kglv-coast\" fill=\"none\" stroke=\"{}\" stroke-opacity=\"{}\" \
+         stroke-width=\"1.2\" stroke-linejoin=\"round\">\n{paths}</g>\n",
+        palette.island,
+        num(COAST_INK)
+    ));
 }
 
 /// Corner radius of an island boundary, in pixels — soft enough that it reads
@@ -195,6 +336,20 @@ fn emit_islands(out: &mut String, scene: &Scene, positions: &Positions, palette:
                 num(ISLAND_CORNER_PX),
                 palette.island
             ));
+            // A tray whose membership is a *negative* fact — "these have no
+            // coordinate" — cannot be read off the shape, so it is written on
+            // the boundary. See `layout::Island::caption`.
+            if let Some(caption) = &island.caption {
+                out.push_str(&format!(
+                    "<text x=\"{}\" y=\"{}\" fill=\"{}\" fill-opacity=\"0.55\" \
+                     font-family=\"{}\" font-size=\"11\">{}</text>\n",
+                    num(x + 2.0),
+                    num(y - 5.0),
+                    palette.island,
+                    MONO_STACK,
+                    escape(caption)
+                ));
+            }
             continue;
         }
         out.push_str(&format!(

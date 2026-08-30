@@ -164,7 +164,7 @@ test('force mode: switch to a static kernel, expand under it, switch back', asyn
   }
 })
 
-test('the picker is absent in the fixture mode, and geo is refused rather than faked', async ({
+test('the picker is absent in the fixture mode, and a map of nowhere is refused', async ({
   page,
 }) => {
   let server: Launched | null = null
@@ -177,9 +177,10 @@ test('the picker is absent in the fixture mode, and geo is refused rather than f
     expect((await page.evaluate(() => window.__kglv)).layoutMode).toBe('deterministic')
     await expect(page.getByTestId('layout-kernel')).toHaveCount(0)
 
-    // `geo` is in the wire vocabulary and has no implementation until G4. The
-    // server says so in a sentence; it does not quietly serve a force layout,
-    // which would let a caller report a map as working.
+    // The entry screen is nothing but type nodes, and a *type* is not anywhere
+    // — its instances are. So `geo` over this view has nothing to place, and
+    // the server says so in a sentence rather than quietly serving a force
+    // layout, which would let a caller report a map as working.
     const refusal = await page.evaluate(async (base) => {
       const response = await fetch(`${base}api/layout`, {
         method: 'POST',
@@ -189,7 +190,65 @@ test('the picker is absent in the fixture mode, and geo is refused rather than f
       return { status: response.status, body: (await response.json()) as { error?: string } }
     }, server.info.url)
     expect(refusal.status).toBe(400)
-    expect(refusal.body.error).toContain('G4')
+    expect(refusal.body.error).toContain('no map to draw')
+  } finally {
+    server?.process.kill()
+  }
+})
+
+/**
+ * The map, offered where it means something and withheld where it does not
+ * (plan E12).
+ *
+ * **The conditional entry is the assertion, not decoration.** G3 shipped no
+ * `geo` entry at all because an option that always errored was worse than none;
+ * the rule this replaces it with is the same rule with a live condition, and a
+ * spec that only checked the happy path would pass against a picker that
+ * offered the map on the entry screen — where every node is a type and nothing
+ * is anywhere.
+ */
+test('the map is offered once the view holds nodes that are somewhere', async ({
+  page,
+}, testInfo) => {
+  let server: Launched | null = null
+  const consoleErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text())
+  })
+  try {
+    server = await launch()
+    await page.goto(server.info.url)
+    await ready(page)
+
+    const options = page.getByTestId('layout-kernel').locator('option[value="geo"]')
+    await expect(options).toHaveCount(0)
+
+    // `City` is the fixture's one type with a lat/lon location (`loc` on the
+    // meta-graph). Expanding it puts its instances on screen, together with the
+    // companies that are in them — which have no coordinate and are exactly the
+    // tray case the server counts.
+    await page.locator('.kglv-label:has-text("City")').click()
+    await page.getByTestId('expand-LOCATED_IN-in').click()
+    await page.waitForFunction((seed) => window.__kglv.pointCount > seed, META_POINTS, {
+      timeout: 15_000,
+    })
+    await expect(options).toHaveCount(1)
+
+    await page.getByTestId('layout-kernel').selectOption('geo')
+    await page.waitForFunction(() => window.__kglv.layoutKernel === 'geo', undefined, {
+      timeout: 15_000,
+    })
+    const mapped = await page.evaluate(() => window.__kglv)
+    expect(mapped.layoutMode).toBe('static')
+    // The live map is positions and nothing else, and the hint says so rather
+    // than leaving a user to wonder where the coastline went.
+    await expect(page.getByTestId('layout-note')).toContainText('positions only')
+
+    const shotPath = testInfo.outputPath('layout-geo.png')
+    await page.screenshot({ path: shotPath })
+    await testInfo.attach('layout-geo.png', { path: shotPath, contentType: 'image/png' })
+
+    expect(consoleErrors, `browser console errors: ${consoleErrors.join(' | ')}`).toEqual([])
   } finally {
     server?.process.kill()
   }

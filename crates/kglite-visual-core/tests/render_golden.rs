@@ -19,6 +19,12 @@
 //! 3. `fixture-cypher-dark.svg` — the instance path: uniform radii, floor link
 //!    widths, the title-or-`type id` display fallback, and the label grid with
 //!    `place_all` **off**, which is a different branch of the same function.
+//! 4. `fixture-geo-dark.svg` — the geographic kernel (G4): the equirectangular
+//!    projection, the `cos φ₁` aspect correction, the vendored coastline and
+//!    the graticule. The fixture's ten `City` nodes carry real
+//!    latitude/longitude and are spread over the whole globe, so this pins the
+//!    world-scale case; sodir's 56–82°N case is exercised by the acceptance
+//!    renders, which are not committed.
 //!
 //! `make check-render-baseline` is the gate step that diffs them.
 
@@ -80,6 +86,7 @@ fn meta_request(theme: Theme) -> RenderRequest {
         height: 600,
         seed: 1234,
         theme,
+        kernel: None,
     }
 }
 
@@ -101,6 +108,7 @@ fn cypher_request() -> RenderRequest {
         height: 600,
         seed: 1234,
         theme: Theme::Dark,
+        kernel: None,
     }
 }
 
@@ -115,6 +123,71 @@ fn generate_meta_graph_goldens() {
             &render_to_string(&meta_request(theme)),
         );
     }
+}
+
+/// The geographic kernel, on the one committed fixture that has coordinates.
+///
+/// **`kernel: Some(Geo)`, not `auto`** — deliberately. Ten cities out of a
+/// 60-person graph is nowhere near `geo::AUTO_PLACEABLE_SHARE`, so `auto` would
+/// (correctly) draw something else and this golden would silently stop pinning
+/// the projection. Naming the kernel is what makes the file a check of the
+/// thing it is named after.
+fn geo_request() -> RenderRequest {
+    RenderRequest {
+        source: RenderSource::Cypher(CypherRequest {
+            query: "MATCH (c:City) RETURN c".to_string(),
+            params: Default::default(),
+            limit: Some(24),
+            as_graph: true,
+        }),
+        format: RenderFormat::Svg,
+        width: 900,
+        height: 600,
+        seed: 1234,
+        theme: Theme::Dark,
+        kernel: Some(kglite_visual_core::request::LayoutKernel::Geo),
+    }
+}
+
+#[test]
+fn generate_geo_golden() {
+    let svg = render_to_string(&geo_request());
+    // The same vacuity guard the cypher golden carries, plus the two things
+    // that make this file a *geo* golden rather than another scatter of dots:
+    // the coastline path and the graticule are drawn from the vendored
+    // TopoJSON, and a golden with neither would pin nothing this test claims.
+    assert!(
+        svg.matches("<circle").count() >= 10,
+        "the geo golden must actually contain the ten cities"
+    );
+    assert!(
+        svg.contains("kglv-coast"),
+        "the geo golden must carry the coastline it is a golden of"
+    );
+    assert!(
+        svg.contains("kglv-graticule"),
+        "the geo golden must carry the graticule"
+    );
+    write_if_changed(&goldens_dir().join("fixture-geo-dark.svg"), &svg);
+}
+
+/// The map is a claim about places, so the same request must land the same node
+/// on the same pixel — and a *different* node somewhere else.
+#[test]
+fn the_geo_render_is_a_pure_function_of_its_request() {
+    let first = render_to_string(&geo_request());
+    let second = render_to_string(&geo_request());
+    assert_eq!(first, second);
+
+    // The seed reaches the force pass's initial placement and nothing else, so
+    // a map must be identical under a different one: geography is not seeded.
+    let mut reseeded = geo_request();
+    reseeded.seed = 99;
+    assert_eq!(
+        render_to_string(&reseeded),
+        first,
+        "a map has no seed to vary — the positions come from the data"
+    );
 }
 
 #[test]
@@ -204,6 +277,7 @@ fn a_truncated_render_says_so_in_the_image_and_in_the_metadata() {
         height: 600,
         seed: 1,
         theme: Theme::Dark,
+        kernel: None,
     };
     let rendered = render::render(&graph, "meta.kgl", QueryConfig::default(), &request)
         .expect("the expansion renders");

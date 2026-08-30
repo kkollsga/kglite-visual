@@ -11,8 +11,8 @@ export type LayoutMeta = { protocol_version: number,
  */
 kernel_requested: LayoutKernel, 
 /**
- * What actually ran. Never `auto` (that is a question, not an answer) and
- * never `geo` (refused until G4). It can differ from `kernel_requested`
+ * What actually ran. Never `auto` (that is a question, not an answer). It
+ * can differ from `kernel_requested`
  * for a reason the caller cannot predict: `islands` over a scene with no
  * community structure has no islands to pack, and falling back to `force`
  * while *saying* `force` is the honest outcome — a caller that reads this
@@ -33,7 +33,7 @@ slot_count: number,
 live_count: number, 
 /**
  * Wall-clock milliseconds the kernel took, for the same reason
- * [`super::Rendered::layout_ms`] carries it: the three kernels have very
+ * [`super::Rendered::layout_ms`] carries it: the kernels have very
  * different costs and a caller that suddenly waits needs the number.
  */
 layout_ms: number, };

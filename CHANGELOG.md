@@ -13,13 +13,26 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- **A geographic layout: `--layout geo`, `kernel: "geo"`.** Every node whose
+  type declares a lat/lon location or a WKT geometry is drawn where it
+  actually is, on an equirectangular projection whose longitudes are
+  corrected by the cosine of the data's mid-latitude — so a shelf at 68°N
+  comes out its own shape rather than 2.7× too wide. Mercator is deliberately
+  not used: over 56–82°N it stretches one end of the same picture three times
+  as much as the other. Nodes sharing a coordinate exactly (a drilling pad
+  reported once per bore) are spread deterministically; nodes with no
+  coordinate go into a labelled tray at the foot with a count in the status
+  block, never dropped. The static render draws the world's coastline and a
+  graticule under the graph, from a vendored 21 KB TopoJSON — no network, no
+  tiles. The live view gets the positions only, and the picker says so. The
+  picker offers the map exactly while the view holds nodes that are somewhere:
+  a *type* is not anywhere, so the entry screen never offers it.
 - **Protocol v4: a `layout` message and request.** The server computes a
   static arrangement for the live view with the same structure-chosen
   kernels the headless render uses — hop rings, packed islands or a
   held-still force pass — and broadcasts it to every attached client, which
   stops its simulation and holds the picture still. `POST /api/layout`, the
-  MCP `set_layout` tool, and a picker in the sidebar. `geo` is named and
-  refused until the geo kernel lands.
+  MCP `set_layout` tool, and a picker in the sidebar.
 - **The geometry caveat is conditional.** Under a static kernel the server
   knows the arrangement it sent, so `view_state` reports `layout_kernel`
   and the caveat that goes with it instead of an absolute claim that is no
