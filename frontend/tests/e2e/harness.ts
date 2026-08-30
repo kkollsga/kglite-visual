@@ -13,6 +13,8 @@ import os from 'node:os'
 import { createInterface } from 'node:readline'
 import path from 'node:path'
 
+import type { Page } from '@playwright/test'
+
 // Playwright runs with the config's directory as cwd, so the repo root is one
 // level up. Derived rather than hard-coded, and verified below: a wrong root
 // would otherwise surface as "binary not found", which reads like a build
@@ -112,4 +114,46 @@ export async function launch(): Promise<Launched> {
   })
 
   return { process: child, info, stderr }
+}
+
+/**
+ * Put text in the query editor, whichever editor is live.
+ *
+ * The panel ships a `<textarea>` and upgrades it to CodeMirror when that chunk
+ * lands, so a spec that only knew how to drive one of them would be asserting
+ * on an app half the users may not have. `fill()` covers both: Playwright
+ * clears and inserts through the same path for a textarea and for a
+ * `contenteditable`, and CodeMirror turns that into a document change.
+ *
+ * The first wait is the race guard, and it waits for the *upgrade to settle*
+ * rather than for a box to exist. Waiting for "a textarea or a CodeMirror"
+ * would be satisfied instantly by the textarea and the spec would type into an
+ * element the import is about to replace — text the editor never receives,
+ * surfacing as an empty query and reading as a server bug. The panel settles
+ * exactly two ways: CodeMirror mounted, or the note saying it did not.
+ */
+export async function fillQuery(page: Page, text: string): Promise<void> {
+  await page
+    .locator('[data-testid="query-editor"] .cm-content, [data-testid="editor-note"].kglv-warn')
+    .first()
+    .waitFor({ state: 'attached' })
+  const target = page.locator(
+    '[data-testid="query-editor"] .cm-content, [data-testid="query-editor"] textarea',
+  )
+  await target.first().fill(text)
+}
+
+/**
+ * The editor's text.
+ *
+ * CodeMirror renders one `.cm-line` per line, so the joins are the newlines;
+ * `textContent` alone would run them together and an assertion on a two-line
+ * query would compare the wrong string.
+ */
+export async function queryText(page: Page): Promise<string> {
+  const lines = page.locator('[data-testid="query-editor"] .cm-line')
+  if ((await lines.count()) > 0) {
+    return lines.evaluateAll((nodes) => nodes.map((node) => node.textContent ?? '').join('\n'))
+  }
+  return page.locator('[data-testid="query-editor"] textarea').inputValue()
 }

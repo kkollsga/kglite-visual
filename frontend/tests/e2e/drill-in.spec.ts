@@ -15,7 +15,7 @@
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { appUrl, launch, type Launched } from './harness'
+import { appUrl, fillQuery, launch, queryText, type Launched } from './harness'
 
 /** The fixture's Person type: 60 members, largest type, therefore slot 0. */
 const PERSON_SLOT = 0
@@ -155,12 +155,11 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
     await expect(page.getByTestId('appearance-note')).toContainText('Person: 60 nodes')
 
     // ── a Cypher query, through the panel ───────────────────────────────
-    await page
-      .getByTestId('query-input')
-      .fill(
-        'MATCH (p:Person)-[:WORKS_AT]->(c:Company) ' +
-          'RETURN c.title AS company, count(p) AS staff ORDER BY staff DESC LIMIT 3',
-      )
+    await fillQuery(
+      page,
+      'MATCH (p:Person)-[:WORKS_AT]->(c:Company) ' +
+        'RETURN c.title AS company, count(p) AS staff ORDER BY staff DESC LIMIT 3',
+    )
     await page.getByTestId('query-run').click()
     const table = page.getByTestId('query-table')
     await expect(table.locator('tr')).toHaveCount(4) // header + 3 rows
@@ -176,12 +175,12 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
     // ── a mistyped label is an advisory, not an empty graph ─────────────
     // kglite raises this one and it used to reach only the SERVER's stderr, so
     // the panel showed "0 rows" and the user read it as "no such nodes".
-    await page.getByTestId('query-input').fill('MATCH (n:Persn) RETURN n LIMIT 3')
+    await fillQuery(page, 'MATCH (n:Persn) RETURN n LIMIT 3')
     await page.getByTestId('query-run').click()
     await expect(page.getByTestId('query-status')).toContainText('0 rows')
     await expect(page.getByTestId('query-warning').first()).toContainText('Persn')
     // ── EXPLAIN gets a plan, not a three-column grid ────────────────────
-    await page.getByTestId('query-input').fill('EXPLAIN MATCH (p:Person) RETURN p.title')
+    await fillQuery(page, 'EXPLAIN MATCH (p:Person) RETURN p.title')
     await page.getByTestId('query-run').click()
     const plan = page.getByTestId('query-plan')
     await expect(plan).toBeVisible()
@@ -193,7 +192,7 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
 
     // Back to a query that works, so the collapse below acts on the same view
     // the assertions above described.
-    await page.getByTestId('query-input').fill('MATCH (p:Person) RETURN p.title LIMIT 3')
+    await fillQuery(page, 'MATCH (p:Person) RETURN p.title LIMIT 3')
     await page.getByTestId('query-run').click()
     await expect(page.getByTestId('query-warning')).toHaveCount(0)
     await expect(page.getByTestId('query-plan')).toHaveCount(0)
@@ -205,21 +204,17 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
     await expect(page.getByTestId('query-history').locator('button').first()).toContainText(
       'MATCH (p:Person) RETURN p.title LIMIT 3',
     )
-    await page.getByTestId('query-input').fill('')
+    await fillQuery(page, '')
     await page.getByTestId('query-history').locator('button').first().click()
-    await expect(page.getByTestId('query-input')).toHaveValue(
-      'MATCH (p:Person) RETURN p.title LIMIT 3',
-    )
+    expect(await queryText(page)).toBe('MATCH (p:Person) RETURN p.title LIMIT 3')
 
     // Save it, reload the editor from somewhere else, and load it back.
     page.once('dialog', (dialog) => void dialog.accept('people'))
     await page.getByTestId('query-save').click()
     await expect(page.getByTestId('saved-note')).toContainText('1 of 64 saved')
-    await page.getByTestId('query-input').fill('RETURN 1')
+    await fillQuery(page, 'RETURN 1')
     await page.getByTestId('saved-list').selectOption('people')
-    await expect(page.getByTestId('query-input')).toHaveValue(
-      'MATCH (p:Person) RETURN p.title LIMIT 3',
-    )
+    expect(await queryText(page)).toBe('MATCH (p:Person) RETURN p.title LIMIT 3')
     await page.getByTestId('query-delete').click()
     await expect(page.getByTestId('saved-note')).toContainText('0 of 64 saved')
 

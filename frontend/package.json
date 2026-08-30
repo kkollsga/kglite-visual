@@ -2,7 +2,7 @@
   "name": "kglite-visual-frontend",
   "private": true,
   "type": "module",
-  "description": "Built to static assets and embedded into the Rust binary by rust-embed. Never published to npm, and deliberately carries no `version` field \u2014 an unpublished package with a version string is a fourth place this project's version could drift from the three that matter (CLAUDE.md, Commits & releases). Every dependency is pinned EXACT, no caret: the renderer is pre-stable, and it shares version numbers with a non-free package family whose name differs by one scope, so a floating range is an API risk and a licence risk at once. scripts/check_bans.py names and enforces the ban; it also scans this file, so the banned name cannot be written here.",
+  "description": "Built to static assets and embedded into the Rust binary by rust-embed. Never published to npm, and deliberately carries no `version` field — an unpublished package with a version string is a fourth place this project's version could drift from the three that matter (CLAUDE.md, Commits & releases). Every dependency is pinned EXACT, no caret: the renderer is pre-stable, and it shares version numbers with a non-free package family whose name differs by one scope, so a floating range is an API risk and a licence risk at once. scripts/check_bans.py names and enforces the ban; it also scans this file, so the banned name cannot be written here.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -10,7 +10,14 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@cosmos.gl/graph": "3.4.1"
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/commands": "6.11.0",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/lint": "6.9.7",
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.9",
+    "@cosmos.gl/graph": "3.4.1",
+    "@lezer/highlight": "1.2.3"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

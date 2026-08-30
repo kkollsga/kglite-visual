@@ -13,6 +13,20 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- **A real editor for the Cypher panel.** The query box highlights Cypher as
+  you type — keywords, strings, numbers, comments, node labels (`:Wellbore`),
+  relationship types (`[:DRILLED_IN]`), property reads (`.title`) and
+  parameters (`$ids`), with node labels and relationship types in deliberately
+  different colours because they are the two halves of the meta-graph. Undo,
+  multi-line editing and Ctrl/Cmd+Enter all work as before; save, load and the
+  recent list still put queries into it and read them back.
+
+  It is CodeMirror 6 with hand-picked extensions rather than a stock setup, and
+  it arrives in **its own chunk, fetched after the page is already usable** (84
+  KB gzipped, no change to the main bundle). The plain text box is what you get
+  until it lands, and what you keep if it never does — in which case the panel
+  says so in one line rather than quietly handing you a worse editor.
+
 - **Saved queries, kept by the server and shared by every face.** A query
   panel that saves what you wrote, a picker to load it back, and a recent list
   of the last 20 you ran. The store is a small JSON file per graph under your

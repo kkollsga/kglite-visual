@@ -7,13 +7,15 @@
  * comparable-repo study found the opposite arrangement in every graph UI that
  * froze.
  *
- * A plain `<textarea>` for the query editor is a deliberate P3 scope call: a
- * CodeMirror instance with a Cypher grammar is real value and real bundle, and
- * nothing in this phase's gate can tell whether it works. Recorded as
- * consider-for-future rather than half-built.
+ * The query editor is a plain `<textarea>` that upgrades itself. CodeMirror 6
+ * arrives through a dynamic `import()` — its own chunk, fetched after first
+ * paint — and replaces the textarea when it lands. Everything here talks to the
+ * {@link QueryEditor} contract, which both satisfy, so the panel never learns
+ * which one it has and the card keeps working when the chunk does not arrive.
  */
 
 import { statLabel } from './appearance'
+import type { QueryEditor } from './editor/contract'
 import type { EdgeDirection } from './generated/EdgeDirection'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { NodeDetail } from './generated/NodeDetail'
@@ -63,6 +65,11 @@ function count(value: number): string {
 export class Panels {
   readonly root: HTMLDivElement
   private readonly queryInput: HTMLTextAreaElement
+  /** Where the CodeMirror view mounts, and what holds the textarea until it does. */
+  private readonly queryHost: HTMLDivElement
+  private readonly editorNote: HTMLDivElement
+  /** The textarea, or CodeMirror once its chunk has landed. Never null. */
+  private editor: QueryEditor
   private readonly queryAsGraph: HTMLInputElement
   private readonly queryStatus: HTMLDivElement
   private readonly queryDiagnostics: HTMLDivElement
@@ -148,27 +155,37 @@ export class Panels {
 
     // ── cypher ────────────────────────────────────────────────────────────
     const query = element('div', 'kglv-card')
+    this.queryHost = element('div', 'kglv-editor')
+    this.queryHost.setAttribute('data-testid', 'query-editor')
     this.queryInput = element('textarea', 'kglv-textarea')
     this.queryInput.setAttribute('data-testid', 'query-input')
     this.queryInput.rows = 4
     this.queryInput.spellcheck = false
     this.queryInput.value = 'MATCH (p:Person)-[:WORKS_AT]->(c:Company)\nRETURN c.title AS company, count(p) AS staff\nORDER BY staff DESC'
+    this.queryHost.appendChild(this.queryInput)
+    this.editor = {
+      value: () => this.queryInput.value,
+      setValue: (text) => {
+        this.queryInput.value = text
+      },
+      focus: () => this.queryInput.focus(),
+    }
+    this.editorNote = element('div', 'kglv-hint')
+    this.editorNote.setAttribute('data-testid', 'editor-note')
     const queryRow = element('div', 'kglv-row')
     const run = element('button', 'kglv-button', 'Run')
     run.setAttribute('data-testid', 'query-run')
-    run.addEventListener('click', () =>
-      this.handlers.runQuery(this.queryInput.value, this.queryAsGraph.checked),
-    )
+    run.addEventListener('click', () => this.runCurrentQuery())
     this.queryAsGraph = element('input')
     this.queryAsGraph.type = 'checkbox'
     this.queryAsGraph.setAttribute('data-testid', 'query-as-graph')
     const asGraphLabel = element('label', 'kglv-checkbox')
     asGraphLabel.append(this.queryAsGraph, document.createTextNode(' show in graph'))
     // Ctrl/Cmd+Enter runs, because a multi-line editor cannot use Enter alone.
+    // The CodeMirror half binds the same chord as a keymap; this one covers the
+    // textarea, which is what a user types into until the chunk lands.
     this.queryInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-        this.handlers.runQuery(this.queryInput.value, this.queryAsGraph.checked)
-      }
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) this.runCurrentQuery()
     })
 
     // ── saved queries + recent ────────────────────────────────────────────
@@ -205,7 +222,8 @@ export class Panels {
     this.queryDiagnostics.setAttribute('data-testid', 'query-diagnostics')
     this.queryResults = element('div', 'kglv-results')
     query.append(
-      this.queryInput,
+      this.queryHost,
+      this.editorNote,
       queryRow,
       savedRow,
       this.savedNote,
@@ -215,6 +233,42 @@ export class Panels {
       this.queryResults,
     )
     this.root.appendChild(this.section('Cypher', query))
+
+    void this.upgradeEditor()
+  }
+
+  /** Run whatever is in the editor — the one path both the button and the chord take. */
+  private runCurrentQuery(): void {
+    this.handlers.runQuery(this.editor.value(), this.queryAsGraph.checked)
+  }
+
+  /**
+   * Fetch the CodeMirror chunk and, if it arrives, swap the textarea out.
+   *
+   * The failure branch is the point. A dynamic import can fail for reasons that
+   * have nothing to do with this code — a chunk that did not get embedded, a
+   * proxy that rewrote the path, a browser that refused the module — and the
+   * silent version of that is a query box that is *quietly* worse than the one
+   * the last release shipped. So the note says which editor is on screen, and
+   * the textarea it says that about is still fully working.
+   */
+  private async upgradeEditor(): Promise<void> {
+    try {
+      const { mountCypherEditor } = await import('./editor')
+      const text = this.queryInput.value
+      this.queryInput.remove()
+      this.editor = mountCypherEditor({
+        parent: this.queryHost,
+        doc: text,
+        onRun: () => this.runCurrentQuery(),
+      })
+      this.editorNote.remove()
+    } catch (err) {
+      this.editorNote.className = 'kglv-hint kglv-warn'
+      this.editorNote.textContent = `plain text box — the syntax editor did not load (${
+        err instanceof Error ? err.message : String(err)
+      })`
+    }
   }
 
   private section(title: string, body: HTMLElement): HTMLElement {
@@ -242,7 +296,7 @@ export class Panels {
 
   /** The query text currently in the editor. */
   queryText(): string {
-    return this.queryInput.value
+    return this.editor.value()
   }
 
   /**
@@ -254,8 +308,8 @@ export class Panels {
    * button as the only thing that runs anything.
    */
   private setQueryText(query: string): void {
-    this.queryInput.value = query
-    this.queryInput.focus()
+    this.editor.setValue(query)
+    this.editor.focus()
   }
 
   private loadSaved(): void {
@@ -264,7 +318,7 @@ export class Panels {
   }
 
   private emitSave(): void {
-    const query = this.queryInput.value.trim()
+    const query = this.editor.value().trim()
     if (query === '') return
     // The selected name is the default, so re-saving an edited query is one
     // click; a fresh name is one word.

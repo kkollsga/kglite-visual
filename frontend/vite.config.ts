@@ -45,14 +45,15 @@ export default defineConfig({
     // this app's dependencies, not about anything a split could improve, and a
     // warning that fires on every build of a correct tree is one nobody reads.
     //
-    // 700 leaves ~82 KB of raw headroom over today's 617.6 KB and is expected
-    // to hold: the one large addition planned — a CodeMirror 6 editor, ~90-120
-    // KB gzipped — lands behind a dynamic `import()` and therefore in its own
-    // chunk, not in this one. Code splitting works here and is not theoretical:
-    // this build already emits `webgl-device-*.js` (101 KB) from a dynamic
-    // import inside luma.gl, fetched at runtime through the relative `base`
-    // above and served by the embedded static handler, which is what the e2e
-    // suite exercises on every run.
+    // 700 leaves ~78 KB of raw headroom over today's 622.2 KB, and the one
+    // large addition this ceiling was sized for has now landed inside it: the
+    // CodeMirror 6 editor is `editor-*.js`, 257.3 KB raw / 84.2 KB gzipped,
+    // fetched by the dynamic `import()` in `panels.ts`. The entry chunk moved
+    // 621.3 → 622.2 KB for it — the swap logic, not the editor. Code splitting
+    // is not theoretical here: this build also emits `webgl-device-*.js`
+    // (101 KB) from a dynamic import inside luma.gl, and both are fetched at
+    // runtime through the relative `base` above and served by the embedded
+    // static handler, which is what the e2e suite exercises on every run.
     //
     // Crossing 700 means the entry chunk grew by something that is not the
     // renderer. Raise it again only with a fresh per-package measurement and a

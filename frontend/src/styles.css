@@ -242,6 +242,27 @@
   resize: vertical;
 }
 
+/* The query editor's slot. Holds the textarea until the CodeMirror chunk
+   lands, then holds the CodeMirror view — so the card's layout is the same
+   either way and the swap does not move the Run button. */
+.kglv-editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.kglv-editor .kglv-textarea {
+  width: 100%;
+}
+
+/* CodeMirror's own colours are set in editor/theme.ts, from this file's
+   palette. What is left here is the geometry it cannot know: the editor must
+   not overflow a 340px panel, and its own default is to grow to its content. */
+.kglv-editor .cm-editor {
+  min-height: 62px;
+  max-width: 100%;
+}
+
 .kglv-button {
   padding: 4px 10px;
   border-radius: 4px;
