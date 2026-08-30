@@ -357,6 +357,43 @@
   font-weight: 600;
 }
 
+/* An EXPLAIN plan. Monospace because the operation names are identifiers and
+   the step column is a gutter, not a data column. */
+.kglv-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.kglv-plan-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.kglv-plan-step {
+  flex: 0 0 18px;
+  text-align: right;
+  color: #6e7681;
+}
+
+.kglv-plan-op {
+  flex: 1 1 auto;
+  color: #e6edf3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kglv-plan-rows {
+  flex: 0 0 auto;
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+}
+
 .kglv-hits {
   display: flex;
   flex-direction: column;

@@ -13,6 +13,15 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- **`EXPLAIN` results are drawn as a plan.** The rows have always arrived and
+  the panel rendered them as three columns of data — a `step` column counting
+  1..n beside an `operation` column is a numbered list wearing a grid, and
+  `estimated_rows` read as a value rather than as the planner's guess. An
+  `EXPLAIN` now gets its own monospace treatment: the step in the gutter, the
+  operation indented, the estimate on the right where the planner produced one
+  and blank where it did not. The status line says "not executed", because the
+  query was planned rather than run.
+
 - **The engine's query advisories now reach the person who typed the query.**
   kglite raises non-fatal warnings for an unknown label, an unknown
   relationship type or an absent property, each with a "did you mean?" hint —

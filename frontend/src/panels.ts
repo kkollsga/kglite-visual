@@ -324,11 +324,73 @@ export class Panels {
     }
   }
 
+  /**
+   * An `EXPLAIN` plan, drawn as a plan rather than as three columns of data.
+   *
+   * The rows already arrive — `explain` has been on `QueryTable` since the flag
+   * existed — and the generic table renders them truthfully and unreadably: a
+   * `step` column of 1..n beside an `operation` column is a numbered list
+   * wearing a grid, and `estimated_rows` reads as a value of the row rather
+   * than as the planner's guess about it. Monospace, the step in the gutter,
+   * the estimate on the right, so the shape of the plan is the shape on screen.
+   *
+   * **The rows are a plan, not data**, which is also why nothing here offers
+   * "show in graph" and why the status line below says the query did not run.
+   */
+  private showExplainPlan(table: QueryTable, rows: number): void {
+    const column = (name: string): unknown[] => table.data[table.columns.indexOf(name)] ?? []
+    const steps = column('step')
+    const operations = column('operation')
+    const estimates = column('estimated_rows')
+
+    const plan = element('div', 'kglv-plan')
+    plan.setAttribute('data-testid', 'query-plan')
+    for (let row = 0; row < rows; row += 1) {
+      const line = element('div', 'kglv-plan-row')
+      line.append(
+        element('span', 'kglv-plan-step', formatCell(steps[row])),
+        element('span', 'kglv-plan-op', formatCell(operations[row])),
+      )
+      // Only where the planner produced one. A blank cell is the honest
+      // rendering of "no estimate"; a `0` would be a number it never gave.
+      const estimate = estimates[row]
+      if (typeof estimate === 'number') {
+        line.appendChild(element('span', 'kglv-plan-rows', `~${count(estimate)}`))
+      }
+      plan.appendChild(line)
+    }
+    this.queryResults.appendChild(plan)
+  }
+
+  /**
+   * True when this result is a plan *and* has the shape this panel can draw.
+   *
+   * The column check is not belt-and-braces: an engine that reshapes `EXPLAIN`
+   * would otherwise get a plan panel of empty rows, and an unreadable table is
+   * a better failure than a confident blank one.
+   */
+  private static isDrawablePlan(table: QueryTable): boolean {
+    return table.explain && table.columns.includes('operation')
+  }
+
   /** The results table. Rows are already bounded by the server (D5). */
   showQueryTable(table: QueryTable): number {
     this.queryResults.replaceChildren()
     this.showQueryDiagnostics(table)
     const rows = table.data[0]?.length ?? 0
+
+    if (Panels.isDrawablePlan(table)) {
+      // No bound wording: `EXPLAIN` is exempt from the row cap in the engine,
+      // so "n of m" would be describing a ceiling that did not apply. And no
+      // elapsed time worth reading — the query was planned, not run.
+      this.queryStatus.className = 'kglv-hint'
+      this.queryStatus.textContent = `query plan — ${count(rows)} step${
+        rows === 1 ? '' : 's'
+      }, not executed`
+      this.showExplainPlan(table, rows)
+      return rows
+    }
+
     const bound = table.bound.truncated
       ? `showing ${count(table.bound.returned)} of ${count(table.bound.total)} rows`
       : `${count(table.bound.total)} row${table.bound.total === 1 ? '' : 's'}`

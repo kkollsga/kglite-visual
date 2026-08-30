@@ -180,11 +180,23 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
     await page.getByTestId('query-run').click()
     await expect(page.getByTestId('query-status')).toContainText('0 rows')
     await expect(page.getByTestId('query-warning').first()).toContainText('Persn')
+    // ── EXPLAIN gets a plan, not a three-column grid ────────────────────
+    await page.getByTestId('query-input').fill('EXPLAIN MATCH (p:Person) RETURN p.title')
+    await page.getByTestId('query-run').click()
+    const plan = page.getByTestId('query-plan')
+    await expect(plan).toBeVisible()
+    await expect(plan.locator('.kglv-plan-op').first()).toContainText('Match')
+    // The generic table is what this treatment replaces, so its absence is
+    // half of the assertion.
+    await expect(page.getByTestId('query-table')).toHaveCount(0)
+    await expect(page.getByTestId('query-status')).toContainText('not executed')
+
     // Back to a query that works, so the collapse below acts on the same view
     // the assertions above described.
     await page.getByTestId('query-input').fill('MATCH (p:Person) RETURN p.title LIMIT 3')
     await page.getByTestId('query-run').click()
     await expect(page.getByTestId('query-warning')).toHaveCount(0)
+    await expect(page.getByTestId('query-plan')).toHaveCount(0)
 
     // ── collapse back to the meta-graph ─────────────────────────────────
     await page.getByTestId('collapse').click()
