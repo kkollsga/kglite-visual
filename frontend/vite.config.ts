@@ -32,5 +32,31 @@ export default defineConfig({
     // inside a fresh binary reads exactly like a backend bug, so the build
     // must not leave last week's chunks lying beside this week's.
     sourcemap: true,
+    // 700 KB raw, and the number is a ratchet rather than a silencer.
+    //
+    // The default 500 has been firing since the renderer landed, so the choice
+    // was between splitting the entry chunk and moving the line. Measured on
+    // 2026-08-30 by summing the entry chunk's own source map by package: of
+    // 1355.6 KB pre-minify, 410.2 KB is @cosmos.gl/graph, 428.1 KB is the four
+    // @luma.gl packages, 126.1 KB is dompurify, and the app's own `src/` is
+    // 130.7 KB — 9.6%. There is nothing in the 90% to defer: the canvas *is*
+    // the entry screen, so a dynamically imported renderer would be a
+    // dynamically imported first paint. The warning was reporting a fact about
+    // this app's dependencies, not about anything a split could improve, and a
+    // warning that fires on every build of a correct tree is one nobody reads.
+    //
+    // 700 leaves ~82 KB of raw headroom over today's 617.6 KB and is expected
+    // to hold: the one large addition planned — a CodeMirror 6 editor, ~90-120
+    // KB gzipped — lands behind a dynamic `import()` and therefore in its own
+    // chunk, not in this one. Code splitting works here and is not theoretical:
+    // this build already emits `webgl-device-*.js` (101 KB) from a dynamic
+    // import inside luma.gl, fetched at runtime through the relative `base`
+    // above and served by the embedded static handler, which is what the e2e
+    // suite exercises on every run.
+    //
+    // Crossing 700 means the entry chunk grew by something that is not the
+    // renderer. Raise it again only with a fresh per-package measurement and a
+    // reason, or split what grew — never because a build went yellow.
+    chunkSizeWarningLimit: 700,
   },
 })
