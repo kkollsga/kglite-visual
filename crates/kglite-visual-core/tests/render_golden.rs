@@ -23,8 +23,10 @@
 //!    projection, the `cos φ₁` aspect correction, the vendored coastline and
 //!    the graticule. The fixture's ten `City` nodes carry real
 //!    latitude/longitude and are spread over the whole globe, so this pins the
-//!    world-scale case; sodir's 56–82°N case is exercised by the acceptance
-//!    renders, which are not committed.
+//!    world-scale case — and with it the **coarsest** of G4b's three coastline
+//!    tiers, since a 360° span is what `resolution_for_span` answers `110m`
+//!    for. The two finer tiers are pinned by `coastline`'s own unit tests and
+//!    by the sodir acceptance renders, which are not committed.
 //!
 //! `make check-render-baseline` is the gate step that diffs them.
 
@@ -167,6 +169,17 @@ fn generate_geo_golden() {
     assert!(
         svg.contains("kglv-graticule"),
         "the geo golden must carry the graticule"
+    );
+    // The tier this golden pins, asserted by its size rather than trusted from
+    // the header above: the world at 110m is a few thousand path points, and
+    // the same frame at 50m is thirteen times that. A tier rule that silently
+    // started answering `50m` for a world span would otherwise regenerate this
+    // file with an explanation nobody had to give.
+    let coast_points = svg.matches('L').count();
+    assert!(
+        (3_000..8_000).contains(&coast_points),
+        "a world-span coastline is the 110m tier — expected a few thousand path \
+         points, got {coast_points}"
     );
     write_if_changed(&goldens_dir().join("fixture-geo-dark.svg"), &svg);
 }

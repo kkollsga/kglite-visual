@@ -1551,6 +1551,7 @@ dependencies = [
 name = "kglite-visual-core"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "kglite",
  "png",
  "resvg",

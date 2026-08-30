@@ -83,8 +83,12 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
   reported once per bore) are spread deterministically; nodes with no
   coordinate go into a labelled tray at the foot with a count in the status
   block, never dropped. The static render draws the world's coastline and a
-  graticule under the graph, from a vendored 21 KB TopoJSON — no network, no
-  tiles. The live view gets the positions only, and the picker says so. The
+  graticule under the graph, from vendored TopoJSON at **three scales, chosen
+  by how much of the world the frame covers** — 1:110M for a hemisphere or
+  more, 1:50M for a shelf, 1:10M for anything tighter than 25°, so a North Sea
+  crop gets the fjords and a world map does not carry 400 000 points nothing
+  can resolve. Each ring is cut to the segments the frame can see. No network,
+  no tiles. The live view gets the positions only, and the picker says so. The
   picker offers the map exactly while the view holds nodes that are somewhere:
   a *type* is not anywhere, so the entry screen never offers it.
 - **Protocol v4: a `layout` message and request.** The server computes a

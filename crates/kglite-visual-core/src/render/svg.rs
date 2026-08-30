@@ -241,21 +241,25 @@ fn emit_graticule(out: &mut String, frame: &super::geo::GeoFrame, palette: &Pale
     out.push_str("</g>\n");
 }
 
+/// The land outline, at the scale this frame can resolve, clipped to its box.
+///
+/// Both halves of that sentence are decisions the module docs argue:
+/// [`coastline::resolution_for_span`] picks the source file from the span in
+/// degrees, and [`coastline::clipped`] cuts each ring down to the segments the
+/// box overlaps. Neither is an optimisation with a visual cost — a finer file
+/// than the frame can show and a point ten thousand kilometres off-canvas are
+/// both bytes that draw nothing.
+///
+/// Open polylines, no `Z`: the coast is stroked and never filled, and a closing
+/// chord across a clipped fragment would be a line the world does not have.
 fn emit_coast(out: &mut String, frame: &super::geo::GeoFrame, palette: &Palette) {
     let (west, south, east, north) = frame.bbox;
+    let span = (east - west).max(north - south);
+    let resolution = super::coastline::resolution_for_span(span);
     let mut paths = String::new();
-    for ring in super::coastline::land() {
-        // A ring wholly outside the box contributes nothing, and skipping it by
-        // its own extent is what keeps a Norwegian Shelf render from projecting
-        // Antarctica's 1 100 points off-canvas.
-        let outside = ring
-            .iter()
-            .all(|(lon, lat)| *lon < west || *lon > east || *lat < south || *lat > north);
-        if outside {
-            continue;
-        }
+    for line in super::coastline::clipped(resolution, frame.bbox) {
         let mut path = String::new();
-        for (index, (lon, lat)) in ring.iter().enumerate() {
+        for (index, (lon, lat)) in line.iter().enumerate() {
             let (x, y) = frame.project(*lon, *lat);
             path.push_str(&format!(
                 "{}{} {}",
@@ -265,7 +269,6 @@ fn emit_coast(out: &mut String, frame: &super::geo::GeoFrame, palette: &Palette)
             ));
             path.push(' ');
         }
-        path.push('Z');
         paths.push_str(&format!("<path d=\"{}\"/>\n", path.trim_end()));
     }
     if paths.is_empty() {

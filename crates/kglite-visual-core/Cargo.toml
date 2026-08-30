@@ -55,6 +55,17 @@ kglite = "=0.16.15"
 # with the PNG path the only difference.
 resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 
+# Inflates the three vendored coastline outlines (G4b). The finest is 3.1 MB of
+# JSON and 774 KB of gzip, and it is embedded in every binary and every wheel
+# whether a map is drawn or not, so it ships compressed.
+#
+# NOT a new crate in the tree: kglite already depends on flate2 for `.kgl`
+# compression, so this is a direct requirement on something Cargo.lock already
+# resolves — no new licence, no new build time, and no second copy (the version
+# requirement is deliberately loose so it unifies with the engine's rather than
+# pinning a second one beside it).
+flate2 = "1"
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
