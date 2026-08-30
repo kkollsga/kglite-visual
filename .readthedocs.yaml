@@ -1,0 +1,24 @@
+# Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html
+#
+# The docs are pure Markdown and static images: nothing here imports the
+# compiled extension, so the build needs no Rust toolchain, no Node and no
+# wheel — only the four packages in docs/requirements.txt.
+
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.12"
+
+sphinx:
+  configuration: docs/conf.py
+  # The same `-W --keep-going` the local `make docs` and the CI docs job use.
+  # A broken cross-reference is a broken page, and a warning nobody must fix
+  # is a warning nobody reads.
+  fail_on_warning: true
+
+python:
+  install:
+    - requirements: docs/requirements.txt

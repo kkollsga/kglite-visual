@@ -73,12 +73,26 @@ WHEEL_DIR = target/wheels
 # artifact is `make wheel WHEEL_PROFILE=--release`, which is what P6's CI runs.
 WHEEL_PROFILE ?=
 
+# The documentation build gets its OWN venv, deliberately not `.venv`.
+#
+# `.venv` is the wheel's test environment: maturin, pytest and an editable
+# install of the extension. Sphinx, furo and MyST have nothing to do with any
+# of that, and putting them there would grow the venv every `make pytest`
+# developer pays for to serve a build almost none of them run. Both live under
+# target/, which already has a bound (TARGET_WARN_MB) and an owner
+# (`make clean-build`) — a new top-level `docs/_build/` would be a third
+# accumulation tier needing both (doctrine R4).
+DOCS_VENV = target/docs-venv
+DOCS_VENV_STAMP = $(DOCS_VENV)/.kglv-docs-tooling
+DOCS_OUT = target/docs
+
 .PHONY: help gate lint self-test clean-build prune \
         check-dev-docs check-skill-mirrors check-bans check-licenses check-build-dirs \
         check-generated-ts check-protocol-baseline check-bundle sync-agents \
         rust-fmt rust-clippy rust-test cli-build fixture e2e \
         frontend-install frontend-typecheck frontend-build frontend-audit \
-        py-venv py-venv-refresh py-develop pytest wheel check-packaged-consumer
+        py-venv py-venv-refresh py-develop pytest wheel check-packaged-consumer \
+        docs docs-venv docs-venv-refresh
 
 help:  ## List the targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | \
@@ -365,6 +379,38 @@ wheel: py-venv  ## Build a wheel into target/wheels (WHEEL_PROFILE=--release for
 # source tree cannot shadow the package being tested.
 check-packaged-consumer: wheel  ## Install the built wheel elsewhere and drive it
 	@$(PYTHON) scripts/check_wheel.py
+
+$(DOCS_VENV_STAMP): docs/requirements.txt
+	@test -x $(DOCS_VENV)/bin/python || $(PYTHON) -m venv $(DOCS_VENV)
+	@$(DOCS_VENV)/bin/python -m pip install -q --upgrade pip
+	@$(DOCS_VENV)/bin/python -m pip install -q -r docs/requirements.txt
+	@touch $@
+
+docs-venv: $(DOCS_VENV_STAMP)  ## Create (or reuse) the venv the docs are built in
+
+docs-venv-refresh:  ## Re-install the docs venv's tooling from the network
+	@rm -f $(DOCS_VENV_STAMP)
+	@$(MAKE) docs-venv
+
+# The docs build, with the same settings Read the Docs uses.
+#
+# `-W` because a broken cross-reference is a broken page and a warning nobody
+# must fix is a warning nobody reads; `--keep-going` so one bad link does not
+# hide the other nine. The output directory is PURGED first rather than
+# incrementally rebuilt: Sphinx's doctree cache will happily serve a page whose
+# source was deleted, so an incremental build can go green over a toctree that
+# no longer resolves — which is precisely the failure `-W` is here to catch.
+#
+# Deliberately NOT in `make gate`. Gate membership is earned: a check belongs
+# there once it has a record of catching a CI failure, and this one is brand
+# new. It is also the wrong shape for a per-change gate — the docs surface is
+# orthogonal to almost every diff, and a venv creation on the first run is
+# minutes nobody editing Rust should pay. CI owns it (`.github/workflows/ci.yml`
+# → the `docs` job), which is where a check with no local track record belongs.
+docs: docs-venv  ## Build the documentation into target/docs (-W: warnings are errors)
+	@rm -rf $(DOCS_OUT)
+	@$(DOCS_VENV)/bin/python -m sphinx -W --keep-going -b html docs $(DOCS_OUT)
+	@echo "docs: $(DOCS_OUT)/index.html"
 
 frontend-install:  ## Install frontend deps from the committed lockfile
 	@cd frontend && $(NPM) ci
