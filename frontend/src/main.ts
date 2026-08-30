@@ -51,6 +51,7 @@ import {
 import { LabelOverlay } from './labels'
 import { ExportCard } from './export'
 import { tableColumns, typeTableQuery } from './generate'
+import { PathBuilder } from './path'
 import { Legend, type LegendEntry, type LegendSection } from './legend'
 import { formatCell, Panels } from './panels'
 import {
@@ -74,6 +75,7 @@ import {
 import { connectedAtom } from './state'
 import { rendersGraph } from './tiers'
 import { WebSocketTransport } from './transport'
+import { apiUrl } from './urls'
 import { SlotView } from './view'
 
 const mount = document.querySelector<HTMLDivElement>('#app')
@@ -262,6 +264,38 @@ const panels = new Panels(root, {
   validateQuery: (query) => validateQuery(query),
   showTypeTable: (nodeType) => showTypeTable(nodeType),
 }, schema)
+
+/**
+ * The path builder (plan E9), in the sidebar under its own heading.
+ *
+ * Its Run goes down the same `cypher` request the Run button sends, with
+ * `as_graph` on: a path is a picture, and the nodes and relationships the
+ * result names are what land in the slot space. Its count probes go over HTTP
+ * instead — the JSON twin answers the same struct with no side effect on the
+ * results panel, which is the same reasoning `schema.ts` records for its own
+ * lazy fetches. A probe that repainted the query table would overwrite whatever
+ * the user was reading.
+ */
+const pathBuilder = new PathBuilder(document.createElement('div'), schema, {
+  runPath: (query, params) => {
+    panels.loadGeneratedQuery(query)
+    send({ type: 'cypher', query, params, limit: null, as_graph: true })
+  },
+  copyToEditor: (query) => panels.loadGeneratedQuery(query),
+  countRows: async (query, params) => {
+    const response = await fetch(apiUrl('api/cypher'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query, params, limit: null, as_graph: false }),
+    })
+    if (!response.ok) throw new Error(`the count probe was refused (${response.status})`)
+    const table = (await response.json()) as { data: unknown[][] }
+    const value = table.data[0]?.[0]
+    if (typeof value !== 'number') throw new Error('the count probe answered no number')
+    return value
+  },
+})
+panels.addSection('Path', pathBuilder.root)
 
 /**
  * A type's on-screen nodes, as a table of their properties (plan E9).
@@ -710,6 +744,10 @@ async function showMetaGraph(message: {
   debugState.positionsHash = fnv1a(message.points)
   panels.setNodeTypes(message.meta.nodes.map((node) => node.name))
   schema.setMetaGraph(message.meta)
+  // After `schema.setMetaGraph`, which is where the builder's hop lists come
+  // from: filling the start picker first would offer types with no hops behind
+  // them.
+  pathBuilder.setNodeTypes(message.meta.nodes.map((node) => node.name))
   renderStatus()
 
   if (!rendersGraph(message.meta.tier)) {

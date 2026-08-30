@@ -493,6 +493,19 @@ export class Panels {
     }
   }
 
+  /**
+   * Put another card in the sidebar, under its own heading.
+   *
+   * The path builder (plan E9) is a card this class does not own: it holds a
+   * spec, a generator and a probe queue, none of which belong in a file whose
+   * rule is "no graph data in here". So it builds its own DOM and asks for a
+   * place to stand — which keeps the section chrome in one place without making
+   * this class a second home for it.
+   */
+  addSection(title: string, body: HTMLElement): void {
+    this.root.appendChild(this.section(title, body))
+  }
+
   private section(title: string, body: HTMLElement): HTMLElement {
     const wrapper = element('section', 'kglv-section')
     wrapper.append(element('h2', 'kglv-section-title', title), body)

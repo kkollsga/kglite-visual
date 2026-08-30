@@ -13,6 +13,10 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Fixed
 
+- **A self-referencing relationship was counted twice.** `Person -[:KNOWS]->
+  Person` contributed a hop from each end of the same edge list, so the path
+  builder's picker would have offered "KNOWS ↔ Person (360)" on a graph with
+  180 of them.
 - **A sidebar row that hid itself did not.** `.kglv-field` set `display: flex`
   with the same specificity as the browser's own `[hidden]` rule and, being an
   author rule, won — so every row `panels.ts` hid stayed on screen. The visible
@@ -31,6 +35,17 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- **A path builder: a multi-hop question from dropdowns, shown as Cypher.**
+  Pick a start type, add up to three hops — the relationship pickers offer only
+  the ones the graph actually has, read out of the meta-graph, with direction in
+  the label and the edge count beside it — and narrow any node with a
+  `property is/contains/>/< value` filter. **The generated Cypher is on screen
+  the whole time**, in a read-only strip, and one button copies it into the
+  editor. Each hop carries a `count(*)` preview so the size of the answer is
+  known before anything is drawn, and Run sends exactly the query on screen
+  down the ordinary bounded path — no per-hop bound, one row ceiling, the same
+  banner. Values are always bound as parameters; labels, relationship types and
+  property names are validated as identifiers and refused rather than quoted.
 - **A table of a type's nodes, generated and shown.** The type panel offers
   "table of the N on screen"; the app writes
   `MATCH (n:Type) WHERE id(n) IN $ids RETURN …` over the twelve properties most

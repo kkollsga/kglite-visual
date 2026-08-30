@@ -637,3 +637,49 @@
 .kglv-th-sort:hover {
   color: #e6edf3;
 }
+
+/* The path builder (plan E9). A card of stacked hops, each with its own row of
+   controls and an optional filter under it. */
+.kglv-path-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kglv-path-step {
+  border-left: 2px solid rgb(139 148 158 / 30%);
+  padding-left: 6px;
+}
+
+.kglv-path-filter {
+  margin-top: 2px;
+}
+
+/* Same specificity problem the `.kglv-field[hidden]` rule above fixes: a
+   `.kglv-row` that sets `display: flex` beats the UA sheet's `[hidden]`, so a
+   filter row hidden for a type with no properties would stay on screen. */
+.kglv-row[hidden] {
+  display: none;
+}
+
+.kglv-path-count {
+  color: #8b949e;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The generated query, always visible and never editable: this is the strip
+   that makes the builder a teaching tool rather than a black box. It wraps
+   rather than scrolling horizontally, because a Cypher line the user cannot
+   see the end of is a query they cannot check. */
+.kglv-generated {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgb(13 17 23 / 60%);
+  border: 1px solid rgb(139 148 158 / 20%);
+  color: #c9d1d9;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

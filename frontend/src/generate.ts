@@ -149,3 +149,168 @@ export function tableColumns(
     .slice(0, MAX_TABLE_COLUMNS)
     .map((stat) => stat.name)
 }
+
+/** How a step's value is compared. */
+export type FilterOperator = '=' | 'contains' | '>' | '<'
+
+/** One optional per-step narrowing: a property, an operator, and a value. */
+export type StepFilter = {
+  property: string
+  operator: FilterOperator
+  /** As typed. Bound as a parameter; never written into the query text. */
+  value: string
+}
+
+/** Which way a hop's arrow points. `both` draws no arrowhead. */
+export type HopDirection = 'out' | 'in' | 'both'
+
+/** One hop of a path: an edge, and the node on the far side of it. */
+export type PathStep = {
+  relationship: string
+  direction: HopDirection
+  nodeType: string
+  filter: StepFilter | null
+}
+
+/** A path, as the builder holds it. */
+export type PathSpec = {
+  start: string
+  startFilter: StepFilter | null
+  steps: PathStep[]
+}
+
+/**
+ * Hops past which the builder does not go.
+ *
+ * Not a performance guess — the response bound is what protects the server,
+ * and it applies whatever the depth. It is about the *picture*: three hops from
+ * a type with a fan-out of a hundred is already a million-row question, and a
+ * builder that let a user assemble one by clicking is a builder that produces
+ * timeouts rather than paths. Beyond three, the honest answer is Cypher.
+ */
+export const MAX_PATH_DEPTH = 3
+
+/**
+ * The path a spec describes, as a graph query.
+ *
+ * `RETURN n0, r1, n1, …` rather than a projection: this result is meant for the
+ * canvas, and "show in graph" maps the nodes and relationships a result
+ * *names* into the slot space. A table of property values would draw nothing.
+ *
+ * **No bound is re-armed here.** The query runs down the same path a typed one
+ * does, so the row ceiling and the byte ceiling apply once, at the end, to the
+ * whole answer (plan E9). A per-hop limit would be a second, weaker bound that
+ * disagreed with the banner the user reads.
+ */
+export function pathQuery(spec: PathSpec): Generated {
+  const { pattern, where, params, names } = compilePath(spec, spec.steps.length)
+  const clauses = [`MATCH ${pattern}`]
+  if (where.length > 0) clauses.push(`WHERE ${where.join('\n  AND ')}`)
+  clauses.push(`RETURN ${names.join(', ')}`)
+  return { query: clauses.join('\n'), params }
+}
+
+/**
+ * How many rows the path would have after `depth` hops.
+ *
+ * A separate query rather than a `LIMIT` on the real one, and cheap for the
+ * reason the expansion preview is cheap: `count(*)` asks the engine for a
+ * number and returns one row, so a builder can say "1 240 matches" beside a
+ * step before anybody has decided to draw 1 240 nodes. `depth` of 0 counts the
+ * start type alone, which is the number that tells a user their *first* filter
+ * did something.
+ */
+export function pathCountQuery(spec: PathSpec, depth: number): Generated {
+  const { pattern, where, params } = compilePath(spec, depth)
+  const clauses = [`MATCH ${pattern}`]
+  if (where.length > 0) clauses.push(`WHERE ${where.join('\n  AND ')}`)
+  clauses.push('RETURN count(*) AS matches')
+  return { query: clauses.join('\n'), params }
+}
+
+/** The pattern, the predicates and the bindings a path of `depth` hops needs. */
+function compilePath(
+  spec: PathSpec,
+  depth: number,
+): { pattern: string; where: string[]; params: QueryParams; names: string[] } {
+  const steps = spec.steps.slice(0, Math.min(depth, MAX_PATH_DEPTH))
+  const where: string[] = []
+  const params: QueryParams = {}
+  const names: string[] = ['n0']
+
+  let pattern = `(n0:${identifier(spec.start, 'node type')})`
+  pushFilter(where, params, 'n0', spec.startFilter)
+
+  steps.forEach((step, index) => {
+    const edge = `r${index + 1}`
+    const node = `n${index + 1}`
+    const type = identifier(step.relationship, 'relationship type')
+    const label = identifier(step.nodeType, 'node type')
+    const left = step.direction === 'in' ? '<-' : '-'
+    const right = step.direction === 'out' ? '->' : '-'
+    pattern += `${left}[${edge}:${type}]${right}(${node}:${label})`
+    pushFilter(where, params, node, step.filter)
+    names.push(edge, node)
+  })
+
+  return { pattern, where, params, names }
+}
+
+/**
+ * One `WHERE` predicate, with its value bound.
+ *
+ * **The value never reaches the query text.** That is the search precedent
+ * (`core::query::search`): the needle is a parameter because a quote in a text
+ * box would otherwise turn a filter into a different query. What *does* reach
+ * the text is the property name, which is an identifier and is validated
+ * instead.
+ *
+ * `contains` folds both sides to lower case, exactly as the server's own search
+ * does — a filter box that matched case-sensitively while the Search card above
+ * it did not would be two different meanings of the same word on one screen.
+ */
+function pushFilter(
+  where: string[],
+  params: QueryParams,
+  node: string,
+  filter: StepFilter | null,
+): void {
+  if (filter === null || filter.property === '' || filter.value === '') return
+  const property = identifier(filter.property, 'property')
+  const name = `p${Object.keys(params).length}`
+  const reference = `${node}.${property}`
+  switch (filter.operator) {
+    case 'contains':
+      where.push(`toLower(toString(${reference})) CONTAINS $${name}`)
+      params[name] = filter.value.toLowerCase()
+      break
+    case '>':
+    case '<':
+      // A comparison against a string is not a smaller-than question, it is a
+      // different one — kglite would compare lexically and the user would read
+      // the answer as numeric. Refused here, where the message can say so.
+      if (!Number.isFinite(Number(filter.value))) {
+        throw new Error(
+          `"${filter.value}" is not a number, so ${reference} ${filter.operator} it would ` +
+            'compare as text. Use "contains" for a text match.',
+        )
+      }
+      where.push(`${reference} ${filter.operator} $${name}`)
+      params[name] = Number(filter.value)
+      break
+    default:
+      // Equality takes the value's own type where it has one: `= "3"` and
+      // `= 3` are different questions to the engine, and a numeric property
+      // compared against a string matches nothing while looking correct.
+      where.push(`${reference} = $${name}`)
+      params[name] = coerce(filter.value)
+  }
+}
+
+/** A typed value from a text box: a number if it reads as one, else the text. */
+function coerce(value: string): unknown {
+  if (value === 'true') return true
+  if (value === 'false') return false
+  const asNumber = Number(value)
+  return value.trim() !== '' && Number.isFinite(asNumber) ? asNumber : value
+}

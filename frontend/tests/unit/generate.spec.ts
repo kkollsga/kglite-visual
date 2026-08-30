@@ -9,10 +9,14 @@
 import { expect, test } from '@playwright/test'
 
 import {
+  MAX_PATH_DEPTH,
   MAX_TABLE_COLUMNS,
   isIdentifier,
+  pathCountQuery,
+  pathQuery,
   tableColumns,
   typeTableQuery,
+  type PathSpec,
 } from '../../src/generate'
 
 test('an identifier that could escape the query is refused, not quoted', () => {
@@ -92,4 +96,160 @@ test('columns are the best-covered properties, capped and stable', () => {
   // Two calls over the same statistics produce the same table: a cap plus an
   // unstable order would silently change which columns a user sees.
   expect(tableColumns(many)).toEqual(capped)
+})
+
+test('a path becomes a MATCH whose arrows follow the directions chosen', () => {
+  const { query, params } = pathQuery({
+    start: 'Field',
+    startFilter: null,
+    steps: [
+      { relationship: 'OWNED_BY', direction: 'out', nodeType: 'Company', filter: null },
+      { relationship: 'LOCATED_IN', direction: 'in', nodeType: 'City', filter: null },
+      { relationship: 'KNOWS', direction: 'both', nodeType: 'Person', filter: null },
+    ],
+  })
+  expect(query).toBe(
+    'MATCH (n0:Field)-[r1:OWNED_BY]->(n1:Company)<-[r2:LOCATED_IN]-(n2:City)' +
+      '-[r3:KNOWS]-(n3:Person)\n' +
+      'RETURN n0, r1, n1, r2, n2, r3, n3',
+  )
+  // Nothing to bind, so nothing is bound. An empty `params` beside a query with
+  // no `$` is the pair that says no value was concatenated.
+  expect(params).toEqual({})
+  expect(query).not.toContain('$')
+})
+
+test('every filter value is bound, and the operator decides its type', () => {
+  const { query, params } = pathQuery({
+    start: 'Field',
+    startFilter: { property: 'fldName', operator: 'contains', value: 'TROLL' },
+    steps: [
+      {
+        relationship: 'OWNED_BY',
+        direction: 'out',
+        nodeType: 'Company',
+        filter: { property: 'cmpShare', operator: '>', value: '50' },
+      },
+    ],
+  })
+  expect(query).toBe(
+    'MATCH (n0:Field)-[r1:OWNED_BY]->(n1:Company)\n' +
+      'WHERE toLower(toString(n0.fldName)) CONTAINS $p0\n' +
+      '  AND n1.cmpShare > $p1\n' +
+      'RETURN n0, r1, n1',
+  )
+  // `contains` folds case, exactly as the server's own search does; `>` binds a
+  // NUMBER, because a numeric property compared against the string "50" is a
+  // lexical comparison wearing a numeric operator.
+  expect(params).toEqual({ p0: 'troll', p1: 50 })
+  expect(query).not.toContain('TROLL')
+  expect(query).not.toContain('50')
+})
+
+test('equality takes the value type the text implies', () => {
+  const value = (text: string): unknown =>
+    pathQuery({
+      start: 'T',
+      startFilter: { property: 'p', operator: '=', value: text },
+      steps: [],
+    }).params.p0
+  expect(value('3')).toBe(3)
+  expect(value('3.5')).toBe(3.5)
+  expect(value('true')).toBe(true)
+  expect(value('false')).toBe(false)
+  expect(value('34/2-A')).toBe('34/2-A')
+})
+
+test('a > against text is refused rather than compared lexically', () => {
+  expect(() =>
+    pathQuery({
+      start: 'T',
+      startFilter: { property: 'p', operator: '>', value: 'north' },
+      steps: [],
+    }),
+  ).toThrow(/is not a number/)
+})
+
+test('an injection attempt in a path spec is refused at every identifier', () => {
+  const hostile = "x`) MATCH (m) DETACH DELETE m //"
+  const base: PathSpec = { start: 'T', startFilter: null, steps: [] }
+  expect(() => pathQuery({ ...base, start: hostile })).toThrow(/not a plain identifier/)
+  expect(() =>
+    pathQuery({
+      ...base,
+      steps: [{ relationship: hostile, direction: 'out', nodeType: 'T', filter: null }],
+    }),
+  ).toThrow(/not a plain identifier/)
+  expect(() =>
+    pathQuery({
+      ...base,
+      steps: [{ relationship: 'R', direction: 'out', nodeType: hostile, filter: null }],
+    }),
+  ).toThrow(/not a plain identifier/)
+  expect(() =>
+    pathQuery({
+      ...base,
+      startFilter: { property: hostile, operator: '=', value: 'x' },
+    }),
+  ).toThrow(/not a plain identifier/)
+
+  // …and the one place hostile text is ALLOWED, because it is bound rather
+  // than written: a value can be anything at all.
+  const { query, params } = pathQuery({
+    ...base,
+    startFilter: { property: 'p', operator: '=', value: hostile },
+  })
+  expect(query).toBe('MATCH (n0:T)\nWHERE n0.p = $p0\nRETURN n0')
+  expect(params.p0).toBe(hostile)
+})
+
+test('a count probe is the same path truncated, with the same bindings', () => {
+  const spec: PathSpec = {
+    start: 'Field',
+    startFilter: { property: 'fldName', operator: 'contains', value: 'troll' },
+    steps: [
+      { relationship: 'OWNED_BY', direction: 'out', nodeType: 'Company', filter: null },
+      {
+        relationship: 'EMPLOYS',
+        direction: 'out',
+        nodeType: 'Person',
+        filter: { property: 'age', operator: '<', value: '40' },
+      },
+    ],
+  }
+
+  // Depth 0 is the start type alone — the number that says whether the first
+  // filter did anything.
+  expect(pathCountQuery(spec, 0).query).toBe(
+    'MATCH (n0:Field)\nWHERE toLower(toString(n0.fldName)) CONTAINS $p0\nRETURN count(*) AS matches',
+  )
+  const one = pathCountQuery(spec, 1)
+  expect(one.query).toContain('(n0:Field)-[r1:OWNED_BY]->(n1:Company)')
+  expect(one.query).not.toContain('EMPLOYS')
+  // A hop that is not in the probe must not drag its filter's binding in with
+  // it: an unused `$p1` is a parameter the engine has no placeholder for.
+  expect(one.params).toEqual({ p0: 'troll' })
+
+  const two = pathCountQuery(spec, 2)
+  expect(two.query).toContain('AND n2.age < $p1')
+  expect(two.params).toEqual({ p0: 'troll', p1: 40 })
+  // The probe answers a count, never rows: this is the whole reason it is
+  // cheap enough to fire on every change.
+  expect(two.query.endsWith('RETURN count(*) AS matches')).toBe(true)
+})
+
+test('the depth cap is enforced by the generator, not only by the UI', () => {
+  const spec: PathSpec = {
+    start: 'T',
+    startFilter: null,
+    steps: Array.from({ length: MAX_PATH_DEPTH + 2 }, () => ({
+      relationship: 'R',
+      direction: 'out' as const,
+      nodeType: 'T',
+      filter: null,
+    })),
+  }
+  // A builder bug that pushed a fourth step must not produce a four-hop query:
+  // the cap lives where the query is written.
+  expect(pathQuery(spec).query.match(/\[r\d+:R\]/g)).toHaveLength(MAX_PATH_DEPTH)
 })
