@@ -43,6 +43,11 @@ export type PanelHandlers = {
   setColorBy(property: string | null): void
   setSizeBy(property: string | null): void
   /**
+   * Draw this type's nodes under a different property's value instead of the
+   * title kglite chose (plan E11). `null` restores the title.
+   */
+  setCaptionBy(nodeType: string, property: string | null): void
+  /**
    * Ask the server for an arrangement — or, with `simulation`, hand the
    * layout back to the viewer's GPU (plan E5).
    */
@@ -127,7 +132,11 @@ export class Panels {
   private readonly filterNote: HTMLDivElement
   private readonly colorBy: HTMLSelectElement
   private readonly sizeBy: HTMLSelectElement
+  private readonly captionBy: HTMLSelectElement
+  private readonly captionRow: HTMLElement
   private readonly appearanceNote: HTMLDivElement
+  /** The type the three per-type channels are currently describing. */
+  private statsType: string | null = null
   private readonly layoutKernel: HTMLSelectElement
   /** The picker's whole row, so `?deterministic=1` can remove it. */
   private readonly layoutRow: HTMLElement
@@ -221,9 +230,25 @@ export class Panels {
     this.sizeBy.addEventListener('change', () =>
       this.handlers.setSizeBy(this.sizeBy.value === '' ? null : this.sizeBy.value),
     )
+    // The third per-type display channel, beside the two it belongs with.
+    // The plan called it "the type panel"; this card IS that panel for these
+    // channels — its dropdowns are filled from the selected type's property
+    // statistics — and splitting one type's three display choices across two
+    // cards would make the third look like it was about something else.
+    this.captionBy = element('select', 'kglv-select')
+    this.captionBy.setAttribute('data-testid', 'caption-by')
+    this.captionBy.addEventListener('change', () => {
+      if (this.statsType === null) return
+      this.handlers.setCaptionBy(
+        this.statsType,
+        this.captionBy.value === '' ? null : this.captionBy.value,
+      )
+    })
+    this.captionRow = this.labelled('caption by', this.captionBy)
     appearance.append(
       this.labelled('colour by', this.colorBy),
       this.labelled('size by', this.sizeBy),
+      this.captionRow,
     )
     this.appearanceNote = element('div', 'kglv-hint')
     this.appearanceNote.setAttribute('data-testid', 'appearance-note')
@@ -886,7 +911,8 @@ export class Panels {
    * the "approximate" labelling on, because a sampled stat presented as exact
    * is the failure D12 named.
    */
-  showPropertyStats(stats: PropertyStatsResponse): [number, number] {
+  showPropertyStats(stats: PropertyStatsResponse, caption: string | null): [number, number] {
+    this.statsType = stats.node_type
     const byName = new Map(stats.properties.map((stat) => [stat.name, stat]))
     const fill = (select: HTMLSelectElement, names: string[], none: string) => {
       select.replaceChildren()
@@ -903,6 +929,31 @@ export class Panels {
     fill(this.colorBy, stats.categorical_candidates, 'capability')
     fill(this.sizeBy, stats.numeric_candidates, 'uniform')
 
+    // Every string property is offered, not only the server's own candidate:
+    // the candidate is a heuristic about what a human finds readable, and the
+    // human is right here. The blank entry names what it restores rather than
+    // saying "none" — the title is a real choice, not the absence of one.
+    this.captionBy.replaceChildren()
+    const keepTitle = element('option', undefined, 'title (as stored)')
+    keepTitle.value = ''
+    this.captionBy.appendChild(keepTitle)
+    for (const stat of stats.properties) {
+      if (!/string/i.test(stat.value_type)) continue
+      const option = element('option', undefined, statLabel(stat))
+      option.value = stat.name
+      this.captionBy.appendChild(option)
+    }
+    // A caption the server suggested but this list does not contain would be a
+    // silently ignored suggestion, so it is added rather than dropped — the
+    // same rule `setAppearanceSelection` follows for a remote channel choice.
+    if (caption !== null && ![...this.captionBy.options].some((o) => o.value === caption)) {
+      const option = element('option', undefined, caption)
+      option.value = caption
+      this.captionBy.appendChild(option)
+    }
+    this.captionBy.value = caption ?? ''
+    this.captionRow.hidden = this.captionBy.options.length <= 1
+
     const offered: PropertyStat[] = [
       ...stats.categorical_candidates,
       ...stats.numeric_candidates,
@@ -912,6 +963,14 @@ export class Panels {
     const approximate = offered.filter((stat) => stat.approx).length
 
     const notes: string[] = [`${stats.node_type}: ${count(stats.node_count)} nodes`]
+    // The approx rule applies to a caption exactly as it applies to a colour:
+    // a value drawn from a sampled population is a value some nodes will not
+    // have, and a label falling back to the title on those looks like a bug in
+    // the labelling rather than a fact about the statistics.
+    const captionStat = caption === null ? undefined : byName.get(caption)
+    if (captionStat?.approx === true) {
+      notes.push(`captions come from ${caption}, whose values kglite only sampled`)
+    }
     if (stats.sampled) {
       notes.push(
         `statistics are approximate — kglite samples above ${count(stats.exact_scan_ceiling)} nodes`,

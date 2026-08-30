@@ -217,19 +217,36 @@ const CAPTION_NAME_HINTS: [&str; 6] = ["name", "navn", "title", "label", "tittel
 /// each rule against a synthetic stat rather than against whatever a
 /// half-million-node graph happens to contain.
 ///
+/// **The first rule is that the title has to be inadequate**, and it was added
+/// after driving sodir rather than reasoned into place. Without it the ranking
+/// answers "which column looks most like a name", which on a real schema is a
+/// question with a confident wrong answer: sodir's `Field` nodes are titled
+/// `EKOFISK` and carry a `wlbName` of `25/1-4`; its `Wellbore` nodes are titled
+/// `6407/1-3` and carry a `wlbLicenceTargetName` of `050`. Both were offered,
+/// and both would have replaced a good name with a code on every chip on the
+/// screen. A caption exists to rescue a type whose title is *not* a name; where
+/// the title already is one, the honest answer is `None`.
+///
+/// Inadequate means it fails one of the two tests every candidate must pass, so
+/// "better than the title" is measured on the axes the title failed rather than
+/// on a second opinion about which column sounds nicer. On sodir that is 17 of
+/// 98 types: `WellboreCasing` titles 8 620 nodes with 8 distinct values, and
+/// `wlbName` is what a reader needs.
+///
 /// The rules, in the order they eliminate:
 ///
-/// 1. **Identity columns are never captions.** `id`, `type` and their siblings
+/// 1. **The title must be inadequate**, by rules 4 and 5 below.
+/// 2. **Identity columns are never captions.** `id`, `type` and their siblings
 ///    are the columns a title would already have been drawn from.
-/// 2. **Strings only.** A number is not a name, however well populated.
-/// 3. **Covered.** [`MIN_CAPTION_COVERAGE`] of the type's nodes must carry it.
-/// 4. **Distinguishing.** A property with a handful of distinct values is a
+/// 3. **Strings only.** A number is not a name, however well populated.
+/// 4. **Covered.** [`MIN_CAPTION_COVERAGE`] of the type's nodes must carry it.
+/// 5. **Distinguishing.** A property with a handful of distinct values is a
 ///    *category* — it is what colour-by is for — and forty nodes all captioned
 ///    "EXPLORATION" is worse than forty codes, because at least the codes
 ///    differ. So the caption must look near-unique, which for a capped
 ///    distinct-count means "it hit the cap": `approx` with `unique` at
 ///    [`MAX_DISTINCT_VALUES`] is precisely kglite saying "more than I counted".
-/// 5. **Short enough to draw.** A sample longer than
+/// 6. **Short enough to draw.** A sample longer than
 ///    [`MAX_CAPTION_SAMPLE_CHARS`] is a description.
 ///
 /// What survives is ranked by a name hint first ([`CAPTION_NAME_HINTS`]), then
@@ -237,6 +254,14 @@ const CAPTION_NAME_HINTS: [&str; 6] = ["name", "navn", "title", "label", "tittel
 /// two calls.
 pub(crate) fn caption_candidate(properties: &[PropertyStat], node_count: u32) -> Option<String> {
     if node_count == 0 {
+        return None;
+    }
+    // Rule 1. A type whose title is already a well-covered, distinguishing name
+    // needs no caption, and offering one would replace a good name with a code.
+    if properties
+        .iter()
+        .any(|stat| stat.name == "title" && covers(stat, node_count) && distinguishes(stat))
+    {
         return None;
     }
     // `Reverse` on the name so a tie on the two real criteria goes to the
@@ -250,16 +275,7 @@ pub(crate) fn caption_candidate(properties: &[PropertyStat], node_count: u32) ->
         if !matches!(stat.value_type.as_str(), "String" | "string" | "Utf8") {
             continue;
         }
-        if f64::from(stat.non_null) < MIN_CAPTION_COVERAGE * f64::from(node_count) {
-            continue;
-        }
-        // Near-unique, either exactly counted or capped-and-therefore-more.
-        let distinguishing = if stat.approx {
-            stat.unique as usize >= MAX_DISTINCT_VALUES
-        } else {
-            u64::from(stat.unique) * 2 >= u64::from(stat.non_null)
-        };
-        if !distinguishing {
+        if !covers(stat, node_count) || !distinguishes(stat) {
             continue;
         }
         if sample_chars(stat).is_some_and(|len| len > MAX_CAPTION_SAMPLE_CHARS) {
@@ -279,6 +295,26 @@ pub(crate) fn caption_candidate(properties: &[PropertyStat], node_count: u32) ->
     // heuristic liked, so the bar for overriding them is the hint.
     best.filter(|(hinted, _, _)| *hinted)
         .map(|(_, _, name)| name.0.to_string())
+}
+
+/// Does this property reach [`MIN_CAPTION_COVERAGE`] of the type's nodes?
+fn covers(stat: &PropertyStat, node_count: u32) -> bool {
+    f64::from(stat.non_null) >= MIN_CAPTION_COVERAGE * f64::from(node_count)
+}
+
+/// Is it near-unique rather than a category?
+///
+/// A capped distinct-count is the interesting half: kglite stops enumerating at
+/// [`MAX_DISTINCT_VALUES`] and sets `approx`, so a genuinely unique name column
+/// on any type larger than the cap reports exactly the cap. Reading that as
+/// "only 32 values, therefore a category" would reject every caption on every
+/// type worth captioning.
+fn distinguishes(stat: &PropertyStat) -> bool {
+    if stat.approx {
+        stat.unique as usize >= MAX_DISTINCT_VALUES
+    } else {
+        u64::from(stat.unique) * 2 >= u64::from(stat.non_null)
+    }
 }
 
 fn has_name_hint(property: &str) -> bool {
@@ -447,45 +483,73 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_name_column_beats_a_code_and_an_unnamed_one_is_not_taken() {
-        // The sodir case the feature exists for: 100 wellbores whose title is a
-        // code, and a `wlbWellboreName` column beside it.
-        let stats = vec![
-            string_stat("wlbWellboreCode", 100, 100, "AB-12"),
-            string_stat("wlbWellboreName", 100, 100, "31/2-1 Troll"),
-        ];
-        assert_eq!(
-            caption_candidate(&stats, 100).as_deref(),
-            Some("wlbWellboreName")
-        );
+    /// A title good enough to keep — well covered and near-unique.
+    fn good_title(count: u32) -> PropertyStat {
+        let mut stat = string_stat("title", count, count, "EKOFISK");
+        stat.value_type = "str".to_string();
+        stat
+    }
 
-        // The same shape with the hint removed is left alone. A column this
-        // heuristic merely *likes* must not replace the title the graph's own
-        // author chose — the failure mode is every label on screen quietly
-        // becoming something nobody asked for.
-        let unhinted = vec![string_stat("wlbWellboreCode", 100, 100, "AB-12")];
-        assert_eq!(caption_candidate(&unhinted, 100), None);
+    /// A title that names nothing: 8 620 rows, eight distinct values. Sodir's
+    /// `WellboreCasing`, which is the shape the feature exists for.
+    fn useless_title(count: u32) -> PropertyStat {
+        let mut stat = string_stat("title", count, 8, "CASING");
+        stat.value_type = "str".to_string();
+        stat.approx = false;
+        stat
+    }
+
+    #[test]
+    fn a_good_title_is_never_replaced() {
+        // The rule sodir bought. `Field` is titled EKOFISK and carries a
+        // `wlbName` of 25/1-4; ranking on "which column looks like a name"
+        // offered the code and would have put it on every chip on the screen.
+        let stats = vec![
+            good_title(144),
+            string_stat("wlbName", 140, 140, "25/1-4"),
+            string_stat("fldOwnerName", 126, 126, "SLEIPNER VEST UNIT"),
+        ];
+        assert_eq!(caption_candidate(&stats, 144), None);
+    }
+
+    #[test]
+    fn a_useless_title_is_replaced_by_the_name_column_beside_it() {
+        let stats = vec![
+            useless_title(8_620),
+            string_stat("wlbName", 8_620, MAX_DISTINCT_VALUES as u32, "34/10-A-1 H"),
+        ];
+        assert_eq!(caption_candidate(&stats, 8_620).as_deref(), Some("wlbName"));
+
+        // …and only by a column that IS a name. The same useless title with
+        // nothing hinted beside it stays, because a column this heuristic
+        // merely likes must not replace what the graph's author chose.
+        let unhinted = vec![
+            useless_title(8_620),
+            string_stat("wlbCode", 8_620, MAX_DISTINCT_VALUES as u32, "AB-12"),
+        ];
+        assert_eq!(caption_candidate(&unhinted, 8_620), None);
     }
 
     #[test]
     fn a_caption_must_cover_the_type_distinguish_its_nodes_and_fit_a_chip() {
-        // Each of these is a hinted name column, and each is rejected for
-        // exactly one reason — so a rule that stopped firing shows up here as
-        // one failing assert rather than as a silently worse screen.
+        // Each of these is a hinted name column beside a title that needs
+        // replacing, and each is rejected for exactly one reason — so a rule
+        // that stopped firing shows up here as one failing assert rather than
+        // as a silently worse screen.
+        let with = |stat: PropertyStat| vec![useless_title(100), stat];
         assert_eq!(
-            caption_candidate(&[string_stat("fldName", 40, 40, "Troll")], 100),
+            caption_candidate(&with(string_stat("fldName", 40, 40, "Troll")), 100),
             None,
             "40% coverage is a name for a subset, not for the type"
         );
         assert_eq!(
-            caption_candidate(&[string_stat("statusName", 100, 3, "PRODUCING")], 100),
+            caption_candidate(&with(string_stat("statusName", 100, 3, "PRODUCING")), 100),
             None,
             "three distinct values is a category — that is what colour-by is for"
         );
         assert_eq!(
             caption_candidate(
-                &[string_stat("cmpLongName", 100, 100, &"x".repeat(80))],
+                &with(string_stat("cmpLongName", 100, 100, &"x".repeat(80))),
                 100
             ),
             None,
@@ -494,7 +558,7 @@ mod tests {
         // And the same stat inside every limit is taken, so the three asserts
         // above are testing the limits rather than a function that says no.
         assert_eq!(
-            caption_candidate(&[string_stat("fldName", 100, 100, "Troll")], 100).as_deref(),
+            caption_candidate(&with(string_stat("fldName", 100, 100, "Troll")), 100).as_deref(),
             Some("fldName")
         );
     }
@@ -513,18 +577,15 @@ mod tests {
         );
         assert!(stat.approx, "the fixture must exercise the approx branch");
         assert_eq!(
-            caption_candidate(&[stat], 5_000).as_deref(),
+            caption_candidate(&[useless_title(5_000), stat], 5_000).as_deref(),
             Some("wlbWellboreName")
         );
     }
 
     #[test]
     fn identity_columns_and_numbers_are_never_captions() {
-        assert_eq!(
-            caption_candidate(&[string_stat("title", 100, 100, "Troll")], 100),
-            None,
-            "the title is what a caption would be replacing"
-        );
+        // A type with no title at all is the other way in: nothing gates the
+        // ranking, and `id` / `type` must still be refused.
         let mut numeric = string_stat("fieldNameId", 100, 100, "1");
         numeric.value_type = "Int64".to_string();
         assert_eq!(
@@ -532,6 +593,9 @@ mod tests {
             None,
             "a number is not a name, however well populated"
         );
+        let mut identity = string_stat("type", 100, 100, "Field");
+        identity.value_type = "str".to_string();
+        assert_eq!(caption_candidate(&[identity], 100), None);
     }
 
     #[test]

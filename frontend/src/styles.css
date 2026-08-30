@@ -509,9 +509,12 @@
   margin-top: 8px;
 }
 
+/* No `text-transform` here, and that is a correctness rule rather than a
+   style one: a section title carries a PROPERTY NAME, property names are
+   case-sensitive, and lower-casing `fldCultureCode` on screen hands the reader
+   a string that does not work in a query. */
 .kglv-legend-title {
   color: #8b949e;
-  text-transform: lowercase;
   letter-spacing: 0.02em;
   margin-bottom: 3px;
 }

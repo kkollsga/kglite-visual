@@ -37,6 +37,7 @@ import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
 import type { NodeDetail } from './generated/NodeDetail'
 import type { PropertyStat } from './generated/PropertyStat'
+import type { PropertyStatsResponse } from './generated/PropertyStatsResponse'
 import type { Request } from './generated/Request'
 import { InteractionState } from './interaction'
 import {
@@ -173,6 +174,20 @@ let sizeByName: string | null = null
 const appearanceValues = new Map<number, unknown>()
 /** Values for the size channel, keyed by slot. Separate array, separate query. */
 const sizeValues = new Map<number, number>()
+/**
+ * The property each type's nodes are captioned by, or `null` for the title
+ * kglite chose (plan E11).
+ *
+ * Per TYPE, because that is the scope the question has: "what do you call a
+ * wellbore" is a different question from "what do you call a field", and the
+ * statistics that answer it arrive per type. Seeded from the server's
+ * `caption_candidate` the first time a type's statistics land, and overridden
+ * from the panel after that — an entry present here is a decision, so a later
+ * arrival of the same type's stats does not overwrite it.
+ */
+const captionByType = new Map<string, string | null>()
+/** The caption value of each slot whose type has one, keyed by slot. */
+const captionValues = new Map<number, string>()
 
 /**
  * The schema behind the editor's completions.
@@ -231,6 +246,7 @@ const panels = new Panels(root, {
   setSizeBy: (property) => applySizeBy(property),
   setLayoutKernel: (kernel) => requestLayout(kernel),
   setFilter: (query) => applyFilter(query),
+  setCaptionBy: (nodeType, property) => applyCaptionBy(nodeType, property),
   saveQuery: (name, query) => void refreshQueries(store.saveQuery(name, query)),
   deleteQuery: (name) => void refreshQueries(store.deleteQuery(name)),
   // Parse-only, over plain HTTP, on the editor's idle timer. It never runs the
@@ -283,7 +299,7 @@ function applyColorBy(property: string | null): void {
     redraw()
     return
   }
-  requestAppearanceValues(property, 'color')
+  requestValues(property, 'color')
 }
 
 /** The size channel, from either driver. See {@link applyColorBy}. */
@@ -295,7 +311,7 @@ function applySizeBy(property: string | null): void {
     redraw()
     return
   }
-  requestAppearanceValues(property, 'size')
+  requestValues(property, 'size')
 }
 
 /**
@@ -419,10 +435,23 @@ function applyAppearance(command: AppearanceCommand): void {
   applySizeBy(command.size_by)
 }
 
-/** The property statistics behind the two dropdowns, by property name. */
+/** The property statistics behind the dropdowns, by property name. */
 const lastStats = new Map<string, PropertyStat>()
-/** Which channel the in-flight appearance query is filling. */
-let appearanceChannel: 'color' | 'size' | null = null
+
+/** One outstanding per-node value fetch. */
+type ValueRequest = { channel: 'color' | 'size' | 'caption'; property: string; ids: number[] }
+/**
+ * The value fetch currently on the wire, and the ones waiting behind it.
+ *
+ * A queue rather than a single slot, because the caption channel made
+ * concurrency real: selecting a type fetches its statistics, which can start a
+ * caption fetch while a colour-by fetch from the previous selection is still
+ * out — and the results are told apart only by which request was in flight.
+ * Two at once would absorb one answer into the wrong channel, which is a
+ * mis-coloured graph with nothing on screen saying so.
+ */
+let inFlightValues: ValueRequest | null = null
+const pendingValues: ValueRequest[] = []
 
 transport.connect({
   onStatus: (connected) => {
@@ -533,9 +562,11 @@ async function handle(completed: Completed): Promise<void> {
       break
     case 'query-table': {
       const table = completed.value
-      if (appearanceChannel !== null) {
-        absorbAppearanceValues(table.columns, table.data, appearanceChannel)
-        appearanceChannel = null
+      if (inFlightValues !== null) {
+        const request = inFlightValues
+        inFlightValues = null
+        absorbValues(table.columns, table.data, request)
+        drainValueRequests()
         break
       }
       debugState.queryRows = panels.showQueryTable(table)
@@ -552,7 +583,11 @@ async function handle(completed: Completed): Promise<void> {
     case 'property-stats': {
       lastStats.clear()
       for (const stat of completed.value.properties) lastStats.set(stat.name, stat)
-      const [candidates, approximate] = panels.showPropertyStats(completed.value)
+      adoptCaption(completed.value)
+      const [candidates, approximate] = panels.showPropertyStats(
+        completed.value,
+        captionByType.get(completed.value.node_type) ?? null,
+      )
       debugState.appearanceCandidates = candidates
       debugState.approximateStats = approximate
       break
@@ -576,10 +611,15 @@ async function handle(completed: Completed): Promise<void> {
     case 'error':
       // A query failure is the panel's business, not the whole app's: the graph
       // on screen is still valid and blanking it would lose the user's place.
-      if (appearanceChannel !== null) appearanceChannel = null
+      // A failed value fetch must not wedge the queue: the next channel's
+      // answer would otherwise be absorbed as this one's.
+      if (inFlightValues !== null) {
+        inFlightValues = null
+        drainValueRequests()
+      }
       // …and a *layout* refusal belongs under the layout picker, not in the
       // Cypher card. The wire carries no request id, so the in-flight kernel is
-      // the correlation — the same trick `appearanceChannel` uses above, and it
+      // the correlation — the same trick the value queue uses above, and it
       // is enough because a refusal ends the one request that was outstanding.
       if (pendingLayoutKernel !== null) {
         pendingLayoutKernel = null
@@ -763,6 +803,55 @@ function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rg
 }
 
 /**
+ * Take the server's caption suggestion the FIRST time a type is described.
+ *
+ * First time only, because an entry in the map is a decision — the server's or
+ * the user's — and a second arrival of the same type's statistics (every
+ * re-selection sends one) would otherwise walk a manual override back to the
+ * heuristic while the user watched.
+ */
+function adoptCaption(stats: PropertyStatsResponse): void {
+  if (captionByType.has(stats.node_type)) return
+  captionByType.set(stats.node_type, stats.caption_candidate)
+  if (stats.caption_candidate !== null) {
+    requestValues(stats.caption_candidate, 'caption', stats.node_type)
+  }
+}
+
+/**
+ * Caption this type's nodes by a different property, or by the title again.
+ *
+ * **No slice is re-sent.** The nodes are already on screen with the identity
+ * the server gave them; what changes is the string this client draws over each
+ * one, so the fetch is one column of values through the ordinary Cypher path —
+ * the same route the colour and size channels take.
+ */
+function applyCaptionBy(nodeType: string, property: string | null): void {
+  captionByType.set(nodeType, property)
+  // Drop this type's stored captions before the new ones land, or the labels
+  // would keep the previous property's values until the round trip returns.
+  for (const slot of view.liveSlots()) {
+    if (view.label(slot)?.nodeType === nodeType) captionValues.delete(slot)
+  }
+  if (property === null) {
+    redraw()
+    return
+  }
+  requestValues(property, 'caption', nodeType)
+}
+
+/**
+ * The text a slot's label carries.
+ *
+ * The caption when this client has fetched one for that node, and the stored
+ * title otherwise — so a type with no caption chosen, and a node whose caption
+ * property is empty, both keep the name the graph actually holds.
+ */
+function slotCaption(slot: number): string {
+  return captionValues.get(slot) ?? view.label(slot)?.text ?? ''
+}
+
+/**
  * The filter box's terms, and the slots they are hiding (plan E7).
  *
  * Hidden, not removed: the nodes are still loaded, still in the slot space,
@@ -800,7 +889,9 @@ function slotFacts(slot: number): SlotFacts {
   if (sizeByName !== null && sizeValues.has(slot)) {
     values.set(sizeByName.toLowerCase(), sizeValues.get(slot))
   }
-  return { text: label?.text ?? '', nodeType: label?.nodeType ?? null, values }
+  // The caption, not the stored title: the box hides what does not match, and
+  // what a user matches against is the name they can read on the screen.
+  return { text: slotCaption(slot), nodeType: label?.nodeType ?? null, values }
 }
 
 /**
@@ -1015,7 +1106,7 @@ function refreshLabelSpecs(): void {
       const label = view.label(slot)
       return {
         slot,
-        text: label?.text ?? '',
+        text: slotCaption(slot),
         badges: label?.badges ?? [],
         weight: label?.weight ?? 0,
         // A count chip where there is a count. A type node's count is the whole
@@ -1180,49 +1271,70 @@ function showSummaryPanel(meta: MetaGraphMeta): void {
 }
 
 /**
- * Fetch the per-node values an appearance channel needs.
+ * Fetch the per-node values a display channel needs.
  *
  * Through the ordinary Cypher path, over the ids currently on screen — the
- * statistics say what a property *looks like* across the type, and colouring
- * needs each node's own value. Bounded because the id list is bounded: nothing
- * on screen got there except through a bounded response.
+ * statistics say what a property *looks like* across the type, and colouring,
+ * sizing or captioning needs each node's own value. Bounded because the id list
+ * is bounded: nothing on screen got there except through a bounded response.
+ *
+ * `ofType` narrows it to one type's nodes, which is what the caption channel
+ * wants: a caption is a per-type decision, and asking every node on screen for
+ * `n.wlbWellboreName` would spend the round trip on the nodes that have no such
+ * property.
  */
-function requestAppearanceValues(property: string, channel: 'color' | 'size'): void {
+function requestValues(
+  property: string,
+  channel: 'color' | 'size' | 'caption',
+  ofType: string | null = null,
+): void {
   const ids: number[] = []
   for (const slot of view.liveSlots()) {
     const label = view.label(slot)
-    if (label?.nodeId != null) ids.push(label.nodeId)
+    if (label?.nodeId == null) continue
+    if (ofType !== null && label.nodeType !== ofType) continue
+    ids.push(label.nodeId)
   }
   if (ids.length === 0) {
     redraw()
     return
   }
-  appearanceChannel = channel
+  pendingValues.push({ channel, property, ids })
+  drainValueRequests()
+}
+
+/** Send the next fetch, if nothing is already out. */
+function drainValueRequests(): void {
+  if (inFlightValues !== null) return
+  const next = pendingValues.shift()
+  if (next === undefined) return
+  inFlightValues = next
   send({
     type: 'cypher',
-    query: `MATCH (n) WHERE id(n) IN $ids RETURN id(n) AS id, n.${property} AS value`,
-    params: { ids },
+    query: `MATCH (n) WHERE id(n) IN $ids RETURN id(n) AS id, n.${next.property} AS value`,
+    params: { ids: next.ids },
     limit: null,
     as_graph: false,
   })
 }
 
-function absorbAppearanceValues(
-  columns: string[],
-  data: unknown[][],
-  channel: 'color' | 'size',
-): void {
+function absorbValues(columns: string[], data: unknown[][], request: ValueRequest): void {
   const idColumn = data[columns.indexOf('id')] ?? []
   const valueColumn = data[columns.indexOf('value')] ?? []
   for (const [row, rawId] of idColumn.entries()) {
     const slot = view.slotForNode(Number(rawId))
     if (slot === undefined) continue
     const value = valueColumn[row]
-    if (channel === 'color') {
+    if (request.channel === 'color') {
       appearanceValues.set(slot, value)
-    } else {
+    } else if (request.channel === 'size') {
       const numeric = Number(value)
       if (Number.isFinite(numeric)) sizeValues.set(slot, numeric)
+    } else if (typeof value === 'string' && value !== '') {
+      // An empty or absent caption is left out rather than stored: the label
+      // then falls back to the title, which is a real name, where a blank chip
+      // would be a node the user cannot address at all.
+      captionValues.set(slot, value)
     }
   }
   redraw()
