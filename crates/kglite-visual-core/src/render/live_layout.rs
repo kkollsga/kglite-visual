@@ -4,10 +4,10 @@
 //! **This is the one thing the browser's force layout cannot do: hold still.**
 //! cosmos.gl's simulation is the right answer for "what shape is this graph",
 //! and the wrong one for "put the same graph in the same place twice" — a hop
-//! ring stays a hop ring only while nothing re-heats it. P11 already built the
-//! three structure-chosen kernels for the headless render; this hands the same
-//! kernels' output to the *live* view, so the picture a user is looking at can
-//! be an arrangement rather than a settle.
+//! ring stays a hop ring only while nothing re-heats it. The structure-chosen
+//! kernels already existed for the headless render — P11's three, plus G4's
+//! geographic map; this hands the same kernels' output to the *live* view, so
+//! the picture a user is looking at can be an arrangement rather than a settle.
 //!
 //! **The scene is [`super::live_scene`]'s, and deliberately so.** Reusing the
 //! render's scene builder is what keeps the two arrangements answering the same

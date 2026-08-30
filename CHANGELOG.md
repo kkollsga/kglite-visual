@@ -162,6 +162,15 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
   `kglite-visual queries list`, `… rm <file>` and `… prune` are the owner, and
   `prune` only offers the stores whose graph is gone from disk.
 
+- **`PROFILE` reports what each clause of a query cost.** Prefix a query with
+  `PROFILE` and the panel draws a row per clause above the results — the
+  engine's own clause name, rows in → rows out, a bar scaled against the
+  slowest clause, and microseconds. `PROFILE` is the whole interface on
+  purpose: it is Cypher, it is what every other Cypher tool profiles with, and
+  a checkbox that prepended the keyword behind your back would mean the query
+  in the editor was not the query that ran. Unlike `EXPLAIN`, the query
+  actually runs, so the results table is there beside the profile.
+
 - **`EXPLAIN` results are drawn as a plan.** The rows have always arrived and
   the panel rendered them as three columns of data — a `step` column counting
   1..n beside an `operation` column is a numbered list wearing a grid, and
