@@ -1,12 +1,13 @@
 name: CI
 
-# AUTHORED IN P6, NEVER RUN. There is no remote and no Actions runner has ever
-# executed a line of this file (2026-08-29). It is written against the local
-# gate — every step below is a `make` target that runs on a developer machine
-# today, which is the only evidence there is that any of it works. Treat the
-# first real run as the validation step it is: a green badge here has never
-# existed, and "the workflow is committed" is not "the workflow passes"
-# (doctrine R10).
+# Authored in P6 and live since 2026-08-29. The first real run earned its keep:
+# it went red on a genuine bug and green on the fix, and the `ci-success`
+# aggregate has been seen refusing a red job in production — the R1 proof local
+# runs could only reason about.
+#
+# Every step below is a `make` target that also runs on a developer machine, so
+# a CI failure is reproducible locally by name. That is deliberate: a CI-only
+# incantation is a failure nobody can debug.
 
 on:
   push:
@@ -32,7 +33,7 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------
-  # `make gate` runs sixteen checks. Fourteen of them are here, split across
+  # `make gate` runs eighteen checks. Sixteen of them are here, split across
   # the jobs below. The two that are deliberately absent, and why:
   #
   #   check-dev-docs      — bounds `dev-docs/`, which is gitignored and never
@@ -44,6 +45,12 @@ jobs:
   #
   # Both are local-only by construction, not by omission. If either ever
   # becomes checkable in CI, it gets a job here in the same change.
+  #
+  # The `docs` job below is the other direction: a check CI owns that the local
+  # gate does NOT run. Gate membership is earned by a record of catching a CI
+  # failure, and the docs build has none yet — so it lives here, where a check
+  # with no local track record belongs, and `make docs` stays available for
+  # anyone editing a page.
   # ---------------------------------------------------------------------
 
   structural:
@@ -265,13 +272,34 @@ jobs:
       - name: Packaged-consumer check
         run: make check-packaged-consumer
 
+  docs:
+    name: Documentation — sphinx-build -W
+    runs-on: ubuntu-latest
+    # The cheapest job in the file: four pure-Python packages and a Markdown
+    # tree. No Rust toolchain, no Node, no wheel — nothing here imports the
+    # compiled extension, which is also why Read the Docs can build it.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      # `-W --keep-going` into a purged output directory, which is what
+      # `.readthedocs.yaml` asks for too (`fail_on_warning: true`). A broken
+      # cross-reference is a broken page; catching it here is catching it
+      # before the published site has it.
+      - name: Build the documentation
+        run: make docs
+
   ci-success:
     name: CI success
     # The single aggregate gate. release.yml waits on THIS, not on a
     # hand-maintained list of check names — an allowlist is how a red job ships
     # a release by simply not being listed. A job added above is covered by
     # adding it to `needs` here, and nowhere else.
-    needs: [structural, frontend, rust, e2e, python]
+    needs: [structural, frontend, rust, e2e, python, docs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

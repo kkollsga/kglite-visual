@@ -11,6 +11,42 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Added
+
+- **Documentation, at
+  [kglite-visual.readthedocs.io](https://kglite-visual.readthedocs.io).** A
+  Sphinx + MyST site under `docs/`, built by Read the Docs from
+  `.readthedocs.yaml`: getting started, the viewer in five pages — the tour,
+  the **honesty model**, the layouts, the query surfaces, appearance — then
+  render, export, the Python API, the CLI's full flag reference, four concept
+  pages, and an agents track covering the launch contract, the JSON twin, all
+  thirteen MCP tools and what an agent may claim about a screen it cannot see.
+  Every claim in it was checked against the running program rather than
+  against the plan: the endpoint payloads, the refusal messages, the `--help`
+  text, the JSON summary lines and the MCP schemas quoted on those pages are
+  transcripts. Four screenshots ship with it (432 KB total), including a `geo`
+  render of a real shelf. There is deliberately **no sphinx-autoapi**: this
+  package's whole Python surface is `show()` and the handle it returns, and a
+  generated page over two private modules would be longer than the surface it
+  describes.
+- **`make docs`** builds the site with `-W --keep-going` into a purged
+  `target/docs`, in its own `target/docs-venv` — not `.venv`, which belongs to
+  the wheel's test loop and has no business growing Sphinx. It is **not** in
+  `make gate`: gate membership is earned by a record of catching a CI failure
+  and this check has none yet. CI owns it, as a sixth job on the `ci-success`
+  aggregate — four pure-Python packages and a Markdown tree, no Rust
+  toolchain and no Node.
+
+### Changed
+
+- **The README is rewritten** around what the program is for: the agent-driven
+  shared view, the honesty model, and the structure-chosen layouts including
+  the map. Its image links are absolute `raw.githubusercontent.com` URLs
+  because a relative one breaks on PyPI, where this file is the wheel's long
+  description; verified through `readme_renderer` rather than assumed. The
+  "not yet published" note is gone — it should have gone with 0.1.0, which is
+  what it said it would do.
+
 ## [0.1.1] - 2026-08-30
 
 ### Fixed
