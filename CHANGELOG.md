@@ -13,6 +13,28 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- **Protocol v4: a `layout` message and request.** The server computes a
+  static arrangement for the live view with the same structure-chosen
+  kernels the headless render uses — hop rings, packed islands or a
+  held-still force pass — and broadcasts it to every attached client, which
+  stops its simulation and holds the picture still. `POST /api/layout`, the
+  MCP `set_layout` tool, and a picker in the sidebar. `geo` is named and
+  refused until the geo kernel lands.
+- **The geometry caveat is conditional.** Under a static kernel the server
+  knows the arrangement it sent, so `view_state` reports `layout_kernel`
+  and the caveat that goes with it instead of an absolute claim that is no
+  longer true.
+- **A legend card** over the colour, size and link encodings, built from the
+  same state the renderer's arrays are filled from.
+- **A client-side filter that hides what is already loaded** — fuzzy text,
+  `type:` and any property the view has fetched — with an "n of m drawn"
+  honesty line. A term it cannot answer without a fetch is refused by name
+  and points at Search.
+- **Auto-caption:** where a type's title names nothing (few distinct values,
+  or poor coverage), the server suggests the property its nodes read best
+  under and the client draws it on the labels. Overridable per type; no
+  slice is re-sent.
+
 - **A real editor for the Cypher panel.** The query box highlights Cypher as
   you type — keywords, strings, numbers, comments, node labels (`:Wellbore`),
   relationship types (`[:DRILLED_IN]`), property reads (`.title`) and

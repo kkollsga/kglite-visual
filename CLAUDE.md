@@ -17,18 +17,21 @@ localhost CLI and a Python wheel.
 > line.
 > Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend that
 > renders the type-level meta-graph through cosmos.gl — GPU force layout by
-> default, the D2 deterministic mode behind an explicit `?deterministic=1`
-> switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v3)
+> default, a **server-computed static layout** the user or an agent can
+> switch to (hop rings, packed islands, or a held-still force pass — the
+> simulation stops, dragging goes off, and the server then knows where the
+> points are), and the D2 deterministic mode behind an explicit
+> `?deterministic=1` switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v4)
 > with an exact framing baseline, an axum server on localhost with the
 > frontend embedded, **a Python wheel whose `show()` runs that same server
 > lib-linked into the extension**, **`kglite-visual render` /
 > `POST /api/render`** — the meta-graph, a Cypher result or a bounded
 > expansion drawn as a deterministic SVG or PNG with the app's own visual
 > encoding and the truncation banner in the picture — **an MCP server at
-> `/mcp` on the running instance** — eleven tools an agent uses to show,
-> expand, collapse, highlight, focus and re-colour the live view, with
-> every change broadcast to every attached browser, so the user's screen
-> follows the agent in real time — a source distribution
+> `/mcp` on the running instance** — twelve tools an agent uses to show,
+> expand, collapse, highlight, focus, re-arrange and re-colour the live
+> view, with every change broadcast to every attached browser, so the
+> user's screen follows the agent in real time — a source distribution
 > that installs without Node, a CHANGELOG, and a gate that builds, lints,
 > tests and
 > **drives** all of it — in a headless browser, and for the built wheel in a

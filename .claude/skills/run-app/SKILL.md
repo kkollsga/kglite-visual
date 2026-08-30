@@ -80,6 +80,7 @@ curl -s -XPOST $B/api/cypher         -H "$C" -d '{"query":"MATCH (n) RETURN n LI
 curl -s -XPOST $B/api/search         -H "$C" -d '{"query":"ada","node_type":"Person","property":"title"}'
 curl -s -XPOST $B/api/property-stats -H "$C" -d '{"node_type":"Person"}'
 curl -s -XPOST $B/api/validate       -H "$C" -d '{"query":"MATCH (n:Persn) RETRN n"}'
+curl -s -XPOST $B/api/layout         -H "$C" -d '{"kernel":"islands"}'
 ```
 
 Same structs as the binary WebSocket protocol — divergence between the twin
@@ -103,6 +104,17 @@ refuses) or `"warning"` (it runs and may answer nothing: an unknown label or
 relationship type, carrying kglite's "did you mean?"). `line`/`col` are
 1-indexed and `null` when the finding is about the whole query. It moves
 nothing and broadcasts nothing.
+
+**`/api/layout` is the one endpoint that changes what the picture LOOKS like
+without changing what is in it.** `{"kernel": "auto"|"radial"|"islands"|
+"force"|"simulation", "seed_slot": n}`. It allocates no slot, tombstones
+nothing and touches no link; it computes an arrangement server-side and
+broadcasts it to every attached browser, which then holds it still — the
+simulation stops and dragging is disabled. `"simulation"` hands the layout
+back to the viewer's GPU. The answer names `kernel_chosen`, which can differ
+from what was asked: `islands` over a graph with no community structure
+falls back to `force` and says so. `"geo"` is in the vocabulary and refused,
+by name, until the geo kernel lands.
 
 Saved queries live in a file store keyed by the graph's absolute path
 (`$KGLITE_VISUAL_CONFIG_DIR` overrides the config dir). Every face reads the
@@ -177,15 +189,18 @@ geometry-different. The browser's layout runs on the user's GPU; this is
 one of three structure-chosen kernels in core — hop rings, packed islands,
 or a seeded Fruchterman-Reingold when the input has no shape to find. Same
 nodes, same links, same truncation, a different arrangement — never claim
-"your screen shows X at the top left".
+"your screen shows X at the top left". That holds even when the live view is
+under a static kernel (`/api/layout`): this pass folds fans and separates
+circles for the page it draws, and the live layout deliberately does
+neither.
 
 ## 3c. Drive the live view over MCP
 
 The running server speaks MCP at the `mcp` URL its stdout line printed —
-streamable HTTP, no second process, no discovery file. Eleven tools:
+streamable HTTP, no second process, no discovery file. Twelve tools:
 `view_state`, `show_cypher`, `expand`, `collapse`, `highlight`, `focus`,
-`set_appearance`, `reset_view`, `render`, `list_saved_queries`,
-`run_saved_query`.
+`set_appearance`, `set_layout`, `reset_view`, `render`,
+`list_saved_queries`, `run_saved_query`.
 
 ```bash
 M="$(python3 -c 'import json,sys;print(json.load(sys.stdin)["mcp"])' < server.json)"
@@ -205,11 +220,22 @@ is pushed to every attached browser, whoever asked. `view_state` is the
 server-side `window.__kglv`; re-read it rather than assuming your last call
 still describes the screen.
 
-**`render` geometry is not the user's geometry.** The layout runs on the
-viewer's GPU and the server never learns the final positions, so
-`render{target:"live-view"}` returns the same nodes and links in a different
-arrangement. Describe what is in the view; use `focus` and `highlight` to say
-"look at this" instead of naming a screen position you cannot see.
+**Whether the user's geometry is knowable depends on
+`view_state.layout_kernel`** (protocol v4). While it reads `simulation` —
+the default every session opens in — the layout runs on the viewer's GPU
+and the server never learns the final positions: describe what is in the
+view, and use `focus` and `highlight` to say "look at this" rather than
+naming a screen position you cannot see. `set_layout` with a static kernel
+(`auto`, `radial`, `islands`, `force`) computes the arrangement here and
+broadcasts it; the viewer's simulation stops, dragging is disabled, and
+relative position — "the ring around X", "the island on the left" — becomes
+safe to describe. Their camera is still theirs, so a screen coordinate
+never is. Read the `geometry_caveat` that comes back rather than
+remembering which mode you are in; core owns both wordings.
+
+**`render` is a separate pass either way.** It has its own fold and its own
+separation, so `render{target:"live-view"}` can differ from the canvas even
+under a static kernel.
 
 The same verbs exist on the JSON twin — `POST /api/{focus,highlight,appearance,reset}`,
 `GET /api/view-state` — which is the `curl`-shaped way to drive the same
@@ -224,13 +250,19 @@ from one that reached the user.
   Readiness is `window.__kglv.ready === true` — **never a fixed sleep**
   (cosmos.gl v3 is async-init and draws zero frames when static).
 - Interactive (Claude in Chrome / a headed browser): open the reported URL,
-  then read `window.__kglv` — `{protocolVersion, tier, pointCount,
-  linkCount, slotCount, tombstoneCount, ready, simRunning, lastMessageSeq,
-  positionsHash, deviceFeatures, lastSliceKind, compactions, truncation,
+  then read `window.__kglv` — `{protocolVersion, tier, layoutMode,
+  layoutKernel, pointCount, linkCount, slotCount, tombstoneCount, ready,
+  simRunning, lastMessageSeq, positionsHash, deviceFeatures, lastSliceKind,
+  compactions, truncation, zoomLevel, focusedSlots, colorBy, sizeBy,
   hoveredSlot, emphasizedCount, highlightedCount, selectedCount,
-  previewRows, queryRows, searchHits, appearanceCandidates,
-  approximateStats, error}`. `pointCount` is *live* points; `slotCount`
-  includes tombstones. `truncation` carries the banner text the user is
+  previewRows, queryRows, searchHits, legendEntries, filteredOut,
+  appearanceCandidates, approximateStats, error}`. `pointCount` is *live*
+  points **and excludes whatever the client-side filter is hiding** —
+  `filteredOut` is that count, and the two together are the honest pair.
+  `slotCount` includes tombstones. `layoutMode` is `force` /
+  `deterministic` / `static` and `layoutKernel` names the arrangement in
+  force; `positionsHash` only means something where nothing is moving the
+  points. `truncation` carries the banner text the user is
   actually reading, so an assertion checks the words rather than a boolean
   beside them. Assert on state; screenshots are artifacts. `error` non-null
   explains any `ready:false`.
