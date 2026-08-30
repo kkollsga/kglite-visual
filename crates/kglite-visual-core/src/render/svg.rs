@@ -415,6 +415,13 @@ fn emit_links(out: &mut String, scene: &Scene, positions: &Positions, palette: &
     ] {
         let mut group = String::new();
         for link in scene.links.iter().filter(|link| crosses(link) == cross) {
+            // A self-loop's endpoints are one point, and a zero-length <line>
+            // is invisible ink that the counts used to claim as drawn. Until
+            // an arc glyph exists (consider-for-future), the honest move is
+            // to not emit it and to say so in the status block.
+            if link.source == link.target {
+                continue;
+            }
             let (Some(a), Some(b)) = (positions.xy.get(link.source), positions.xy.get(link.target))
             else {
                 continue;

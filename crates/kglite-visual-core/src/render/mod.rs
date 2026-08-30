@@ -417,7 +417,16 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     // answer "what did the slice carry"; `folded` is the one that says how
     // much of it a reader can count.
     let slice_nodes = scene.nodes.len() as u32;
-    let slice_links = scene.links.len() as u32;
+    let self_loops = scene
+        .links
+        .iter()
+        .filter(|link| link.source == link.target)
+        .count() as u32;
+    // Drawn excludes self-loops: the emitter skips a zero-length line, and a
+    // count that includes what the reader cannot see is the exact honesty
+    // failure the status block exists to prevent. The skipped count is named
+    // below when it is nonzero.
+    let slice_links = scene.links.len() as u32 - self_loops;
 
     // **The geographic question is asked before the fold, and settles it.** A
     // fold replaces a fan of nodes with one wedge, and a wedge standing for
@@ -443,6 +452,18 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
             "{} folded into {} fans",
             encoding::group_thousands(u64::from(folded)),
             scene.nodes.iter().filter(|n| n.aggregate.is_some()).count()
+        ));
+    }
+
+    if self_loops > 0 {
+        // Same D5 family: a self-loop has no line glyph yet (an arc is a
+        // parked capability), so it is not drawn and not counted as drawn —
+        // and a relationship the picture holds but cannot show is named
+        // rather than silently absent.
+        scene.status.push(format!(
+            "{} self-loop{} not drawn",
+            encoding::group_thousands(u64::from(self_loops)),
+            if self_loops == 1 { "" } else { "s" }
         ));
     }
 

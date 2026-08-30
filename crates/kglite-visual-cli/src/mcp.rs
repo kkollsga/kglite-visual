@@ -633,8 +633,10 @@ impl ViewControl {
                        relative position ('the ring around X', 'the island on the left') \
                        becomes safe to describe. `auto` reads the structure and picks; \
                        `radial` needs a `seed_slot` to centre on; `islands` groups \
-                       communities; `simulation` hands the layout back to their GPU and takes \
-                       that knowledge away again. Check `kernel_chosen` in the answer — a \
+                       communities; `force` is a held-still force pass; `geo` puts every \
+                       node with coordinates where it actually is (unplaceable nodes go to \
+                       a labelled tray); `simulation` hands the layout back to their GPU and \
+                       takes that knowledge away again. Check `kernel_chosen` in the answer — a \
                        kernel with nothing to work with falls back and says so. Changes \
                        nothing about what is loaded."
     )]
