@@ -79,6 +79,7 @@ curl -s -XPOST $B/api/node           -H "$C" -d '{"slot":5}'
 curl -s -XPOST $B/api/cypher         -H "$C" -d '{"query":"MATCH (n) RETURN n LIMIT 3","params":{},"as_graph":false}'
 curl -s -XPOST $B/api/search         -H "$C" -d '{"query":"ada","node_type":"Person","property":"title"}'
 curl -s -XPOST $B/api/property-stats -H "$C" -d '{"node_type":"Person"}'
+curl -s -XPOST $B/api/validate       -H "$C" -d '{"query":"MATCH (n:Persn) RETRN n"}'
 ```
 
 Same structs as the binary WebSocket protocol — divergence between the twin
@@ -92,6 +93,16 @@ read as a whole one. A bad
 request is **400** and names what it refused; a query the engine rejected is
 **422** and carries kglite's own diagnostic verbatim — quote it, don't
 summarise it.
+
+**`/api/validate` is the one endpoint that answers about a query without
+running it.** It parses through kglite's own parser — no graph argument,
+nothing executed — and answers `{"protocol_version",
+"diagnostics":[{"severity","message","line","col"}]}`. `severity` is
+`"error"` (it cannot run: a syntax error, or a write this read-only viewer
+refuses) or `"warning"` (it runs and may answer nothing: an unknown label or
+relationship type, carrying kglite's "did you mean?"). `line`/`col` are
+1-indexed and `null` when the finding is about the whole query. It moves
+nothing and broadcasts nothing.
 
 Saved queries live in a file store keyed by the graph's absolute path
 (`$KGLITE_VISUAL_CONFIG_DIR` overrides the config dir). Every face reads the
@@ -110,6 +121,15 @@ any harness**, or it reads and writes the developer's own saved queries.
 
 `--query-timeout-secs N` (default 30) raises the wall-clock ceiling for one
 Cypher query. Leave it alone unless a deliberate analytical query needs it.
+
+**The query box is CodeMirror, in its own chunk.** The panel paints a
+`<textarea>` and swaps it for a CodeMirror view when `editor-*.js` arrives,
+so a driver waits for the swap to *settle* — `[data-testid="query-editor"]
+.cm-content` exists, or `[data-testid="editor-note"].kglv-warn` says the
+chunk did not load — and then fills whichever is there.
+`frontend/tests/e2e/harness.ts` exports `fillQuery` / `queryText` for
+exactly this. There is no `[data-testid="query-input"]` on a page where the
+editor loaded.
 
 ## 3b. Get a picture — no browser, no server
 
