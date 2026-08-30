@@ -151,6 +151,7 @@ export class Panels {
   private readonly queryAsGraph: HTMLInputElement
   private readonly queryStatus: HTMLDivElement
   private readonly queryDiagnostics: HTMLDivElement
+  private readonly queryProfile: HTMLDivElement
   private readonly queryResults: HTMLDivElement
   /** What a generated table left out, when it left anything out. */
   private readonly tableNote: HTMLDivElement
@@ -412,6 +413,11 @@ export class Panels {
     // printed under the table is a warning read after the conclusion was drawn.
     this.queryDiagnostics = element('div', 'kglv-diagnostics')
     this.queryDiagnostics.setAttribute('data-testid', 'query-diagnostics')
+    // Above the rows for the same reason the diagnostics are: what the query
+    // cost is read while deciding whether to trust the answer, not after.
+    this.queryProfile = element('div', 'kglv-profile')
+    this.queryProfile.setAttribute('data-testid', 'query-profile')
+    this.queryProfile.hidden = true
     this.queryResults = element('div', 'kglv-results')
     query.append(
       this.queryHost,
@@ -423,6 +429,7 @@ export class Panels {
       this.historyList,
       this.queryStatus,
       this.queryDiagnostics,
+      this.queryProfile,
       this.tableNote,
       this.queryResults,
     )
@@ -838,6 +845,59 @@ export class Panels {
   }
 
   /**
+   * What each clause of a `PROFILE` query cost, as a row per clause.
+   *
+   * **Present exactly when the user typed `PROFILE`** (plan E10). There is no
+   * toggle: `PROFILE` is Cypher, it is what every other Cypher tool profiles
+   * with, and a checkbox that prepended the keyword behind the user's back
+   * would mean the query in the editor was not the query that ran.
+   *
+   * Microseconds, not milliseconds, because the engine measures them that way
+   * and a clause that took 200 µs would round to `0 ms` and read as free. The
+   * bar is scaled against the *slowest* clause rather than the total, so the
+   * question it answers is "which clause is the expensive one" — the question a
+   * profile is opened to answer. A total-scaled bar makes every clause of a
+   * balanced plan a stub and says nothing.
+   *
+   * The clause names are the engine's own strings, rendered verbatim: a
+   * prettified name is a name that stops matching kglite's documentation the
+   * first time either side reworded one.
+   */
+  private showProfile(table: QueryTable): void {
+    const profile = table.profile
+    this.queryProfile.replaceChildren()
+    this.queryProfile.hidden = profile === null || profile.length === 0
+    if (profile === null || profile.length === 0) return
+
+    const total = profile.reduce((sum, stat) => sum + stat.elapsed_us, 0)
+    const slowest = profile.reduce((max, stat) => Math.max(max, stat.elapsed_us), 0)
+    this.queryProfile.appendChild(
+      element(
+        'div',
+        'kglv-hint',
+        `profile — ${count(profile.length)} clause${profile.length === 1 ? '' : 's'}, ` +
+          `${count(total)} µs in the engine`,
+      ),
+    )
+    for (const stat of profile) {
+      const row = element('div', 'kglv-profile-row')
+      row.append(
+        element('span', 'kglv-profile-clause', stat.clause_name),
+        element('span', 'kglv-profile-rows', `${count(stat.rows_in)} → ${count(stat.rows_out)}`),
+      )
+      const track = element('span', 'kglv-profile-bar')
+      const fill = element('span', 'kglv-profile-fill')
+      // A zero-length clause still gets a visible sliver: a bar of width 0 is
+      // indistinguishable from a row the renderer skipped.
+      const share = slowest > 0 ? stat.elapsed_us / slowest : 0
+      fill.style.width = `${Math.max(share * 100, 1.5)}%`
+      track.appendChild(fill)
+      row.append(track, element('span', 'kglv-profile-us', `${count(stat.elapsed_us)} µs`))
+      this.queryProfile.appendChild(row)
+    }
+  }
+
+  /**
    * True when this result is a plan *and* has the shape this panel can draw.
    *
    * The column check is not belt-and-braces: an engine that reshapes `EXPLAIN`
@@ -852,6 +912,7 @@ export class Panels {
   showQueryTable(table: QueryTable): number {
     this.queryResults.replaceChildren()
     this.showQueryDiagnostics(table)
+    this.showProfile(table)
     const rows = table.data[0]?.length ?? 0
 
     if (Panels.isDrawablePlan(table)) {

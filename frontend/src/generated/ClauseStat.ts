@@ -18,5 +18,13 @@ clause_name: string, rows_in: number, rows_out: number,
 /**
  * Microseconds, as the engine measures them. Not milliseconds: a clause
  * that took 200 µs would round to `0 ms` and read as free.
+ *
+ * **`number`, not the `bigint` ts-rs generates for a `u64`.** JSON has one
+ * numeric type; `serde_json` writes this as a bare number and `JSON.parse`
+ * hands the client a double, so a declared `bigint` describes a value that
+ * never arrives and every arithmetic use of it is a `TypeError` the
+ * compiler waves through. The double is exact here by a wide margin —
+ * `Number.MAX_SAFE_INTEGER` microseconds is about 285 years, and this
+ * field measures one clause of one interactive query.
  */
-elapsed_us: bigint, };
+elapsed_us: number, };

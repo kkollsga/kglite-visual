@@ -72,13 +72,19 @@ warnings: Array<string>,
 /**
  * Per-clause execution statistics, when the query ran under `PROFILE`.
  *
- * **Declared in G3 and populated in G6** (plan E10). It is here now
+ * **Declared in G3, populated in G6** (plan E10). It was declared early
  * because the v4 bump was happening anyway for
  * [`crate::protocol::MessageType::Layout`], and one shape change on the
- * wire is cheaper to reason about than two — an additive JSON key needs no
- * bump of its own, so the alternative was not "a smaller v4" but "a v4 and
- * a later shape change at no version". Always `None` until the `PROFILE`
- * path lands; the mirror struct is [`ClauseStat`], and the field it
- * mirrors is kglite's `ClauseStats`.
+ * wire is cheaper to reason about than two.
+ *
+ * `Some` exactly when the user's query carried a `PROFILE` prefix, because
+ * that is the only thing that makes the engine collect these. There is no
+ * panel toggle and no server-side rewriting of the query text: `PROFILE`
+ * is Cypher the user typed, it is what every other Cypher tool asks for
+ * profiling with, and a checkbox that silently prepended a keyword would
+ * mean the query in the editor was not the query that ran.
+ *
+ * The mirror struct is [`ClauseStat`]; the field it mirrors is kglite's
+ * `CypherResult::profile`.
  */
 profile: Array<ClauseStat> | null, };

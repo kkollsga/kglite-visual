@@ -399,6 +399,56 @@ fn a_cypher_result_arrives_columnar_and_bounded() {
     assert_eq!(table.bound.total, 8, "eight companies employ someone");
     assert!(table.bound.truncated);
     assert!(!table.explain);
+    assert!(
+        table.profile.is_none(),
+        "a query with no PROFILE prefix carries no per-clause stats"
+    );
+}
+
+/// `PROFILE` reaches the engine as Cypher and the stats come back on the table.
+///
+/// The negative half is in `a_cypher_result_arrives_columnar_and_bounded`, and
+/// it is the half that matters: `Some(vec![])` and `None` render identically in
+/// a panel that only checks for null, so a wiring that attached an empty
+/// profile to every query would look like this one working.
+#[test]
+fn a_profiled_query_carries_what_each_clause_cost() {
+    let session = open_fixture();
+    let request = Request::Cypher(CypherRequest {
+        query: "PROFILE MATCH (p:Person)-[:WORKS_AT]->(c:Company) \
+                RETURN c.title AS company, count(p) AS staff"
+            .to_string(),
+        params: Default::default(),
+        limit: None,
+        as_graph: false,
+    });
+    let Response::Query(table) = session.handle(&request).expect("the query runs") else {
+        panic!("expected a table");
+    };
+
+    // The rows are still data: `PROFILE` runs the query, unlike `EXPLAIN`.
+    assert!(!table.explain);
+    assert_eq!(table.columns, vec!["company", "staff"]);
+    assert!(table.bound.total > 0, "PROFILE executes, it does not plan");
+
+    let profile = table.profile.expect("PROFILE collects per-clause stats");
+    assert!(
+        !profile.is_empty(),
+        "an empty profile is indistinguishable from no profile in the panel"
+    );
+    assert!(
+        profile.iter().any(|stat| stat.rows_out > 0),
+        "some clause must have emitted a row; got {profile:?}"
+    );
+    // The clause names are the engine's, not ours — asserting one by name is
+    // what would catch a mapping that put `rows_in` in the name field.
+    assert!(
+        profile
+            .iter()
+            .any(|stat| stat.clause_name.to_ascii_uppercase().contains("MATCH")),
+        "the profile should name the MATCH clause; got {:?}",
+        profile.iter().map(|s| &s.clause_name).collect::<Vec<_>>()
+    );
 }
 
 #[test]

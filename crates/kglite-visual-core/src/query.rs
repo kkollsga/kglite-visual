@@ -228,14 +228,20 @@ pub struct QueryTable {
     pub warnings: Vec<String>,
     /// Per-clause execution statistics, when the query ran under `PROFILE`.
     ///
-    /// **Declared in G3 and populated in G6** (plan E10). It is here now
+    /// **Declared in G3, populated in G6** (plan E10). It was declared early
     /// because the v4 bump was happening anyway for
     /// [`crate::protocol::MessageType::Layout`], and one shape change on the
-    /// wire is cheaper to reason about than two — an additive JSON key needs no
-    /// bump of its own, so the alternative was not "a smaller v4" but "a v4 and
-    /// a later shape change at no version". Always `None` until the `PROFILE`
-    /// path lands; the mirror struct is [`ClauseStat`], and the field it
-    /// mirrors is kglite's `ClauseStats`.
+    /// wire is cheaper to reason about than two.
+    ///
+    /// `Some` exactly when the user's query carried a `PROFILE` prefix, because
+    /// that is the only thing that makes the engine collect these. There is no
+    /// panel toggle and no server-side rewriting of the query text: `PROFILE`
+    /// is Cypher the user typed, it is what every other Cypher tool asks for
+    /// profiling with, and a checkbox that silently prepended a keyword would
+    /// mean the query in the editor was not the query that ran.
+    ///
+    /// The mirror struct is [`ClauseStat`]; the field it mirrors is kglite's
+    /// `CypherResult::profile`.
     pub profile: Option<Vec<ClauseStat>>,
 }
 
@@ -256,6 +262,15 @@ pub struct ClauseStat {
     pub rows_out: u32,
     /// Microseconds, as the engine measures them. Not milliseconds: a clause
     /// that took 200 µs would round to `0 ms` and read as free.
+    ///
+    /// **`number`, not the `bigint` ts-rs generates for a `u64`.** JSON has one
+    /// numeric type; `serde_json` writes this as a bare number and `JSON.parse`
+    /// hands the client a double, so a declared `bigint` describes a value that
+    /// never arrives and every arithmetic use of it is a `TypeError` the
+    /// compiler waves through. The double is exact here by a wide margin —
+    /// `Number.MAX_SAFE_INTEGER` microseconds is about 285 years, and this
+    /// field measures one clause of one interactive query.
+    #[ts(type = "number")]
     pub elapsed_us: u64,
 }
 
@@ -307,6 +322,22 @@ pub fn run_cypher(
         .map(|d| forwarded_warnings(&d.warnings, total_rows.is_some()))
         .unwrap_or_default();
 
+    // Taken before `outcome.result` is moved apart. `usize` on the engine and
+    // `u32` on the wire: a clause that moved four billion rows is not a number
+    // this panel is trying to render truthfully, and saturating keeps it from
+    // wrapping to a small one that looks like a fact.
+    let profile = outcome.result.profile.map(|stats| {
+        stats
+            .into_iter()
+            .map(|stat| ClauseStat {
+                clause_name: stat.clause_name,
+                rows_in: stat.rows_in.min(u32::MAX as usize) as u32,
+                rows_out: stat.rows_out.min(u32::MAX as usize) as u32,
+                elapsed_us: stat.elapsed_us,
+            })
+            .collect()
+    });
+
     let mut table = to_table(
         outcome.result.columns,
         outcome.result.rows,
@@ -317,6 +348,7 @@ pub fn run_cypher(
     table.explain = outcome.explain;
     table.timed_out = timed_out;
     table.warnings = warnings;
+    table.profile = profile;
     Ok(table)
 }
 

@@ -435,6 +435,64 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A PROFILE result. Same monospace as the plan and for the same reason — the
+   clause names are the engine's identifiers and the counts are meant to line
+   up column-wise between rows. */
+.kglv-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.kglv-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.kglv-profile-clause {
+  flex: 0 0 84px;
+  color: #e6edf3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kglv-profile-rows {
+  flex: 0 0 92px;
+  color: #8b949e;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The bar's track is drawn, not implied: an empty track says "this clause was
+   cheap", where a missing one says nothing at all. */
+.kglv-profile-bar {
+  flex: 1 1 auto;
+  min-width: 24px;
+  height: 6px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.kglv-profile-fill {
+  display: block;
+  height: 100%;
+  background: #58a6ff;
+}
+
+.kglv-profile-us {
+  flex: 0 0 62px;
+  text-align: right;
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The saved-query picker owns its row's slack: it holds a name a user chose,
    and a name clipped to five characters is not a picker. */
 .kglv-row > .kglv-select[data-testid='saved-list'] {
