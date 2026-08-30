@@ -901,3 +901,54 @@ fn the_remembered_layout_is_offered_only_while_the_server_owns_the_geometry() {
         "the arrangement is the viewer's again, so the server has none to offer"
     );
 }
+
+/// The export's scope is the view, and the whole-graph path is not reachable
+/// from it (plan E8, pre-mortem #4).
+///
+/// The structural half of that claim is a signature — `export_nodes` takes a
+/// slice, not kglite's `Option<&CurrentSelection>` — and a signature cannot go
+/// red. This is the observable half: the fixture holds 118 nodes, an expansion
+/// puts 60 of them on screen, and the file that comes out has 60. A handler
+/// that reached the engine's `None` would produce 118 and this test is what
+/// says so.
+#[test]
+fn exporting_the_live_view_writes_the_view_and_never_the_whole_graph() {
+    use kglite_visual_core::ExportFormat;
+
+    let session = open_fixture();
+
+    // The entry screen holds no instance nodes at all. A whole-graph dump would
+    // be the *easiest* thing to answer here and is exactly what must not
+    // happen, so the empty view is refused by name.
+    let err = session
+        .export_view(ExportFormat::Csv)
+        .expect_err("an entry screen has nothing to export");
+    assert!(err.to_string().contains("nothing to export"), "{err}");
+
+    slice(&session, &expand_request("KNOWS", EdgeDirection::Out, None));
+    let on_screen = session.view_state().live_count - session.view_state().types.len() as u32;
+    assert_eq!(
+        on_screen, 60,
+        "the fixture's KNOWS expansion loads 60 Person"
+    );
+
+    let exported = session
+        .export_view(ExportFormat::Csv)
+        .expect("a loaded view exports");
+    assert_eq!(exported.nodes, on_screen);
+    let text = String::from_utf8(exported.bytes).expect("CSV is UTF-8");
+    assert_eq!(
+        text.lines().count() as u32,
+        on_screen + 1,
+        "one header and one row per node on screen — never the graph's 118"
+    );
+    assert!(
+        !text.contains("Company_"),
+        "a type nobody expanded reached the file: this is the whole-graph path"
+    );
+    assert!(
+        exported.filename.ends_with("-view.csv"),
+        "{}",
+        exported.filename
+    );
+}

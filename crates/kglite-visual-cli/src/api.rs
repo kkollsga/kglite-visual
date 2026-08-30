@@ -153,6 +153,139 @@ pub async fn render(State(state): State<AppState>, Json(body): Json<RenderReques
     }
 }
 
+/// What `GET /api/export` takes on its query string.
+#[derive(serde::Deserialize)]
+pub struct ExportQuery {
+    /// `graphml` | `gexf` | `csv` | `csv-edges` | `json`.
+    pub format: String,
+    /// `live-view`, and today nothing else. Named rather than assumed because
+    /// the render endpoint's `source` taught the vocabulary: a caller that
+    /// writes `source=meta` deserves the refusal that names what it can ask
+    /// for, not a live-view export it did not want.
+    #[serde(default = "default_export_source")]
+    pub source: String,
+}
+
+fn default_export_source() -> String {
+    "live-view".to_string()
+}
+
+/// `GET /api/export?format=graphml&source=live-view` — the view, as a file
+/// (plan E8).
+///
+/// **GET, and a deliberate exception to this file's POST convention.** Every
+/// other route here carries a JSON body and several mutate the slot space, so
+/// POST is right for them; a download is neither. `<a href download>` is how a
+/// browser saves a file without JavaScript reassembling bytes it already has,
+/// and an anchor issues a GET. It is also honest about the semantics: this
+/// endpoint reads the view and changes nothing, so a prefetcher re-running it
+/// costs a file nobody keeps rather than an expansion nobody asked for.
+///
+/// **The scope is mandatory and lives in core.** `Session::export_view` takes
+/// no `Option`: there is no argument this handler could pass that would reach
+/// kglite's whole-graph mode. See `core::export`, and the test below that
+/// asserts the reachable surface.
+///
+/// The response says twice what the file cannot: `Content-Disposition` names
+/// it, in ASCII and again in RFC 5987 UTF-8 so a Norwegian graph keeps its
+/// letters, and `x-kglv-note` carries the edge-superset caveat (and, for
+/// GraphML, the upstream label-key gap) so a caller reading only headers still
+/// meets them.
+pub async fn export(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<ExportQuery>,
+) -> Response {
+    if query.source != "live-view" {
+        return error_response(&CoreError::Request(format!(
+            "'{}' is not an export source. The only one is 'live-view' — what is on the shared \
+             screen. To draw something else, use POST /api/render.",
+            query.source
+        )));
+    }
+    let format = match kglite_visual_core::ExportFormat::parse(&query.format) {
+        Ok(format) => format,
+        Err(err) => return error_response(&err),
+    };
+
+    let session = Arc::clone(&state.session);
+    // kglite walks every exported node and its edges and serializes the lot.
+    // On the async runtime that is the WebSocket feeding the renderer stalling
+    // for the length of the walk.
+    match tokio::task::spawn_blocking(move || session.export_view(format)).await {
+        Ok(Ok(exported)) => {
+            let notes = exported.notes().join(" | ");
+            let mut response = (
+                [(CONTENT_TYPE, exported.format.content_type())],
+                exported.bytes,
+            )
+                .into_response();
+            let headers = response.headers_mut();
+            for (name, value) in [
+                (
+                    axum::http::header::CONTENT_DISPOSITION.as_str(),
+                    content_disposition(&exported.filename),
+                ),
+                ("x-kglv-nodes", exported.nodes.to_string()),
+                ("x-kglv-format", exported.format.as_str().to_string()),
+                ("x-kglv-note", notes),
+            ] {
+                if let Ok(value) = axum::http::HeaderValue::from_str(&value) {
+                    headers.insert(name, value);
+                }
+            }
+            response
+        }
+        Ok(Err(err)) => error_response(&err),
+        Err(err) => task_failed("export", &err),
+    }
+}
+
+/// `attachment`, named twice.
+///
+/// The plain `filename=` parameter is ASCII-only by the grammar, so a graph
+/// called `Sokkelkart Æ` would arrive as a mangled name or as none at all.
+/// RFC 5987's `filename*` carries the real one in UTF-8, and every browser this
+/// project targets prefers it when both are present — so the ASCII copy is the
+/// fallback for whatever does not, not the name we expect anyone to see.
+fn content_disposition(filename: &str) -> String {
+    let ascii: String = filename
+        .chars()
+        .map(|c| {
+            if c.is_ascii_graphic() && c != '"' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!(
+        "attachment; filename=\"{ascii}\"; filename*=UTF-8''{}",
+        percent_encode(filename)
+    )
+}
+
+/// RFC 5987 `ext-value` encoding: `attr-char` survives, everything else is
+/// `%XX` per UTF-8 byte.
+///
+/// Hand-written rather than pulled in: `percent-encoding` is in the lockfile
+/// only as somebody else's transitive dependency, and promoting a crate to a
+/// direct requirement — with its licence, its version floor and its place in
+/// the bundled-dependency check — to escape one header is a poor trade for
+/// eight lines with a test.
+fn percent_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => out.push(byte as char),
+            b'!' | b'#' | b'$' | b'&' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~' => {
+                out.push(byte as char)
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
+
 /// `POST /api/reset` — collapse everything back to the entry screen.
 ///
 /// One slice, not a collapse per type: forty round trips would put thirty-nine

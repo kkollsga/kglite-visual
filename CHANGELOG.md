@@ -26,6 +26,19 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- **Export: the view, as a file somebody else's tool can open.** GraphML,
+  GEXF, node CSV, edge CSV or D3 JSON, from an Export card beside the legend,
+  from `GET /api/export?format=…&source=live-view`, and from the MCP
+  `export_view` tool. **The scope is the view** — exactly the instance nodes
+  on screen, never the whole graph: this is a viewer built around a response
+  bound, and an export that answered "everything" would walk straight around
+  it. An empty view is refused by name rather than answered with an empty
+  file. The download is named from the graph, in UTF-8, so a Norwegian graph
+  keeps its letters; the response says in a header what the file cannot — that
+  the edge set can be a superset of what the canvas drew, and that kglite's
+  GraphML carries no Gephi `label` key (export GEXF, or map the `title`
+  column). `kglite-visual export <file>` is the CLI half, and the one place a
+  whole-graph dump is on offer, because there the user typed it.
 - **A geographic layout: `--layout geo`, `kernel: "geo"`.** Every node whose
   type declares a lat/lon location or a WKT geometry is drawn where it
   actually is, on an equirectangular projection whose longitudes are

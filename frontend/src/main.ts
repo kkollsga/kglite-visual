@@ -49,6 +49,7 @@ import {
   type SlotFacts,
 } from './filter'
 import { LabelOverlay } from './labels'
+import { ExportCard } from './export'
 import { Legend, type LegendEntry, type LegendSection } from './legend'
 import { formatCell, Panels } from './panels'
 import {
@@ -145,6 +146,12 @@ const interaction = new InteractionState()
  * only the person who picked it knows.
  */
 const legend = new Legend(root)
+/**
+ * Above the legend, in the same corner and for the same reason: both cards are
+ * about *this view* rather than about the app. The legend says what the picture
+ * means; this says what leaves with it (plan E8).
+ */
+const exportCard = new ExportCard(root)
 const assembler = new ResponseAssembler()
 const transport = new WebSocketTransport('ws')
 
@@ -691,6 +698,11 @@ function redraw(authority?: SeedAuthority): void {
   positionLabels(surface)
   legend.update(legendSections())
   debugState.legendEntries = legend.entryCount
+  // The export's scope is the instance nodes on screen — the same set
+  // `Session::export_view` walks — so the card is refreshed wherever the view
+  // is, not on a click that would read a stale count.
+  exportCard.setLoaded(instancesOnScreen())
+  debugState.exportNodes = exportCard.count
   panels.setGeoAvailable(viewHasPlaceableNodes())
   syncCounts()
   renderStatus()
@@ -1040,6 +1052,21 @@ function legendSections(): LegendSection[] {
     ],
   })
   return sections
+}
+
+/**
+ * Instance nodes currently in the slot space — what an export would carry.
+ *
+ * Not `pointCount`: a filtered-out node is still loaded, and the server's
+ * export walks the slot space rather than the client's appearance arrays. A
+ * count that tracked the filter would promise a file the server will not write.
+ */
+function instancesOnScreen(): number {
+  let count = 0
+  for (const slot of view.liveSlots()) {
+    if (view.label(slot)?.isType === false) count += 1
+  }
+  return count
 }
 
 /** Instance types currently drawn, ascending — one legend row each. */

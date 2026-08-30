@@ -38,6 +38,11 @@ From the shell:
 ```bash
 kglite-visual path/to/graph.kgl        # opens a browser on localhost
 kglite-visual path/to/graph.kgl --no-open --port 8080
+
+# no server, no browser: one image, or one file for somebody else's tool
+kglite-visual render path/to/graph.kgl --meta
+kglite-visual export path/to/graph.kgl --format gexf -o graph.gexf
+kglite-visual export path/to/graph.kgl --format csv --cypher "MATCH (n:Field) RETURN n"
 ```
 
 From Python, including inside Jupyter:

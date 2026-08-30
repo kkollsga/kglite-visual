@@ -824,6 +824,35 @@ impl Session {
         )
     }
 
+    /// Write the live view out in somebody else's format (plan E8).
+    ///
+    /// **The scope is the view, and it cannot be anything else.** The node list
+    /// is assembled here from the live slot space and handed to
+    /// [`crate::export::export_nodes`], which takes a slice rather than
+    /// kglite's `Option<&CurrentSelection>` — so the engine's whole-graph mode
+    /// is not something a server handler could reach by passing the wrong
+    /// argument. That matters more here than the type signature suggests: this
+    /// is a viewer built around a response bound, and an export endpoint that
+    /// answered `None` would stream half a gigabyte in reply to a click.
+    ///
+    /// Type nodes are not in it. They are this app's own summary of the graph,
+    /// not nodes kglite holds, and there is nothing to export them as.
+    pub fn export_view(
+        &self,
+        format: crate::export::ExportFormat,
+    ) -> Result<crate::export::ExportedView, CoreError> {
+        let nodes: Vec<NodeIndex> = {
+            let view = self.read();
+            view.live_entries()
+                .filter_map(|(_, entry)| match entry {
+                    SlotEntry::Node { node_id, .. } => Some(NodeIndex::new(*node_id as usize)),
+                    SlotEntry::Type { .. } | SlotEntry::Tombstone => None,
+                })
+                .collect()
+        };
+        crate::export::export_nodes(&self.graph, &nodes, format, &self.source)
+    }
+
     /// The whole view, from slot zero, for a client that has just connected.
     ///
     /// **The session's truth, not an assumption the newcomer has to make.** A

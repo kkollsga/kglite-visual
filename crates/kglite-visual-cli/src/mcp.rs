@@ -9,11 +9,12 @@
 //!
 //! **The tool surface is small on purpose.** Data-heavy querying belongs to
 //! `kglite-mcp-server`, which owns the schema, the Cypher reference and the
-//! result formatting. These twelve tools do the one thing that server cannot:
-//! move a *shared* view. Ten of them are verbs about the screen; the two
+//! result formatting. These thirteen tools do the one thing that server cannot:
+//! act on a *shared* view. Ten of them are verbs about the screen; the two
 //! saved-query tools are the exception that proves the rule — they read a
 //! store that belongs to *this* window and to the human who filled it, which
-//! is not a fact any other server has.
+//! is not a fact any other server has — and `export_view` is the thirteenth,
+//! which takes what is on the screen out of the screen.
 //!
 //! **Two callers, one view, last writer wins** (D14, v1). The human and the
 //! agent are collaborators on one slot space, not two tenants of two. An
@@ -40,7 +41,7 @@ use kglite_visual_core::request::{
     CypherRequest, EdgeDirection, ExpandRequest, LayoutKernel, LayoutRequest, Request,
     SearchRequest, SlotRequest,
 };
-use kglite_visual_core::{geometry_caveat, Response};
+use kglite_visual_core::{geometry_caveat, ExportFormat, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo};
@@ -76,6 +77,10 @@ pub const MCP_PATH: &str = "/mcp";
 /// - *look at the saved queries first* — otherwise an agent writes its own
 ///   Cypher over a schema it has just met, while the person beside it has a
 ///   query for that exact question saved under a name they chose.
+/// - *export takes the view, not the graph* — otherwise `export_view` reads as
+///   "give me this graph as GraphML", an agent calls it on the entry screen,
+///   gets a refusal it does not understand, and concludes the tool is broken
+///   rather than that it had loaded nothing to export.
 const INSTRUCTIONS: &str = "\
 You are attached to a RUNNING kglite-visual window: an interactive graph view \
 that a human being is looking at right now, in their browser. These tools move \
@@ -117,6 +122,11 @@ The one thing here that is not about the screen: `list_saved_queries` and \
 before writing Cypher of your own — a saved query is what the person you are \
 working with already decided was worth keeping, and running one shows them a \
 result they will recognise.
+
+`export_view` writes a file of what is on screen. Its scope is the VIEW, not \
+the graph: it exports the instance nodes currently loaded and refuses when \
+nothing is, so load what you want first. Read the `notes` it returns before \
+telling the user what they have — they name two things the file cannot.
 
 Every response is bounded in core and says so. A truncated answer is reported \
 as truncated in `view_state.last_slice` and drawn into the banner of any \
@@ -339,6 +349,45 @@ struct LayoutArgs {
 struct SavedQueryArgs {
     /// The saved query's name, exactly as `list_saved_queries` reports it.
     pub name: String,
+}
+
+/// Which file `export_view` writes. A local mirror of core's [`ExportFormat`],
+/// for the reason [`DirectionArg`] is one.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum ExportFormatArg {
+    /// XML that Gephi, yEd and Cytoscape all open. The default — and the one
+    /// whose node names import as `n0`, `n1`, …; the answer says why.
+    #[default]
+    Graphml,
+    /// Gephi's own XML. Its node labels import as the titles.
+    Gexf,
+    /// `id,type,title`, one row per node.
+    Csv,
+    /// `source,target,type`, one row per edge — the other half of `csv`, and a
+    /// separate call because a zip would be a new dependency for two text
+    /// files.
+    CsvEdges,
+    /// D3's `{"nodes": [...], "links": [...]}`.
+    Json,
+}
+
+impl From<ExportFormatArg> for ExportFormat {
+    fn from(value: ExportFormatArg) -> Self {
+        match value {
+            ExportFormatArg::Graphml => ExportFormat::Graphml,
+            ExportFormatArg::Gexf => ExportFormat::Gexf,
+            ExportFormatArg::Csv => ExportFormat::Csv,
+            ExportFormatArg::CsvEdges => ExportFormat::CsvEdges,
+            ExportFormatArg::Json => ExportFormat::Json,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct ExportArgs {
+    #[serde(default)]
+    pub format: ExportFormatArg,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
@@ -760,6 +809,50 @@ impl ViewControl {
     }
 
     #[tool(
+        description = "Write the nodes currently in the shared view out as a graph file — \
+                       GraphML, GEXF, CSV or D3 JSON — and hand back the text so you can read \
+                       or save it. The SCOPE IS THE VIEW: exactly the instance nodes on the \
+                       human's screen, never the whole graph, so `expand` or `show_cypher` \
+                       what you want first and check `view_state` before calling. Two things \
+                       the file will not tell you and this answer does: the edge set can be a \
+                       superset of what the canvas drew, and kglite's GraphML carries no Gephi \
+                       `label` key. Reading `notes` in the reply is how you avoid explaining \
+                       either one to the user after they hit it."
+    )]
+    async fn export_view(
+        &self,
+        Parameters(args): Parameters<ExportArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let session = Arc::clone(&self.state.session);
+        let format: ExportFormat = args.format.into();
+        let exported = match tokio::task::spawn_blocking(move || session.export_view(format))
+            .await
+            .map_err(|err| McpError::internal_error(format!("export task failed: {err}"), None))?
+        {
+            Ok(exported) => exported,
+            Err(err) => return Ok(refused(&err)),
+        };
+
+        // The bytes as text, not as an attachment: every one of these formats
+        // is UTF-8 text, an MCP reply has no file channel, and base64 would be
+        // an agent's decode step for something it can already read. The counts
+        // come first so a caller that stops reading at the summary still learns
+        // the size of what follows.
+        let summary = serde_json::json!({
+            "format": exported.format.as_str(),
+            "filename": exported.filename,
+            "nodes": exported.nodes,
+            "bytes": exported.bytes.len(),
+            "notes": exported.notes(),
+        });
+        let text = String::from_utf8_lossy(&exported.bytes).into_owned();
+        Ok(CallToolResult::success(vec![
+            ContentBlock::text(summary.to_string()),
+            ContentBlock::text(text),
+        ]))
+    }
+
+    #[tool(
         description = "The Cypher this user has SAVED for this graph, plus the queries recently \
                        run from the panel. Read it before writing a query of your own: a saved \
                        query is what the person you are working with already decided was worth \
@@ -965,15 +1058,16 @@ mod tests {
     use super::*;
     use kglite_visual_core::{GEOMETRY_CAVEAT, GEOMETRY_STATIC_CAVEAT};
 
-    /// The tool surface, by name: D14's nine, E4's two saved-query tools, and
-    /// E5's `set_layout`.
+    /// The tool surface, by name: D14's nine, E4's two saved-query tools,
+    /// E5's `set_layout` and E8's `export_view`.
     ///
-    /// A list, not a count: "twelve tools" would still pass if `focus` were
+    /// A list, not a count: "thirteen tools" would still pass if `focus` were
     /// renamed to `zoom`, and the name is the API — an agent's prompt refers to
     /// it and a rename breaks every conversation that mentions one.
-    const EXPECTED: [&str; 12] = [
+    const EXPECTED: [&str; 13] = [
         "collapse",
         "expand",
+        "export_view",
         "focus",
         "highlight",
         "list_saved_queries",
@@ -1026,13 +1120,16 @@ mod tests {
     }
 
     #[test]
-    fn the_instructions_say_the_four_things_an_agent_gets_wrong_without_them() {
+    fn the_instructions_say_the_things_an_agent_gets_wrong_without_them() {
         // Each substring is a specific failure this string exists to prevent —
         // see the doc comment on INSTRUCTIONS. Asserted here so a later edit
         // that "tightens the wording" cannot quietly drop one.
         for phrase in [
             "human being is looking at",
             "Last writer wins",
+            // E8: an agent that reads `export_view` as "dump this graph" calls
+            // it on the entry screen and reports the refusal as a broken tool.
+            "scope is the VIEW, not the graph",
             // Conditional since G3, so the phrase asserted is the condition
             // rather than the old absolute claim: an agent that reads only
             // "you cannot know geometry" would never reach for `set_layout`.

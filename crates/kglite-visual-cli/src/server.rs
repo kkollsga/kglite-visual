@@ -219,6 +219,12 @@ fn router(state: AppState) -> Router {
         // whose query string held a Cypher statement would be logged, cached
         // and re-run by anything in the path.
         .route("/api/render", post(api::render))
+        // …and the second, for the same reason and by the opposite method
+        // (plan E8). A download is what `<a href download>` does, an anchor
+        // issues a GET, and this route reads the view and mutates nothing — so
+        // the POST convention above, which exists for bodies and for
+        // non-idempotence, argues for GET here rather than against it.
+        .route("/api/export", get(api::export))
         // `any` rather than `get`: a WebSocket upgrade is a GET, but routing it
         // through `any` keeps the 405 for a mistaken POST out of the upgrade
         // path, where it would surface as an opaque handshake failure.

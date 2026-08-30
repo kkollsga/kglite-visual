@@ -11,11 +11,13 @@
 //! which reaches [`run_from`] through PyO3. Both get the same parser, the same
 //! stdout line and the same exit codes, because there is one of each.
 //!
-//! **Three modes, one stdout rule.** `kglite-visual <file>` serves;
+//! **Four modes, one stdout rule.** `kglite-visual <file>` serves;
 //! `kglite-visual render <file> …` draws one image and exits (plan D13);
-//! `kglite-visual queries …` owns the saved-query store and touches no graph.
-//! The first two print exactly one JSON line — the launch contract, or the
-//! render summary. `queries list` prints one JSON object per store file,
+//! `kglite-visual export <file> …` writes it out in somebody else's format
+//! (plan E8); `kglite-visual queries …` owns the saved-query store and touches
+//! no graph. The first three print exactly one JSON line — the launch
+//! contract, the render summary, or the export summary. `queries list` prints
+//! one JSON object per store file,
 //! because a listing is the one thing here with more than one answer, and JSON
 //! Lines says so without inventing a second format. Everything else is stderr.
 
@@ -28,6 +30,7 @@ use kglite_visual_core::{
     load_graph_with, GraphSource, LoadLimits, QueryConfig, Session, QUERY_THREAD_STACK_BYTES,
 };
 
+use crate::export_cmd::{self, ExportArgs};
 use crate::render_cmd::{self, RenderArgs};
 use crate::{assets, queries, server};
 
@@ -88,6 +91,9 @@ struct Cli {
 enum Command {
     /// Draw one image of this graph and exit — no server, no browser.
     Render(RenderArgs),
+    /// Write this graph out as GraphML, GEXF, CSV or D3 JSON — no server, no
+    /// browser.
+    Export(ExportArgs),
     /// Inspect and collect the saved-query store — no server, no graph.
     Queries {
         #[command(subcommand)]
@@ -152,6 +158,7 @@ where
     }
     let outcome = match &cli.command {
         Some(Command::Render(args)) => render_cmd::run(args),
+        Some(Command::Export(args)) => export_cmd::run(args),
         Some(Command::Queries { action }) => run_queries(action),
         None => run(&cli),
     };
@@ -414,6 +421,46 @@ mod tests {
         // `queries` with no action is a usage error, not a silent default:
         // guessing between list, rm and prune is guessing about a delete.
         assert!(Cli::try_parse_from(["kglite-visual", "queries"]).is_err());
+
+        let serve = Cli::parse_from(["kglite-visual", "g.kgl"]);
+        assert!(serve.command.is_none());
+        assert_eq!(serve.file, Some(PathBuf::from("g.kgl")));
+    }
+
+    #[test]
+    fn the_export_subcommand_defaults_to_a_whole_graph_graphml_and_leaves_serving_alone() {
+        // The third chance to break `kglite-visual g.kgl`, asserted with the
+        // same pairing the render and queries subcommands use.
+        let Some(Command::Export(args)) =
+            Cli::parse_from(["kglite-visual", "export", "g.kgl"]).command
+        else {
+            panic!("the subcommand did not dispatch");
+        };
+        assert_eq!(args.file, PathBuf::from("g.kgl"));
+        assert_eq!(args.format, crate::export_cmd::FormatArg::Graphml);
+        assert_eq!(
+            args.cypher, None,
+            "no --cypher is the whole-graph dump, which is this command's default and the \
+             server's impossibility"
+        );
+
+        let bounded = Cli::parse_from([
+            "kglite-visual",
+            "export",
+            "g.kgl",
+            "--format",
+            "csv-edges",
+            "--cypher",
+            "MATCH (n) RETURN n",
+            "-o",
+            "out.csv",
+        ]);
+        let Some(Command::Export(args)) = bounded.command else {
+            panic!("the subcommand did not dispatch");
+        };
+        assert_eq!(args.format, crate::export_cmd::FormatArg::CsvEdges);
+        assert_eq!(args.cypher.as_deref(), Some("MATCH (n) RETURN n"));
+        assert_eq!(args.out, Some(PathBuf::from("out.csv")));
 
         let serve = Cli::parse_from(["kglite-visual", "g.kgl"]);
         assert!(serve.command.is_none());

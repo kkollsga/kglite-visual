@@ -130,6 +130,14 @@ export type DebugState = {
    */
   legendEntries: number
   /**
+   * Instance nodes the export card is offering to write (plan E8).
+   *
+   * Deliberately not `pointCount`: a filtered-out node is still loaded and
+   * still exported, so a card that counted what is *drawn* would promise a
+   * different file than the server writes.
+   */
+  exportNodes: number
+  /**
    * Slots the client-side filter is hiding (plan E7).
    *
    * Beside `pointCount`, which already excludes them, because the two together
@@ -185,6 +193,7 @@ export const debugState: DebugState = {
   queryRows: 0,
   searchHits: 0,
   legendEntries: 0,
+  exportNodes: 0,
   filteredOut: 0,
   appearanceCandidates: 0,
   approximateStats: 0,

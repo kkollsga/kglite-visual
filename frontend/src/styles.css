@@ -550,3 +550,60 @@
   color: #8b949e;
   margin-top: 2px;
 }
+
+/* The export card (plan E8). Directly above the legend, in the same corner
+   and the same voice: both are about THIS VIEW rather than about the app, and
+   a sidebar section would have put "what leaves with the picture" next to
+   controls that change the picture. `bottom` is not a fixed offset — the
+   legend grows and shrinks with the encoding — so the two stack in a column
+   the legend anchors. */
+.kglv-export {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  max-width: 34ch;
+  border-radius: 6px;
+  background: rgb(13 17 23 / 85%);
+  border: 1px solid rgb(139 148 158 / 30%);
+  font: 12px/1.5 ui-sans-serif, system-ui, sans-serif;
+  color: #c9d1d9;
+  transform: translateY(-100%);
+  margin-bottom: 6px;
+}
+
+.kglv-export-body {
+  padding: 0 10px 8px;
+}
+
+.kglv-export-link {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  color: #58a6ff;
+  text-decoration: none;
+}
+
+.kglv-export-link:hover {
+  text-decoration: underline;
+}
+
+/* An `<a>` has no disabled attribute, so the refusal is a class plus a removed
+   href — which also stops a middle-click reaching a URL the server would
+   answer with an error where the user expected a file. */
+.kglv-export-disabled {
+  color: #6e7681;
+  pointer-events: none;
+}
+
+.kglv-export-name {
+  flex: 0 0 auto;
+  min-width: 9ch;
+}
+
+.kglv-export-hint {
+  color: #8b949e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

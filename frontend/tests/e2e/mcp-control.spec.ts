@@ -62,6 +62,7 @@ test('MCP protocol: initialize, list_tools, call_tool over streamable HTTP', asy
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       'collapse',
       'expand',
+      'export_view',
       'focus',
       'highlight',
       'list_saved_queries',
