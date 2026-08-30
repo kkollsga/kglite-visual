@@ -23,6 +23,12 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
   each node's `id` field beside its index, the query names nodes by the field,
   and a node with no `id` field is reported rather than silently missing.
 
+- **A generated table's caveat stayed on screen under someone else's rows.**
+  "12 of 18 properties, the ones most FieldReserves nodes carry" describes one
+  generated table; it was left standing over every query run afterwards, so a
+  `PROFILE` of `Field` was rendered under a note about `FieldReserves`. Running
+  your own query now clears it.
+
 - **A query that drew a graph left the previous query's row count on screen.**
   "Show in graph" answers with a slice rather than a table, so the results card
   kept describing whatever ran before it — a path run after a table read as

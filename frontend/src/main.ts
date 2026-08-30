@@ -211,6 +211,13 @@ const schema = new SchemaCache()
 const panels = new Panels(root, {
   runQuery: (query, asGraph) => {
     if (query.trim() === '') return
+    // The note describes a GENERATED table — which columns were capped, which
+    // nodes could not be named — so it belongs to that query and to no other.
+    // Cleared when the user runs their own, because a note left standing under
+    // someone else's rows is a claim about a table that is not there: a
+    // `PROFILE` of Fields was rendered under "12 of 18 properties, the ones
+    // most FieldReserves nodes carry" before this line existed.
+    panels.showTableNote(null)
     send({ type: 'cypher', query, params: {}, limit: null, as_graph: asGraph })
     // The one place a user-typed query is recorded. The app's own queries —
     // appearance values, "load into view" — go through `send` directly and are

@@ -108,6 +108,15 @@ test('the type panel builds a table of what is on screen, and its columns sort',
     const titles = await column(page, 'title')
     expect([...titles].sort((a, b) => a.localeCompare(b))).toEqual(titles)
 
+    // NOT asserted here: that a user-typed query clears the generated table's
+    // note. It is a real fix (`main.ts`, `runQuery`) and this fixture cannot
+    // exercise it — the note only appears when a type has more properties than
+    // the twelve-column cap, and the fixture's richest type, Person, has
+    // eleven. An assertion here would pass against the bug as readily as
+    // against the fix, which is not a check. The evidence is the sodir
+    // portfolio shot that showed a Field PROFILE under "12 of 18 properties,
+    // the ones most FieldReserves nodes carry".
+
     expect(consoleErrors, `browser console errors: ${consoleErrors.join(' | ')}`).toEqual([])
   } finally {
     server?.process.kill()
