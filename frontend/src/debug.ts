@@ -40,15 +40,32 @@ export type DebugState = {
   protocolVersion: number
   tier: string | null
   /**
-   * `force` (the user default) or `deterministic` (`?deterministic=1`).
+   * `force` (the user default), `deterministic` (`?deterministic=1`), or
+   * `static` (a server-computed layout is in force — plan E5).
    *
-   * Here because `positionsHash` is only an assertion in the second one: with
-   * the simulation running, the positions on the GPU are a product of vendor
+   * Here because `positionsHash` is only an assertion when the simulation is
+   * off: with it running, the positions on the GPU are a product of vendor
    * float behaviour and frame cadence, and a hash of them would be asserting
    * on the scheduler. A test that reads a hash without checking this field is
    * asserting on nothing.
+   *
+   * `deterministic` never changes once set — it is the mode the e2e suite
+   * asserts by name, and a broadcast layout arriving in it moves the points
+   * without moving the mode.
    */
-  layoutMode: 'force' | 'deterministic'
+  layoutMode: 'force' | 'deterministic' | 'static'
+  /**
+   * Which kernel the shared view's arrangement came from: `simulation` (the
+   * viewer's own GPU, the default), or `radial` / `islands` / `force` for one
+   * the server computed.
+   *
+   * Separate from `layoutMode` because they answer different questions — *how*
+   * the layout is driven, and *which* layout — and an agent switching kernels
+   * needs to read back the second. It is also the field that makes a switch
+   * observable at all: two force layouts and two island packings differ in
+   * their coordinates, which is not something a test can assert on.
+   */
+  layoutKernel: string
   /** Points that currently draw something — tombstones excluded. */
   pointCount: number
   linkCount: number
@@ -114,6 +131,7 @@ export const debugState: DebugState = {
   protocolVersion: 0,
   tier: null,
   layoutMode: 'force',
+  layoutKernel: 'simulation',
   pointCount: 0,
   linkCount: 0,
   slotCount: 0,

@@ -18,6 +18,7 @@ import { statLabel } from './appearance'
 import type { Diagnostic } from './generated/Diagnostic'
 import type { QueryEditor, SchemaSource } from './editor/contract'
 import type { EdgeDirection } from './generated/EdgeDirection'
+import type { LayoutKernel } from './generated/LayoutKernel'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { NodeDetail } from './generated/NodeDetail'
 import type { PropertyStat } from './generated/PropertyStat'
@@ -41,6 +42,11 @@ export type PanelHandlers = {
   focusSlot(slot: number): void
   setColorBy(property: string | null): void
   setSizeBy(property: string | null): void
+  /**
+   * Ask the server for an arrangement — or, with `simulation`, hand the
+   * layout back to the viewer's GPU (plan E5).
+   */
+  setLayoutKernel(kernel: LayoutKernel): void
   /** Keep this query under this name. The store's ceilings answer as refusals. */
   saveQuery(name: string, query: string): void
   /** Forget a saved query. */
@@ -65,6 +71,23 @@ function count(value: number): string {
   return value.toLocaleString('en-US')
 }
 
+/**
+ * The layout picker's entries, in the order a user reads them.
+ *
+ * `simulation` is first and is the one the session starts in, so the list
+ * reads as "the live one, then the ones that hold still". `geo` is deliberately
+ * absent: it exists in the wire vocabulary and the server refuses it until G4,
+ * and an entry that always answers with an error is worse than no entry —
+ * offering it would be this panel promising something the build cannot do.
+ */
+const LAYOUT_CHOICES: readonly (readonly [LayoutKernel, string])[] = [
+  ['simulation', 'live force (GPU)'],
+  ['auto', 'auto — from the structure'],
+  ['radial', 'hop rings'],
+  ['islands', 'packed islands'],
+  ['force', 'force, held still'],
+]
+
 export class Panels {
   readonly root: HTMLDivElement
   private readonly queryInput: HTMLTextAreaElement
@@ -87,6 +110,10 @@ export class Panels {
   private readonly colorBy: HTMLSelectElement
   private readonly sizeBy: HTMLSelectElement
   private readonly appearanceNote: HTMLDivElement
+  private readonly layoutKernel: HTMLSelectElement
+  /** The picker's whole row, so `?deterministic=1` can remove it. */
+  private readonly layoutRow: HTMLElement
+  private readonly layoutNote: HTMLDivElement
   private readonly savedList: HTMLSelectElement
   private readonly savedNote: HTMLDivElement
   private readonly historyList: HTMLDivElement
@@ -157,6 +184,27 @@ export class Panels {
     this.appearanceNote = element('div', 'kglv-hint')
     this.appearanceNote.setAttribute('data-testid', 'appearance-note')
     appearance.appendChild(this.appearanceNote)
+
+    // ── layout ────────────────────────────────────────────────────────────
+    // In the appearance card rather than a card of its own: colour, size and
+    // arrangement are the three channels that change how the same graph looks
+    // without changing what is in it, and a fourth heading for one select is a
+    // sidebar that scrolls.
+    this.layoutKernel = element('select', 'kglv-select')
+    this.layoutKernel.setAttribute('data-testid', 'layout-kernel')
+    for (const [value, label] of LAYOUT_CHOICES) {
+      const option = element('option', undefined, label)
+      option.value = value
+      this.layoutKernel.appendChild(option)
+    }
+    this.layoutKernel.addEventListener('change', () =>
+      this.handlers.setLayoutKernel(this.layoutKernel.value as LayoutKernel),
+    )
+    this.layoutRow = this.labelled('layout', this.layoutKernel)
+    this.layoutNote = element('div', 'kglv-hint')
+    this.layoutNote.setAttribute('data-testid', 'layout-note')
+    appearance.append(this.layoutRow, this.layoutNote)
+
     this.root.appendChild(this.section('Appearance', appearance))
 
     // ── cypher ────────────────────────────────────────────────────────────
@@ -690,6 +738,52 @@ export class Panels {
     return (this.lastHits?.hits ?? [])
       .map((hit) => hit.slot)
       .filter((slot): slot is number => slot !== null)
+  }
+
+  /**
+   * Take the picker off the page.
+   *
+   * `?deterministic=1` is the fixture mode: the positions are the server's
+   * lattice and `positionsHash` is asserted against them, so a control that
+   * replaced them with a kernel's output would be a button for breaking the
+   * test suite. Removed rather than disabled — a greyed-out control invites
+   * the question "why can I not use this", and the answer is not about this
+   * screen.
+   */
+  hideLayoutPicker(): void {
+    this.layoutRow.remove()
+    this.layoutNote.remove()
+  }
+
+  /**
+   * Show the arrangement the shared view is actually in.
+   *
+   * Driven from the server's answer, never from the click that asked for it:
+   * the kernel that ran can differ from the one requested (`islands` over a
+   * graph with no communities falls back), another tab or an agent can change
+   * it, and a picker showing what the user *asked* for is a UI lying about the
+   * picture beside it — the same rule `setAppearanceSelection` follows.
+   */
+  showLayoutKernel(requested: LayoutKernel, chosen: LayoutKernel, placed: number): void {
+    this.layoutKernel.value = chosen
+    this.layoutNote.className = requested === chosen ? 'kglv-hint' : 'kglv-hint kglv-warn'
+    if (chosen === 'simulation') {
+      this.layoutNote.textContent = 'the layout runs live on this machine — drag a node to move it'
+      return
+    }
+    const fellBack =
+      requested === chosen || requested === 'auto'
+        ? ''
+        : ` (${requested} had nothing to work with here)`
+    this.layoutNote.textContent =
+      `${count(placed)} nodes placed by the server's ${chosen} layout${fellBack}` +
+      ' — held still, so dragging is off'
+  }
+
+  /** A layout request the server refused, in its own words. */
+  showLayoutError(message: string): void {
+    this.layoutNote.className = 'kglv-hint kglv-error'
+    this.layoutNote.textContent = message
   }
 
   /**

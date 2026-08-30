@@ -30,6 +30,7 @@ import type { Appearance as AppearanceCommand } from './generated/Appearance'
 import type { BoundInfo } from './generated/BoundInfo'
 import type { Focus } from './generated/Focus'
 import type { Highlight } from './generated/Highlight'
+import type { LayoutKernel } from './generated/LayoutKernel'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
 import type { NodeDetail } from './generated/NodeDetail'
@@ -69,14 +70,29 @@ debugState.deviceFeatures = probeDeviceFeatures()
 /**
  * `force` unless the page was asked for `?deterministic=1`.
  *
- * Read once, at startup: the axes decide how the renderer is *constructed*, so
- * a mid-session change to `simulation` or `drag` would mean tearing the
- * renderer down. `__kglv` reports the mode name because `positionsHash` only
- * means something in the deterministic one.
+ * The mode the page *starts* in, and — for `deterministic` — the mode it stays
+ * in forever. `force` is the one a user can leave: picking a server-computed
+ * kernel moves the live mode to `static` and back (plan E5), which is a runtime
+ * change to two axes rather than a reconstruction, because cosmos.gl takes
+ * `enableSimulation` and `enableDrag` through `setConfigPartial`.
+ *
+ * `__kglv` reports the live mode because `positionsHash` only means something
+ * where nothing is moving the points.
  */
-const layoutMode = layoutModeFromSearch(window.location.search)
-const layoutAxes = axesFor(layoutMode)
-debugState.layoutMode = layoutMode
+const startupMode = layoutModeFromSearch(window.location.search)
+const layoutAxes = axesFor(startupMode)
+/**
+ * The kernel the SHARED view is in, as the server last reported it.
+ *
+ * Never set from a click: the picker asks, the server answers, and the answer
+ * is what this holds. A kernel with nothing to work with falls back, and an
+ * agent or a second tab can change it without this one asking.
+ */
+let layoutKernel: LayoutKernel = 'simulation'
+/** The kernel a request is in flight for, so a refusal lands on the picker. */
+let pendingLayoutKernel: LayoutKernel | null = null
+debugState.layoutMode = startupMode
+debugState.layoutKernel = layoutKernel
 publishDebugState()
 publishBenchHook()
 
@@ -117,6 +133,19 @@ let lastPreview: ExpansionPreview | null = null
 let lastDetail: NodeDetail | null = null
 /** The banner the last bounded response produced, or null when nothing was clipped. */
 let truncationBanner: string | null = null
+/**
+ * Whether the next settle should reframe the camera.
+ *
+ * **A fit belongs to a changed node SET, not to every settle.** The
+ * `onSimulationEnd` handler used to fit unconditionally, which was right while
+ * a settle only ever followed a mount or an expansion. Restarting the
+ * simulation after a static layout produces one too — and a fit there is a
+ * camera that jumps for no reason the user can connect to what they clicked,
+ * which is exactly the "unexplained jump" this flag exists to remove. Set by
+ * the mount and by every slice; cleared by the settle that consumes it and by
+ * the switch back to the simulation.
+ */
+let fitOnSettle = true
 
 /** Appearance state: a compiled getter plus the values it reads. */
 let colorByStat: PropertyStat | null = null
@@ -180,6 +209,7 @@ const panels = new Panels(root, {
   },
   setColorBy: (property) => applyColorBy(property),
   setSizeBy: (property) => applySizeBy(property),
+  setLayoutKernel: (kernel) => requestLayout(kernel),
   saveQuery: (name, query) => void refreshQueries(store.saveQuery(name, query)),
   deleteQuery: (name) => void refreshQueries(store.deleteQuery(name)),
   // Parse-only, over plain HTTP, on the editor's idle timer. It never runs the
@@ -208,6 +238,11 @@ async function refreshQueries(mutation?: Promise<unknown>): Promise<void> {
 }
 
 void refreshQueries()
+
+// The fixture mode has no picker: its positions are the server's lattice and
+// `positionsHash` is asserted against them, so a control that replaced them
+// would be a button for breaking the suite.
+if (startupMode === 'deterministic') panels.hideLayoutPicker()
 
 /**
  * The colour channel, from either driver.
@@ -283,18 +318,72 @@ function applyHighlight(command: Highlight): void {
 }
 
 /**
+ * Ask for an arrangement. The answer arrives as a broadcast, like every other
+ * change to the shared view.
+ *
+ * A single selected slot rides along as the radial seed: "centre the rings on
+ * the thing I have selected" is what a user picking hop rings means, and the
+ * server ignores the hint for every other kernel.
+ */
+function requestLayout(kernel: LayoutKernel): void {
+  const selected = interaction.selectedSlots()
+  pendingLayoutKernel = kernel
+  send({
+    type: 'layout',
+    kernel,
+    seed_slot: selected.length === 1 ? (selected[0] as number) : null,
+  })
+}
+
+/**
  * Take a server-computed arrangement, whoever asked for it (plan E5).
  *
- * **`'server'` authority for this one upload, and only this one.** The
- * standing authority in force mode is `gpu`, which is right for a slice — the
- * server's lattice is a seed and a seed for a slot already on screen is stale.
- * It is exactly wrong here: every slot the layout covers is already drawn, so
- * the merge would discard the whole answer and the picture would not move.
- * That is pre-mortem #1, and it is why the axis is resolved per upload rather
- * than switched.
+ * **`'server'` authority for this one upload.** The standing authority in force
+ * mode is `gpu`, which is right for a slice — the server's lattice is a seed,
+ * and a seed for a slot already on screen is stale. It is exactly wrong here:
+ * every slot the layout covers is already drawn, so the merge would discard the
+ * whole answer and the picture would not move. That is pre-mortem #1. The mode
+ * switch below also sets that authority, and the e2e shows either alone is
+ * enough (see `Surface.positionsFor`); the argument stays because it is the
+ * half that holds whatever order the two land in.
+ *
+ * **The simulation is stopped before the positions land, and restarted after
+ * nothing else is pending.** `Surface.setAxes` owns that ordering; what is
+ * owned here is not fitting the camera on the settle that a restart produces —
+ * see {@link fitOnSettle}.
  */
 function applyLayout(message: LayoutMessage): void {
-  if (message.meta.kernel_chosen === 'simulation') return
+  pendingLayoutKernel = null
+  const chosen = message.meta.kernel_chosen
+  const previous = layoutKernel
+  layoutKernel = chosen
+  debugState.layoutKernel = chosen
+  panels.showLayoutKernel(message.meta.kernel_requested, chosen, message.meta.live_count)
+  if (surface === null) return
+
+  if (chosen === 'simulation') {
+    if (previous === 'simulation') return
+    // Back to the GPU. The static layout on screen is the seed the simulation
+    // starts from, so nothing is uploaded — and the settle this produces must
+    // not move the camera, because the user asked for a different layout, not
+    // for a different view of it.
+    fitOnSettle = false
+    if (startupMode !== 'deterministic') {
+      debugState.layoutMode = 'force'
+      surface.setAxes(axesFor('force'))
+    }
+    positionLabels(surface)
+    syncCounts()
+    return
+  }
+
+  // `deterministic` keeps its name: it is the mode the e2e suite asserts by,
+  // its axes are already what a static layout wants, and a broadcast that
+  // arrived from an agent must move the points without moving the mode.
+  if (startupMode !== 'deterministic') {
+    debugState.layoutMode = 'static'
+    surface.setAxes(axesFor('static'))
+  }
   view.applyLayout(message.points)
   redraw('server')
 }
@@ -376,11 +465,27 @@ async function handle(completed: Completed): Promise<void> {
         panels.clearSelection()
       }
       redraw()
-      // The node set changed, so the layout has new work to do. Reheating on a
-      // slice and nowhere else is the rule: an appearance change that
-      // re-energised the simulation would make the graph jump under the
-      // user's cursor for no reason they could name.
-      surface?.reheat()
+      // The node set changed, so the layout has new work to do — and *which*
+      // work depends on who owns the layout.
+      //
+      // Under the simulation it is a reheat, on a slice and nowhere else: an
+      // appearance change that re-energised the layout would make the graph
+      // jump under the user's cursor for no reason they could name.
+      //
+      // Under a static kernel there is nothing to reheat, and merging is not
+      // an option either: the new slots arrived on the server's *lattice*, so
+      // an expansion would drop a spiral of dots into the middle of a hop ring
+      // and the picture would stop being the arrangement the user chose. So
+      // the whole layout is re-requested. That is also the compaction answer —
+      // a remap renumbers every slot, which makes the cached arrangement name
+      // the wrong nodes — and a compaction always arrives on a slice, so one
+      // path covers both.
+      if (layoutKernel === 'simulation') {
+        fitOnSettle = true
+        surface?.reheat()
+      } else {
+        requestLayout(layoutKernel)
+      }
       break
     }
     case 'preview':
@@ -448,6 +553,19 @@ async function handle(completed: Completed): Promise<void> {
       // A query failure is the panel's business, not the whole app's: the graph
       // on screen is still valid and blanking it would lose the user's place.
       if (appearanceChannel !== null) appearanceChannel = null
+      // …and a *layout* refusal belongs under the layout picker, not in the
+      // Cypher card. The wire carries no request id, so the in-flight kernel is
+      // the correlation — the same trick `appearanceChannel` uses above, and it
+      // is enough because a refusal ends the one request that was outstanding.
+      if (pendingLayoutKernel !== null) {
+        pendingLayoutKernel = null
+        // Put the picker back on the kernel that is actually in force first —
+        // a select left showing a layout the server refused is the same lie
+        // `showLayoutKernel` exists to prevent — and then say why.
+        panels.showLayoutKernel(layoutKernel, layoutKernel, view.liveCount)
+        panels.showLayoutError(completed.value)
+        break
+      }
       panels.showQueryError(completed.value)
       break
   }
@@ -655,7 +773,8 @@ function attachHandlers(current: Surface): void {
       // already viewport-independent up to the simulation and nothing is left
       // to protect — `Surface.upload` reads the same axis to decide whether to
       // apply the data-derived zoom instead.
-      current.graph.fitView(0)
+      if (fitOnSettle) current.graph.fitView(0)
+      fitOnSettle = false
       positionLabels(current)
       syncCounts()
     },

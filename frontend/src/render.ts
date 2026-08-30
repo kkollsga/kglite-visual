@@ -115,9 +115,27 @@ const DETERMINISTIC_AXES: LayoutAxes = {
   seedAuthority: 'server',
 }
 
+/**
+ * A layout the server computed: nothing on the client may move it.
+ *
+ * Identical to {@link DETERMINISTIC_AXES} in its values and different in its
+ * reason, which is why it is a second constant rather than a reuse. D2's mode
+ * holds the positions still so a *hash* means something; this one holds them
+ * still because a hop ring that a simulation is free to re-heat is a hop ring
+ * for about two seconds. The two would diverge the moment either gained a
+ * fourth axis, and one shared constant is where that divergence would hide.
+ */
+const STATIC_AXES: LayoutAxes = {
+  simulation: false,
+  drag: false,
+  seedAuthority: 'server',
+}
+
 /** The axes a named mode stands for. */
 export function axesFor(mode: LayoutMode): LayoutAxes {
-  return mode === 'deterministic' ? { ...DETERMINISTIC_AXES } : { ...FORCE_AXES }
+  if (mode === 'deterministic') return { ...DETERMINISTIC_AXES }
+  if (mode === 'static') return { ...STATIC_AXES }
+  return { ...FORCE_AXES }
 }
 
 /**
@@ -230,8 +248,52 @@ export type Appearance = {
 export class Surface {
   constructor(
     readonly graph: Graph,
-    readonly axes: LayoutAxes,
+    private currentAxes: LayoutAxes,
   ) {}
+
+  /** The axes in force right now. */
+  get axes(): Readonly<LayoutAxes> {
+    return this.currentAxes
+  }
+
+  /**
+   * Move to a new combination of axes, in the order cosmos.gl requires.
+   *
+   * **The order is the whole method, and it is asymmetric because cosmos.gl
+   * is.** Turning `enableSimulation` from false to true does not just switch a
+   * flag: it rebuilds the simulation modules, reheats at alpha 1 and kills any
+   * in-flight position transition. So —
+   *
+   * - **Going static**, the config goes first and the caller's upload second:
+   *   the simulation has to be gone before the server's positions land, or the
+   *   next tick moves them and the arrangement the user asked for is visibly
+   *   wrong within a frame.
+   * - **Going live**, the config goes last and nothing is uploaded after it:
+   *   the reheat is the point (the static layout becomes the simulation's
+   *   seed), and an upload afterwards would be a second start from a picture
+   *   the GPU has already begun pulling apart.
+   *
+   * The force parameters are re-applied on the way back in rather than assumed
+   * to have survived the round trip, because they were set at construction and
+   * the modules reading them have been destroyed since.
+   */
+  setAxes(axes: LayoutAxes): void {
+    const wasRunning = this.currentAxes.simulation
+    this.currentAxes = { ...axes }
+    if (!axes.simulation) {
+      this.graph.setConfigPartial({ enableSimulation: false, enableDrag: axes.drag })
+      return
+    }
+    if (!wasRunning) {
+      this.graph.setConfigPartial({
+        enableSimulation: true,
+        enableDrag: axes.drag,
+        ...FORCE_CONFIG,
+      })
+      return
+    }
+    this.graph.setConfigPartial({ enableDrag: axes.drag })
+  }
 
   /**
    * Push the whole view to the GPU.
@@ -294,14 +356,20 @@ export class Surface {
    * The positions to upload, resolved by {@link LayoutAxes.seedAuthority} —
    * unless this one upload says otherwise.
    *
-   * **Per-upload, and that is the whole mechanic** (plan E5, pre-mortem #1). A
+   * **The authority is what pre-mortem #1 is about** (plan E5). A
    * server-computed layout arriving while the force simulation is live has to
-   * win *for that upload*: under the mode's standing `gpu` authority it would
-   * be merged away point by point, because every slot on screen already has a
-   * GPU position — so switching kernels would work in deterministic mode and do
-   * visibly nothing in the mode users run. An axis-level flip is not the answer
-   * either: the very next expansion's slice must go back to seeding only the
-   * new slots, or the settled picture rebuilds itself on every click.
+   * win: under `gpu` it is merged away point by point, because every slot on
+   * screen already has a GPU position — so a kernel switch works in
+   * deterministic mode and does visibly nothing in the mode users run.
+   *
+   * **Two things provide it, and the e2e proves each is sufficient alone**
+   * (measured 2026-08-30, `layout.spec.ts` driven three ways): the mode switch
+   * to {@link STATIC_AXES}, which lands before the upload, and this argument.
+   * With `gpu` standing authority and no argument the spec fails at "the
+   * picture moved"; with either one it passes. The argument is kept because it
+   * is the half that does not depend on ordering — a future caller that applies
+   * a layout without having switched modes first still gets the answer it
+   * asked for, rather than a silent no-op nobody would think to test for.
    */
   private positionsFor(view: SlotView, authority?: SeedAuthority): Float32Array {
     const resolved = authority ?? this.axes.seedAuthority
