@@ -186,8 +186,9 @@ is P10 + the deferred client-position capture, not this.
 
 **What the image is not:** content-identical to the app,
 geometry-different. The browser's layout runs on the user's GPU; this is
-one of three structure-chosen kernels in core — hop rings, packed islands,
-or a seeded Fruchterman-Reingold when the input has no shape to find. Same
+one of four structure-chosen kernels in core — hop rings, packed islands,
+a geographic map when the nodes carry coordinates, or a seeded
+Fruchterman-Reingold when the input has no shape to find. Same
 nodes, same links, same truncation, a different arrangement — never claim
 "your screen shows X at the top left". That holds even when the live view is
 under a static kernel (`/api/layout`): this pass folds fans and separates
@@ -230,7 +231,9 @@ naming a screen position you cannot see. `set_layout` with a static kernel
 broadcasts it; the viewer's simulation stops, dragging is disabled, and
 relative position — "the ring around X", "the island on the left" — becomes
 safe to describe. Their camera is still theirs, so a screen coordinate
-never is. Read the `geometry_caveat` that comes back rather than
+never is. One carve-out: under the `geo` kernel the arrangement IS
+geographic, so "this node is in the Barents Sea" is a claim the picture
+supports — "top left of your screen" still is not. Read the `geometry_caveat` that comes back rather than
 remembering which mode you are in; core owns both wordings.
 
 **`render` is a separate pass either way.** It has its own fold and its own

@@ -18,9 +18,10 @@ localhost CLI and a Python wheel.
 > Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend that
 > renders the type-level meta-graph through cosmos.gl — GPU force layout by
 > default, a **server-computed static layout** the user or an agent can
-> switch to (hop rings, packed islands, or a held-still force pass — the
-> simulation stops, dragging goes off, and the server then knows where the
-> points are), and the D2 deterministic mode behind an explicit
+> switch to (hop rings, packed islands, a held-still force pass, or a
+> geographic map that puts a node where it actually is — the simulation
+> stops, dragging goes off, and the server then knows where the points
+> are), and the D2 deterministic mode behind an explicit
 > `?deterministic=1` switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v4)
 > with an exact framing baseline, an axum server on localhost with the
 > frontend embedded, **a Python wheel whose `show()` runs that same server
@@ -118,9 +119,10 @@ summary that belongs in standing rules, because it decides what code is
 allowed to go where:
 
 - **`kglite-visual-core`** — embeds the `kglite` crate. Sessions, Cypher,
-  snapshots, the type-level meta-graph, bounded neighborhood expansion, three
+  snapshots, the type-level meta-graph, bounded neighborhood expansion, four
   structure-chosen layout kernels (hop-ring radial, packed islands, seeded
-  force) plus a final separation pass, and a **transport-agnostic binary
+  force, and an equirectangular geographic map for nodes with coordinates)
+  plus a final separation pass, and a **transport-agnostic binary
   protocol** (typed-array buffers for topology and positions, JSON for
   metadata). *Transport-agnostic is a rule, not a description:* nothing in
   this crate may know it is talking to a WebSocket. It has three consumers
