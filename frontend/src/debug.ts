@@ -110,6 +110,14 @@ export type DebugState = {
   queryRows: number
   /** Hits in the search panel. */
   searchHits: number
+  /**
+   * Rows the legend is drawing (plan E11).
+   *
+   * The assertion that the legend tracks the *active* encoding rather than
+   * being decorative: with a categorical colour-by chosen it is the value count
+   * plus whatever else the card lists, and it moves when the encoding does.
+   */
+  legendEntries: number
   /** Property-stat rows offered as appearance channels, and how many are approximate. */
   appearanceCandidates: number
   approximateStats: number
@@ -155,6 +163,7 @@ export const debugState: DebugState = {
   previewRows: 0,
   queryRows: 0,
   searchHits: 0,
+  legendEntries: 0,
   appearanceCandidates: 0,
   approximateStats: 0,
   error: null,

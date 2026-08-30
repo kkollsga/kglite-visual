@@ -194,6 +194,28 @@ export function compileCategoricalColor(
 }
 
 /**
+ * The value→colour pairs a categorical palette actually assigns.
+ *
+ * The legend's source, and deliberately the *same* arithmetic
+ * {@link compileCategoricalColor} fills the colour array with — index into
+ * `stat.values`, modulo the palette. A legend that re-derived the mapping would
+ * be a second opinion about what is on screen, and the day the two disagreed
+ * the swatch would be the lie: it is what a reader trusts.
+ *
+ * `null` under exactly the condition the compiler refuses to build a palette
+ * at all, so a legend is never drawn for a colouring that is not happening.
+ */
+export function categoricalLegend(
+  stat: PropertyStat,
+): { value: unknown; color: Rgba }[] | null {
+  if (stat.approx || stat.values.length === 0) return null
+  return stat.values.map((value, i) => ({
+    value,
+    color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] ?? UNSET_COLOR,
+  }))
+}
+
+/**
  * Compile a radius function for a numeric property.
  *
  * Fourth root, matching the meta-graph's own size ramp: real graph properties

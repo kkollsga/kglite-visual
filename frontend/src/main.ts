@@ -15,9 +15,11 @@
 import './styles.css'
 
 import {
+  categoricalLegend,
   compileCategoricalColor,
   compileNumericSize,
   fillColors,
+  HIGHLIGHT_COLOR,
   linkWidth,
   typeHue,
   typeRadius,
@@ -38,7 +40,8 @@ import type { PropertyStat } from './generated/PropertyStat'
 import type { Request } from './generated/Request'
 import { InteractionState } from './interaction'
 import { LabelOverlay } from './labels'
-import { Panels } from './panels'
+import { Legend, type LegendEntry, type LegendSection } from './legend'
+import { formatCell, Panels } from './panels'
 import {
   assertLittleEndian,
   fnv1a,
@@ -124,6 +127,15 @@ const labels = new LabelOverlay(root, {
 })
 const view = new SlotView()
 const interaction = new InteractionState()
+/**
+ * Over the canvas, bottom-left, opposite the status block.
+ *
+ * Collapsed to start: on the entry screen the encoding is structural and
+ * "bigger circle = more members" is legible without being told. It opens on the
+ * first colour-by choice, which is the point at which a colour means something
+ * only the person who picked it knows.
+ */
+const legend = new Legend(root)
 const assembler = new ResponseAssembler()
 const transport = new WebSocketTransport('ws')
 
@@ -255,6 +267,9 @@ function applyColorBy(property: string | null): void {
   colorByStat = property === null ? null : (lastStats.get(property) ?? null)
   appearanceValues.clear()
   debugState.colorBy = property
+  // A colour the user chose is the one encoding nobody can read off the
+  // picture, so this is the moment the card earns its space.
+  if (property !== null) legend.open()
   if (property === null) {
     redraw()
     return
@@ -621,6 +636,8 @@ function redraw(authority?: SeedAuthority): void {
   interaction.apply(surface.graph)
   refreshLabelSpecs()
   positionLabels(surface)
+  legend.update(legendSections())
+  debugState.legendEntries = legend.entryCount
   syncCounts()
   renderStatus()
 }
@@ -715,6 +732,96 @@ function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rg
     ? [0.35, 0.65, 0.98, 0.92]
     : [0.98, 0.75, 0.32, 0.92]
   return label.supporting ? [r, g, b, a * 0.45] : [r, g, b, a]
+}
+
+/**
+ * Describe the encoding currently on screen (plan E11).
+ *
+ * Built from the same state `appearance()` fills its arrays from, one function
+ * below it, so the two cannot drift: the categorical swatches come from
+ * `categoricalLegend` — the palette's own assignment — and the structural ones
+ * are the literals `baseColor` returns, cited there.
+ *
+ * The colour section is the one that earns the card. Size and links are listed
+ * because a reader who has just learned that colour means something reasonably
+ * asks what the other two channels mean, and "nothing you chose" is an answer.
+ */
+function legendSections(): LegendSection[] {
+  const sections: LegendSection[] = []
+  const palette = colorByStat === null ? null : categoricalLegend(colorByStat)
+
+  if (colorByStat !== null && palette !== null) {
+    const entries: LegendEntry[] = palette.map(({ value, color }) => ({
+      color,
+      label: formatCell(value) === '' ? '(no value)' : formatCell(value),
+    }))
+    // Only when something on screen actually landed there. An "other" row on a
+    // view where every node matched a value is a swatch for the empty set.
+    const covered = new Set(palette.map(({ value }) => JSON.stringify(value ?? null)))
+    const hasOther = [...appearanceValues.values()].some(
+      (value) => !covered.has(JSON.stringify(value ?? null)),
+    )
+    const unset = view.liveSlots().some((slot) => !appearanceValues.has(slot))
+    if (hasOther || unset) entries.push({ color: UNSET_COLOR, label: 'not set / other' })
+    sections.push({
+      title: `colour — ${colorByStat.name}`,
+      entries,
+      note: colorByStat.approx ? 'these values are approximate (kglite sampled)' : undefined,
+    })
+  } else if (colorByStat !== null) {
+    // The compiler refused to build a palette, so nothing IS coloured by it.
+    // Saying so is the whole job: a legend that listed the values anyway would
+    // be captioning colours the canvas does not carry.
+    sections.push({
+      title: `colour — ${colorByStat.name}`,
+      entries: [{ color: UNSET_COLOR, label: 'not coloured by this property' }],
+      note: 'its distinct values are a lower bound, so some nodes would silently get no colour',
+    })
+  } else {
+    // The structural encoding. These four literals mirror `baseColor` above.
+    const entries: LegendEntry[] = [
+      { color: [0.35, 0.65, 0.98, 0.92], label: 'type' },
+      { color: [0.98, 0.75, 0.32, 0.92], label: 'type with capabilities (ts/geo/loc/vec)' },
+      { color: [0.35, 0.65, 0.98, 0.92 * 0.45], label: 'supporting type — quieter, and smaller' },
+    ]
+    for (const type of instanceTypesOnScreen()) {
+      entries.push({ color: typeHue(type), label: `${type} (instance)` })
+    }
+    sections.push({ title: 'colour — structural', entries })
+  }
+
+  if (interaction.highlightedSlots().length > 0) {
+    sections.push({
+      title: 'found',
+      entries: [{ color: HIGHLIGHT_COLOR, label: 'search or query hit' }],
+    })
+  }
+
+  sections.push({
+    title: 'size',
+    entries: [],
+    note:
+      sizeByName === null
+        ? 'a type circle grows with its member count (log); an instance node is fixed'
+        : `node size is ${sizeByName}`,
+  })
+  sections.push({
+    title: 'links',
+    entries: [
+      { color: [0.55, 0.6, 0.68, 0.9], label: 'thicker = more edges between the two types', line: true },
+    ],
+  })
+  return sections
+}
+
+/** Instance types currently drawn, ascending — one legend row each. */
+function instanceTypesOnScreen(): string[] {
+  const types = new Set<string>()
+  for (const slot of view.liveSlots()) {
+    const label = view.label(slot)
+    if (label !== undefined && !label.isType && label.nodeType !== null) types.add(label.nodeType)
+  }
+  return [...types].sort()
 }
 
 function maxTypeCount(): number {
