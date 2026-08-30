@@ -219,6 +219,17 @@
   justify-content: space-between;
 }
 
+/* `hidden` has to WIN here, and without this rule it does not: the UA sheet's
+   `[hidden] { display: none }` and the `.kglv-field` above have the same
+   specificity, and an author rule beats a UA one — so every `row.hidden = true`
+   in `panels.ts` was a no-op. Found in G5 when the new table action would not
+   hide; the caption row (G3) had the same latent bug, which showed a "caption
+   by" picker offering nothing but the title on a type with no string
+   properties. */
+.kglv-field[hidden] {
+  display: none;
+}
+
 .kglv-field-label {
   color: #8b949e;
   white-space: nowrap;
@@ -606,4 +617,23 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A results-table header is a button (plan E9): the column sorts on click, and
+   a `<th>` with a click handler and no button is unreachable by keyboard. It
+   is styled to still read as a header rather than as a control, because the
+   grid has one meaning and forty of these. */
+.kglv-th-sort {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.kglv-th-sort:hover {
+  color: #e6edf3;
 }

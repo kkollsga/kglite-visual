@@ -50,6 +50,7 @@ import {
 } from './filter'
 import { LabelOverlay } from './labels'
 import { ExportCard } from './export'
+import { tableColumns, typeTableQuery } from './generate'
 import { Legend, type LegendEntry, type LegendSection } from './legend'
 import { formatCell, Panels } from './panels'
 import {
@@ -259,7 +260,62 @@ const panels = new Panels(root, {
   // Parse-only, over plain HTTP, on the editor's idle timer. It never runs the
   // query and never moves the view.
   validateQuery: (query) => validateQuery(query),
+  showTypeTable: (nodeType) => showTypeTable(nodeType),
 }, schema)
+
+/**
+ * A type's on-screen nodes, as a table of their properties (plan E9).
+ *
+ * Three decisions, all of them the teaching-tool rule in different clothes.
+ * The query is **generated here and shown in the editor**, so the user reads
+ * what ran and can edit it into the question they actually had. It is then run
+ * down the **ordinary bounded path** — the same `cypher` request the Run button
+ * sends — so a table of 40 000 nodes is truncated and says so, exactly like a
+ * hand-typed query. And the ids are the **slot space's**, not the graph's: this
+ * is a table of what is on screen, which on a 546 850-node graph is a different
+ * question from "every node of this type".
+ */
+function showTypeTable(nodeType: string): void {
+  const ids: number[] = []
+  for (const slot of view.liveSlots()) {
+    const label = view.label(slot)
+    if (label?.isType === false && label.nodeType === nodeType && label.nodeId !== null) {
+      ids.push(label.nodeId)
+    }
+  }
+  if (ids.length === 0) return
+
+  const columns = tableColumns([...lastStats.values()])
+  let generated
+  try {
+    generated = typeTableQuery(nodeType, columns, ids)
+  } catch (err) {
+    // `identifier` refuses a property name Cypher cannot carry unquoted. The
+    // panel says so in the place a query failure is normally reported, because
+    // from the user's side this IS a query that would not run.
+    panels.showQueryError(err instanceof Error ? err.message : String(err))
+    return
+  }
+  panels.loadGeneratedQuery(generated.query)
+  const dropped = lastStats.size - columns.length
+  if (dropped > 0) {
+    // The cap is a fact about the table, so it is said before the rows arrive
+    // rather than left for the user to notice a missing column.
+    panels.showTableNote(
+      `${columns.length} of ${lastStats.size} properties, the ones most ${nodeType} nodes ` +
+        'carry — edit the RETURN clause above for the rest',
+    )
+  } else {
+    panels.showTableNote(null)
+  }
+  send({
+    type: 'cypher',
+    query: generated.query,
+    params: generated.params as Record<string, unknown>,
+    limit: null,
+    as_graph: false,
+  })
+}
 
 /**
  * Run a store mutation, then re-read the store and redraw the list.
@@ -703,6 +759,7 @@ function redraw(authority?: SeedAuthority): void {
   // is, not on a click that would read a stale count.
   exportCard.setLoaded(instancesOnScreen())
   debugState.exportNodes = exportCard.count
+  panels.setInstanceCounts(instanceCountsByType())
   panels.setGeoAvailable(viewHasPlaceableNodes())
   syncCounts()
   renderStatus()
@@ -1067,6 +1124,18 @@ function instancesOnScreen(): number {
     if (view.label(slot)?.isType === false) count += 1
   }
   return count
+}
+
+/** Instance nodes on screen per type — what the type panel's table offers. */
+function instanceCountsByType(): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const slot of view.liveSlots()) {
+    const label = view.label(slot)
+    if (label?.isType === false && label.nodeType !== null) {
+      counts.set(label.nodeType, (counts.get(label.nodeType) ?? 0) + 1)
+    }
+  }
+  return counts
 }
 
 /** Instance types currently drawn, ascending — one legend row each. */

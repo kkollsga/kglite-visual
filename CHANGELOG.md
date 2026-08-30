@@ -13,6 +13,11 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Fixed
 
+- **A sidebar row that hid itself did not.** `.kglv-field` set `display: flex`
+  with the same specificity as the browser's own `[hidden]` rule and, being an
+  author rule, won — so every row `panels.ts` hid stayed on screen. The visible
+  symptom was a "caption by" picker offered on types with no string property to
+  caption them with.
 - **A browser that joins a session already in progress now sees the session.**
   Every client used to be greeted with the entry screen — the type-level
   meta-graph, slots `0..n` — whatever the shared view had been drilled into
@@ -26,6 +31,14 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- **A table of a type's nodes, generated and shown.** The type panel offers
+  "table of the N on screen"; the app writes
+  `MATCH (n:Type) WHERE id(n) IN $ids RETURN …` over the twelve properties most
+  of that type's nodes carry, **puts it in the Cypher box where the user can
+  read and edit it**, and runs it down the ordinary bounded path. The columns
+  sort by clicking a header — stably, and by type: a numeric column compares as
+  numbers, so a column of ids does not put 100 before 58. The panel says when
+  the twelve-column cap dropped something.
 - **Export: the view, as a file somebody else's tool can open.** GraphML,
   GEXF, node CSV, edge CSV or D3 JSON, from an Export card beside the legend,
   from `GET /api/export?format=…&source=live-view`, and from the MCP

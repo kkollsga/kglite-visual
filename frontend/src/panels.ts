@@ -63,6 +63,13 @@ export type PanelHandlers = {
   deleteQuery(name: string): void
   /** Ask the server what is wrong with this query, without running it. */
   validateQuery(query: string): Promise<Diagnostic[]>
+  /**
+   * Show this type's on-screen nodes as a table of their properties (plan E9).
+   *
+   * The panel asks; the app generates the Cypher, puts it in the editor where
+   * the user can read and edit it, and runs it down the ordinary bounded path.
+   */
+  showTypeTable(nodeType: string): void
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -145,6 +152,8 @@ export class Panels {
   private readonly queryStatus: HTMLDivElement
   private readonly queryDiagnostics: HTMLDivElement
   private readonly queryResults: HTMLDivElement
+  /** What a generated table left out, when it left anything out. */
+  private readonly tableNote: HTMLDivElement
   private readonly selection: HTMLDivElement
   private readonly expandLimit: HTMLInputElement
   private readonly searchInput: HTMLInputElement
@@ -157,6 +166,11 @@ export class Panels {
   private readonly captionBy: HTMLSelectElement
   private readonly captionRow: HTMLElement
   private readonly appearanceNote: HTMLDivElement
+  /** The "table of the N on screen" action, and the row it lives in. */
+  private readonly tableButton: HTMLButtonElement
+  private readonly tableRow: HTMLElement
+  /** Instance nodes on screen, by type — what the table button counts. */
+  private instanceCounts = new Map<string, number>()
   /** The type the three per-type channels are currently describing. */
   private statsType: string | null = null
   private readonly layoutKernel: HTMLSelectElement
@@ -168,6 +182,14 @@ export class Panels {
   private readonly historyList: HTMLDivElement
   private lastHits: SearchResponse | null = null
   private lastSaved: SavedQueries | null = null
+  /**
+   * The rows currently on screen, kept so a header click can re-order them
+   * without re-running the query. Null until a result arrives, and replaced
+   * whole by the next one.
+   */
+  private lastTable: QueryTable | null = null
+  /** The column the grid is sorted by, or null for the engine's own order. */
+  private sortBy: { column: number; descending: boolean } | null = null
 
   constructor(
     container: HTMLElement,
@@ -267,10 +289,22 @@ export class Panels {
       )
     })
     this.captionRow = this.labelled('caption by', this.captionBy)
+    // The fourth thing this card does with a type, and the one that is not a
+    // display channel: read its nodes as rows. It sits here because this card
+    // IS the type panel — its contents are the selected type's property
+    // statistics — and the table's columns come from exactly those statistics.
+    this.tableButton = element('button', 'kglv-button kglv-button-small', 'table')
+    this.tableButton.setAttribute('data-testid', 'type-table')
+    this.tableButton.addEventListener('click', () => {
+      if (this.statsType !== null) this.handlers.showTypeTable(this.statsType)
+    })
+    this.tableRow = this.labelled('rows', this.tableButton)
+    this.tableRow.hidden = true
     appearance.append(
       this.labelled('colour by', this.colorBy),
       this.labelled('size by', this.sizeBy),
       this.captionRow,
+      this.tableRow,
     )
     this.appearanceNote = element('div', 'kglv-hint')
     this.appearanceNote.setAttribute('data-testid', 'appearance-note')
@@ -366,6 +400,14 @@ export class Panels {
 
     this.queryStatus = element('div', 'kglv-hint')
     this.queryStatus.setAttribute('data-testid', 'query-status')
+    // What a *generated* query left out, said above the rows it produced.
+    // Its own line rather than folded into the status: the status describes
+    // the response bound, and a column cap is a different kind of clipping —
+    // conflating them would make "12 of 40" ambiguous between rows and
+    // columns.
+    this.tableNote = element('div', 'kglv-hint')
+    this.tableNote.setAttribute('data-testid', 'table-note')
+    this.tableNote.hidden = true
     // The engine's own diagnostics, between the count and the rows: a warning
     // printed under the table is a warning read after the conclusion was drawn.
     this.queryDiagnostics = element('div', 'kglv-diagnostics')
@@ -381,6 +423,7 @@ export class Panels {
       this.historyList,
       this.queryStatus,
       this.queryDiagnostics,
+      this.tableNote,
       this.queryResults,
     )
     this.root.appendChild(this.section('Cypher', query))
@@ -489,6 +532,46 @@ export class Panels {
   private setQueryText(query: string): void {
     this.editor.setValue(query)
     this.editor.focus()
+  }
+
+  /**
+   * Put a generated query where the user can read it (plan E9).
+   *
+   * The teaching-tool rule: a table or a path this app built is a *query*, and
+   * showing it in the same box the user types into is what makes it something
+   * they can learn from, edit and re-run rather than a button whose workings
+   * are ours. Public, unlike {@link setQueryText}, because the caller is the
+   * app rather than this panel.
+   */
+  loadGeneratedQuery(query: string): void {
+    this.setQueryText(query)
+  }
+
+  /**
+   * How many instance nodes of each type are on screen.
+   *
+   * Refreshed wherever the view changes rather than when statistics arrive: an
+   * expansion moves the count without moving the type, and a "table of 40" on a
+   * view holding 4 000 would be describing the moment the panel was last
+   * opened.
+   */
+  setInstanceCounts(counts: Map<string, number>): void {
+    this.instanceCounts = counts
+    this.refreshTableAction()
+  }
+
+  /**
+   * Offer the table exactly while there is something to put in it.
+   *
+   * A type with no instances loaded has no rows — the query would be
+   * `id(n) IN []` — so the action is hidden rather than left to produce an
+   * empty grid the user would read as "this type has no properties".
+   */
+  private refreshTableAction(): void {
+    const loaded =
+      this.statsType === null ? 0 : (this.instanceCounts.get(this.statsType) ?? 0)
+    this.tableRow.hidden = loaded === 0
+    this.tableButton.textContent = `table of ${count(loaded)} on screen`
   }
 
   private loadSaved(): void {
@@ -776,24 +859,112 @@ export class Panels {
     this.queryStatus.className = table.bound.truncated ? 'kglv-hint kglv-warn' : 'kglv-hint'
     this.queryStatus.textContent = `${bound} in ${count(table.elapsed_ms)} ms`
 
+    this.lastTable = table
+    this.sortBy = null
+    this.drawGrid()
+    return rows
+  }
+
+  /**
+   * Draw the results grid, in whatever order {@link sortBy} says.
+   *
+   * Redrawn rather than re-fetched: sorting is a way of reading rows that have
+   * already arrived, and asking the server for an `ORDER BY` would turn a
+   * column click into a round trip that re-runs the query — against a graph
+   * that may have moved, under a bound that may cut a different subset. The
+   * rows on screen stay the rows the status line above them describes.
+   */
+  private drawGrid(): void {
+    const table = this.lastTable
+    if (table === null) return
+    const rows = table.data[0]?.length ?? 0
+    const order = this.rowOrder(table, rows)
+
     const grid = element('table', 'kglv-table')
     grid.setAttribute('data-testid', 'query-table')
     const head = element('tr')
-    for (const column of table.columns) head.appendChild(element('th', undefined, column))
+    table.columns.forEach((column, index) => {
+      const cell = element('th')
+      const button = element('button', 'kglv-th-sort')
+      button.setAttribute('data-testid', `sort-${column}`)
+      const active = this.sortBy?.column === index
+      button.textContent = active ? `${column} ${this.sortBy?.descending ? '▾' : '▴'}` : column
+      button.addEventListener('click', () => {
+        // First click on a new column sorts ascending; clicking the active one
+        // flips it. Never a third state that clears the sort — a user who
+        // wanted the original order clicked a column by mistake, and re-running
+        // the query is a worse answer than one more click.
+        this.sortBy =
+          active && this.sortBy !== null
+            ? { column: index, descending: !this.sortBy.descending }
+            : { column: index, descending: false }
+        this.drawGrid()
+      })
+      cell.appendChild(button)
+      head.appendChild(cell)
+    })
     grid.appendChild(head)
-    for (let row = 0; row < rows; row += 1) {
+
+    for (const row of order) {
       const tr = element('tr')
       for (let column = 0; column < table.columns.length; column += 1) {
         tr.appendChild(element('td', undefined, formatCell(table.data[column]?.[row])))
       }
       grid.appendChild(tr)
     }
-    this.queryResults.appendChild(grid)
-    return rows
+    this.queryResults.replaceChildren(grid)
+  }
+
+  /**
+   * Row indices in display order.
+   *
+   * **Stable, and typed per column.** Stable because two rows the sort cannot
+   * separate must keep the order the engine returned — an unstable sort makes a
+   * table shuffle under a second click on the same header, which reads as data
+   * changing. Typed because `10` and `9` compare one way as numbers and the
+   * other as strings, and a column of counts sorted lexically is a column
+   * sorted wrong; the type is read off the values rather than off the column
+   * name, since a `RETURN` can name anything. A column that mixes numbers and
+   * text is sorted as text, which is the only comparison both halves answer to.
+   *
+   * Empty cells sort last in both directions. They are not a value, so ranking
+   * them as one would put a block of blanks at the top of a descending sort.
+   */
+  private rowOrder(table: QueryTable, rows: number): number[] {
+    const order = [...Array(rows).keys()]
+    const sort = this.sortBy
+    if (sort === null) return order
+    const values = table.data[sort.column] ?? []
+    const numeric = values.every((value) => value === null || typeof value === 'number')
+    const sign = sort.descending ? -1 : 1
+    return order.sort((a, b) => {
+      const left = values[a]
+      const right = values[b]
+      const leftEmpty = left === null || left === undefined
+      const rightEmpty = right === null || right === undefined
+      if (leftEmpty || rightEmpty) {
+        // Not multiplied by `sign`: blanks are last whichever way the column is
+        // pointing.
+        if (leftEmpty && rightEmpty) return a - b
+        return leftEmpty ? 1 : -1
+      }
+      const compared = numeric
+        ? (left as number) - (right as number)
+        : formatCell(left).localeCompare(formatCell(right))
+      // The index tiebreak is what makes this stable across engines: Array
+      // .prototype.sort is specified stable, but a comparator that returns 0
+      // for two rows still lets a *different* column's later sort reorder them.
+      return compared === 0 ? a - b : compared * sign
+    })
   }
 
   showQueryError(message: string): void {
     this.queryResults.replaceChildren()
+    // The failed query's predecessor is not this query's result. Left in place,
+    // a header click on the old grid would re-draw rows for a question that is
+    // no longer on screen.
+    this.lastTable = null
+    this.sortBy = null
     // The previous run's advisories described the previous query. Left up, they
     // would read as an explanation of this failure.
     this.queryDiagnostics.replaceChildren()
@@ -802,6 +973,18 @@ export class Panels {
     // name it could not resolve. A friendlier summary would delete the only
     // part the user can act on.
     this.queryStatus.textContent = message
+  }
+
+  /**
+   * Say what a generated query is not showing, or clear the line.
+   *
+   * Called before the query runs, so the caveat is on screen with the rows
+   * rather than after the user has read them.
+   */
+  showTableNote(note: string | null): void {
+    this.tableNote.hidden = note === null
+    this.tableNote.className = note === null ? 'kglv-hint' : 'kglv-hint kglv-warn'
+    this.tableNote.textContent = note ?? ''
   }
 
   /** Search hits: already-loaded ones focus, cold ones load into the view. */
@@ -967,6 +1150,7 @@ export class Panels {
    */
   showPropertyStats(stats: PropertyStatsResponse, caption: string | null): [number, number] {
     this.statsType = stats.node_type
+    this.refreshTableAction()
     const byName = new Map(stats.properties.map((stat) => [stat.name, stat]))
     const fill = (select: HTMLSelectElement, names: string[], none: string) => {
       select.replaceChildren()
