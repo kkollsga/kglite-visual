@@ -146,6 +146,10 @@ queries {list,rm,prune}` is the owner, and `prune` only removes stores whose
 graph is gone from disk. **Point `KGLITE_VISUAL_CONFIG_DIR` at a tempdir in
 any harness**, or it reads and writes the developer's own saved queries.
 
+Prefix a query with `PROFILE ` to get per-clause costs (rows in→out,
+elapsed µs, a bar scaled to the slowest clause) beside the result — the
+prefix is the toggle, so the editor always shows the query that ran.
+
 `--query-timeout-secs N` (default 30) raises the wall-clock ceiling for one
 Cypher query. Leave it alone unless a deliberate analytical query needs it.
 

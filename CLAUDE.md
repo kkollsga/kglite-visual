@@ -19,7 +19,8 @@ localhost CLI and a Python wheel.
 > renders the type-level meta-graph through cosmos.gl — GPU force layout by
 > default, a **server-computed static layout** the user or an agent can
 > switch to (hop rings, packed islands, a held-still force pass, or a
-> geographic map that puts a node where it actually is — the simulation
+> geographic map that puts a node where it actually is, over a coastline
+> drawn at whichever of three scales the frame can resolve — the simulation
 > stops, dragging goes off, and the server then knows where the points
 > are), and the D2 deterministic mode behind an explicit
 > `?deterministic=1` switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v4)
@@ -284,6 +285,15 @@ file's timestamp bumped** — ts-rs rewrites the generated `.ts` on every
 `cargo test`, and until the mtime restore landed, a *passing* gate aged its
 own bundle and the next freshness check read its own side effect as
 staleness.
+
+**kglite's `id(n)` reads the node's `id` FIELD, never an internal index.**
+This cost a shipped defect: a generated `WHERE id(n) IN $ids` filled with
+our engine `NodeIndex` values returned zero rows on one sodir type and the
+WRONG rows on another whose id range overlaps the index range — and the
+committed fixture cannot catch the class because its two id spaces
+coincide. `SliceNode.key` carries the id field for exactly this; a query
+that must name a node names it by `key`, and a node without one cannot be
+named in Cypher at all.
 
 ## Code analysis — graph-first via the code-review MCP
 
