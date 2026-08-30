@@ -1,5 +1,5 @@
 /**
- * The cosmos.gl renderer, in one of two layout modes.
+ * The cosmos.gl renderer, driven by three independent layout axes.
  *
  * **`force` is what a user gets.** The server's lattice positions are a *seed*
  * — a deterministic, cheap starting point that makes the first paint stable —
@@ -14,6 +14,18 @@
  * something. The e2e suite and the bench harness both pass the flag, and
  * `window.__kglv.layoutMode` reports which mode is live — a position hash
  * asserted in force mode would be asserting on GPU float scheduling.
+ *
+ * **The two modes are presets over {@link LayoutAxes}, not a switch.** One
+ * boolean used to decide three unrelated questions at once — whether the
+ * simulation runs, whether the user may drag a point, and who wins when the
+ * server sends a position for a slot the GPU already holds — and they were only
+ * ever answered together because the two modes that existed happened to want
+ * the same answer to all three. A server-chosen static layout wants the
+ * simulation off, dragging off, and the server's positions *authoritative*,
+ * which is not a value the old boolean could take: `deterministic` also
+ * suppresses the settle-time fit and is the mode the e2e suite asserts on by
+ * name. Splitting the axes first means that layout can be added without the
+ * mode flag acquiring a third value and a fourth meaning.
  *
  * The constructor values that are *not* mode-dependent, and why:
  *
@@ -40,8 +52,64 @@ import { Graph } from '@cosmos.gl/graph'
 
 import type { SlotView } from './view'
 
-/** Where the positions on the GPU come from. */
+/** A named combination of {@link LayoutAxes}. Reported as `__kglv.layoutMode`. */
 export type LayoutMode = 'force' | 'deterministic'
+
+/**
+ * Who owns a slot's position when the server sends one the GPU already has.
+ *
+ * `gpu` is the force-layout rule: the server's lattice is a seed, and a seed
+ * for a slot that has already been drawn is stale by definition. `server` is
+ * what a computed layout needs — the whole point of asking the server for one
+ * is that its answer replaces whatever is on screen.
+ */
+export type SeedAuthority = 'gpu' | 'server'
+
+/**
+ * The three questions the renderer's construction and upload path ask.
+ *
+ * Independent by construction: nothing here reads another field, and the two
+ * presets below are the only places a combination is named.
+ */
+export type LayoutAxes = {
+  /** The GPU force simulation runs, and reheats when the node set changes. */
+  simulation: boolean
+  /** The user may drag a point. */
+  drag: boolean
+  /** See {@link SeedAuthority}. */
+  seedAuthority: SeedAuthority
+}
+
+/**
+ * The user's mode: a live simulation, draggable, seeded once per slot.
+ *
+ * Dragging a node is how a user pulls a cluster apart to read it, and it only
+ * means anything while a simulation is there to re-settle around the change —
+ * which is why `drag` follows `simulation` *in this preset* rather than in the
+ * type.
+ */
+const FORCE_AXES: LayoutAxes = {
+  simulation: true,
+  drag: true,
+  seedAuthority: 'gpu',
+}
+
+/**
+ * D2's fixture mode: the positions on screen are the server's answer, exactly.
+ *
+ * Nothing may move them — not the simulation, not the user — because they are
+ * what `positionsHash` describes and what the e2e suite asserts on.
+ */
+const DETERMINISTIC_AXES: LayoutAxes = {
+  simulation: false,
+  drag: false,
+  seedAuthority: 'server',
+}
+
+/** The axes a named mode stands for. */
+export function axesFor(mode: LayoutMode): LayoutAxes {
+  return mode === 'deterministic' ? { ...DETERMINISTIC_AXES } : { ...FORCE_AXES }
+}
 
 /**
  * Read the layout mode out of the page's query string.
@@ -153,7 +221,7 @@ export type Appearance = {
 export class Surface {
   constructor(
     readonly graph: Graph,
-    readonly mode: LayoutMode,
+    readonly axes: LayoutAxes,
   ) {}
 
   /**
@@ -172,7 +240,11 @@ export class Surface {
     this.graph.setPointColors(appearance.colors)
     this.graph.setLinks(view.links)
     this.graph.setLinkWidths(appearance.linkWidths)
-    if (this.mode === 'deterministic') this.zoomToPayload(view)
+    // The data-derived zoom, re-applied per upload — but only where nothing is
+    // going to move afterwards. A running simulation reframes at
+    // `onSimulationEnd` instead (`main.ts`), and framing the *seed* first would
+    // be a zoom to an arrangement the user never sees.
+    if (!this.axes.simulation) this.zoomToPayload(view)
     // `render(undefined, 0)` — keep the current simulation alpha, no
     // transition. With on-demand rendering a static scene draws exactly one
     // frame, and that frame has to be asked for. Zero duration is what makes a
@@ -182,14 +254,14 @@ export class Surface {
   }
 
   /**
-   * Reheat the simulation. Force mode only; a no-op otherwise.
+   * Reheat the simulation. A no-op where there is no simulation.
    *
    * Called when the *node set* changed, never when the appearance did: a
    * colour-by choice that re-energised the layout would make the graph jump
    * under the user's cursor for no reason they could name.
    */
   reheat(alpha = 1): void {
-    if (this.mode === 'deterministic') return
+    if (!this.axes.simulation) return
     this.graph.start(alpha)
   }
 
@@ -209,45 +281,61 @@ export class Surface {
     this.graph.setZoomLevel(zoomFor(view.positions))
   }
 
-  /**
-   * The positions to upload: the server's, except where the simulation has
-   * already moved a slot somewhere better.
-   *
-   * In force mode the server's lattice is a *seed*, and it is only a seed for
-   * slots that have never been drawn. Re-pushing it wholesale on every slice
-   * would yank the settled layout back to a grid each time a user expanded
-   * anything — the picture would rebuild itself from scratch on every click.
-   * So: keep whatever the GPU has for a slot it already holds, and take the
-   * server's value for a slot it does not. A NaN from the server wins outright,
-   * because that is a tombstone and absence is the server's call (D4).
-   */
+  /** The positions to upload, resolved by {@link LayoutAxes.seedAuthority}. */
   private positionsFor(view: SlotView): Float32Array {
-    const seeded = toRendererSpace(view.positions)
-    if (this.mode === 'deterministic') return seeded
-    const live = this.graph.getPointPositions()
-    const shared = Math.min(live.length, seeded.length)
-    for (let i = 0; i < shared; i += 2) {
-      const x = live[i]
-      const y = live[i + 1]
-      if (x === undefined || y === undefined) continue
-      if (Number.isNaN(seeded[i]) || !Number.isFinite(x) || !Number.isFinite(y)) continue
-      seeded[i] = x
-      seeded[i + 1] = y
-    }
-    return seeded
+    return mergePositions(
+      toRendererSpace(view.positions),
+      this.axes.seedAuthority === 'gpu' ? this.graph.getPointPositions() : null,
+      this.axes.seedAuthority,
+    )
   }
+}
+
+/**
+ * Resolve the server's positions against the ones already on the GPU.
+ *
+ * Under `server` authority the server's array wins outright — that is what a
+ * computed layout means, and re-deriving it from anything on screen would make
+ * the answer a function of what was there before.
+ *
+ * Under `gpu` authority the server's lattice is a *seed*, and it is only a seed
+ * for slots that have never been drawn. Re-pushing it wholesale on every slice
+ * would yank the settled layout back to a grid each time a user expanded
+ * anything — the picture would rebuild itself from scratch on every click. So:
+ * keep whatever the GPU has for a slot it already holds, and take the server's
+ * value for a slot it does not. A NaN from the server still wins, because that
+ * is a tombstone and absence is the server's call (D4).
+ *
+ * `seeded` is mutated and returned; it is already a private copy
+ * ({@link toRendererSpace}).
+ */
+export function mergePositions(
+  seeded: Float32Array,
+  live: ArrayLike<number> | null,
+  authority: SeedAuthority,
+): Float32Array {
+  if (authority === 'server' || live === null) return seeded
+  const shared = Math.min(live.length, seeded.length)
+  for (let i = 0; i < shared; i += 2) {
+    const x = live[i]
+    const y = live[i + 1]
+    if (x === undefined || y === undefined) continue
+    if (Number.isNaN(seeded[i]) || !Number.isFinite(x) || !Number.isFinite(y)) continue
+    seeded[i] = x
+    seeded[i + 1] = y
+  }
+  return seeded
 }
 
 export async function mountGraph(
   container: HTMLDivElement,
   view: SlotView,
   appearance: Appearance,
-  mode: LayoutMode,
+  axes: LayoutAxes,
 ): Promise<Surface> {
-  const force = mode === 'force'
   const graph = new Graph(container, {
-    enableSimulation: force,
-    ...(force ? FORCE_CONFIG : {}),
+    enableSimulation: axes.simulation,
+    ...(axes.simulation ? FORCE_CONFIG : {}),
     rescalePositions: false,
     transitionDuration: 0,
     fitViewOnInit: false,
@@ -261,11 +349,7 @@ export async function mountGraph(
     renderLinks: true,
     linkWidthScale: 1,
     pointSizeScale: 1,
-    // Dragging a node is how a user pulls a cluster apart to read it, and it
-    // only means anything while a simulation is there to re-settle around the
-    // change. In deterministic mode the positions on screen are an assertion,
-    // so nothing may move them.
-    enableDrag: force,
+    enableDrag: axes.drag,
     // The hover affordances the four interaction concepts drive. Rings rather
     // than a colour change, so hovering composes with a colour-by choice
     // instead of overwriting it.
@@ -285,7 +369,7 @@ export async function mountGraph(
     attribution: 'cosmos.gl',
   })
 
-  const surface = new Surface(graph, mode)
+  const surface = new Surface(graph, axes)
   surface.upload(view, appearance)
   await graph.ready
   graph.render(undefined, 0)

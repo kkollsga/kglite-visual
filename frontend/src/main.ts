@@ -39,7 +39,7 @@ import { InteractionState } from './interaction'
 import { LabelOverlay } from './labels'
 import { Panels } from './panels'
 import { assertLittleEndian, fnv1a, ResponseAssembler, type Completed } from './protocol'
-import { layoutModeFromSearch, mountGraph, type Appearance, type Surface } from './render'
+import { axesFor, layoutModeFromSearch, mountGraph, type Appearance, type Surface } from './render'
 import { connectedAtom } from './state'
 import { rendersGraph } from './tiers'
 import { WebSocketTransport } from './transport'
@@ -53,12 +53,13 @@ debugState.deviceFeatures = probeDeviceFeatures()
 /**
  * `force` unless the page was asked for `?deterministic=1`.
  *
- * Read once, at startup: the mode decides how the renderer is constructed, so
- * a mid-session change would mean tearing the renderer down, and nothing in
- * the app wants that. `__kglv` reports it because `positionsHash` only means
- * something in the deterministic mode.
+ * Read once, at startup: the axes decide how the renderer is *constructed*, so
+ * a mid-session change to `simulation` or `drag` would mean tearing the
+ * renderer down. `__kglv` reports the mode name because `positionsHash` only
+ * means something in the deterministic one.
  */
 const layoutMode = layoutModeFromSearch(window.location.search)
+const layoutAxes = axesFor(layoutMode)
 debugState.layoutMode = layoutMode
 publishDebugState()
 publishBenchHook()
@@ -399,7 +400,7 @@ async function showMetaGraph(message: {
   }
 
   try {
-    surface = await mountGraph(canvasHost, view, appearance(), layoutMode)
+    surface = await mountGraph(canvasHost, view, appearance(), layoutAxes)
     attachHandlers(surface)
     debugState.simRunning = surface.graph.isSimulationRunning
     redraw()
@@ -572,9 +573,11 @@ function attachHandlers(current: Surface): void {
       debugState.simRunning = false
       // The settled layout's extent is not the seed's, so the data-derived
       // zoom no longer frames it. A fit is a viewport-dependent operation and
-      // therefore banned in deterministic mode (D2) — here the layout is
-      // already viewport-independent only up to the simulation, so framing it
-      // costs nothing that was still being protected.
+      // therefore banned wherever the positions are an assertion (D2). This
+      // callback fires only with the simulation axis on, where the layout was
+      // already viewport-independent up to the simulation and nothing is left
+      // to protect — `Surface.upload` reads the same axis to decide whether to
+      // apply the data-derived zoom instead.
       current.graph.fitView(0)
       positionLabels(current)
       syncCounts()
