@@ -579,6 +579,10 @@ async function handle(completed: Completed): Promise<void> {
     case 'session':
       debugState.protocolVersion = completed.value.protocol_version
       debugState.tier = completed.value.tier
+      // The path builder says what a run of the size it is previewing will
+      // actually do, which needs the ceiling the server enforces rather than a
+      // number this file remembers.
+      pathBuilder.setRowCeiling(completed.value.max_query_rows)
       renderStatus()
       break
     case 'meta-graph':
@@ -593,6 +597,11 @@ async function handle(completed: Completed): Promise<void> {
         debugState.compactions += 1
       }
       debugState.lastSliceKind = meta.kind
+      if (meta.kind === 'query') {
+        // A query that drew a graph left no rows, so the results card would
+        // otherwise keep describing whatever ran before it.
+        panels.showGraphResult(meta.bound.returned, meta.nodes.length)
+      }
       // The slots this slice killed cannot stay in an interaction set: they
       // draw nothing, and the counts would keep describing them.
       interaction.dropSlots(meta.tombstones)

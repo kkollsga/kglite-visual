@@ -13,6 +13,11 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Fixed
 
+- **A query that drew a graph left the previous query's row count on screen.**
+  "Show in graph" answers with a slice rather than a table, so the results card
+  kept describing whatever ran before it — a path run after a table read as
+  "120 rows in 10 ms". It now says how many nodes the result named and how many
+  of them were new.
 - **A self-referencing relationship was counted twice.** `Person -[:KNOWS]->
   Person` contributed a hop from each end of the same edge list, so the path
   builder's picker would have offered "KNOWS ↔ Person (360)" on a graph with
@@ -44,7 +49,8 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
   editor. Each hop carries a `count(*)` preview so the size of the answer is
   known before anything is drawn, and Run sends exactly the query on screen
   down the ordinary bounded path — no per-hop bound, one row ceiling, the same
-  banner. Values are always bound as parameters; labels, relationship types and
+  banner. When the last hop's preview is past what the server will return, the
+  card says so before the click rather than after the wait. Values are always bound as parameters; labels, relationship types and
   property names are validated as identifiers and refused rather than quoted.
 - **A table of a type's nodes, generated and shown.** The type panel offers
   "table of the N on screen"; the app writes

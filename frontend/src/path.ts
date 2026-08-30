@@ -106,6 +106,13 @@ export class PathBuilder {
   private readonly steps: StepRow[] = []
   private probe: ReturnType<typeof setTimeout> | null = null
   /**
+   * The server's rows-per-query ceiling, from `SessionInfo`. Zero until the
+   * session message lands, which is before any control exists to click.
+   */
+  private rowCeiling = 0
+  /** The last hop's probe answer, or null while one is outstanding. */
+  private lastCount: number | null = null
+  /**
    * Which probe round the pending answers belong to.
    *
    * The counts arrive out of order — three probes, three fetches — and a stale
@@ -178,6 +185,22 @@ export class PathBuilder {
     this.schema.onChange(() => this.refresh())
 
     container.appendChild(this.root)
+  }
+
+  /**
+   * The row ceiling this server enforces, so the card can say what a run of
+   * *this* size will actually do.
+   *
+   * Measured on sodir during G5 and the reason this exists: a two-hop path
+   * assembled in four clicks — Field → Company ← Licence — previews at
+   * 1 941 015 rows, and running it took the engine past its own wall-clock
+   * deadline and 7 GB of RSS before the OS killed the process. The preview is
+   * what makes that visible; this is what makes it *legible*, in the place the
+   * user is about to click.
+   */
+  setRowCeiling(rows: number): void {
+    this.rowCeiling = rows
+    this.refresh()
   }
 
   /** Fill the start picker from the meta-graph. */
@@ -255,12 +278,32 @@ export class PathBuilder {
     }
     this.generated.textContent = built.query
     this.runButton.disabled = false
+    this.showNote()
+    this.scheduleProbes()
+  }
+
+  /**
+   * What the card has to say about the path as it stands.
+   *
+   * The size warning outranks the depth one: a user one click from a query
+   * that will not finish needs that sentence more than they need to be told
+   * where the card's limit is.
+   */
+  private showNote(): void {
+    const over = this.lastCount !== null && this.rowCeiling > 0 && this.lastCount > this.rowCeiling
+    if (over && this.lastCount !== null) {
+      this.note.className = 'kglv-hint kglv-warn'
+      this.note.textContent =
+        `${this.lastCount.toLocaleString('en-US')} rows — far past the ` +
+        `${this.rowCeiling.toLocaleString('en-US')} this server will return, and a question this ` +
+        'size can take minutes before it is cut. Add a filter, or narrow the last hop.'
+      return
+    }
     this.note.className = 'kglv-hint'
     this.note.textContent =
       this.steps.length >= MAX_PATH_DEPTH
         ? `${MAX_PATH_DEPTH} hops is as far as this card goes — past that, the Cypher box`
         : 'the query above is exactly what Run sends, under the same row bound as any other'
-    this.scheduleProbes()
   }
 
   /**
@@ -275,6 +318,7 @@ export class PathBuilder {
     if (this.probe !== null) clearTimeout(this.probe)
     this.generation += 1
     const round = this.generation
+    this.lastCount = null
     for (const step of this.steps) step.setCount(null)
     this.probe = setTimeout(() => {
       const spec = this.spec()
@@ -292,7 +336,14 @@ export class PathBuilder {
         void this.handlers
           .countRows(probe.query, probe.params)
           .then((count) => {
-            if (round === this.generation) step.setCount(count)
+            if (round !== this.generation) return
+            step.setCount(count)
+            // The last hop's count is the size of the answer Run would ask
+            // for; the ones before it are how the path got there.
+            if (depth === this.steps.length) {
+              this.lastCount = count
+              this.showNote()
+            }
           })
           .catch(() => {
             // A refusal is not a zero. The step keeps its blank, which reads as

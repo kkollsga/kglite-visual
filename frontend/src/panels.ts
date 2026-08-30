@@ -971,6 +971,30 @@ export class Panels {
     })
   }
 
+  /**
+   * A query that answered with a *graph* rather than a table.
+   *
+   * Without this the results card kept the previous query's status line —
+   * "120 rows in 10 ms" sitting under a run that returned no rows at all,
+   * which reads as the row count of the thing that just happened. Found on
+   * sodir in G5, running a path with "show in graph" after a table.
+   *
+   * Both numbers, because they differ and the difference is the interesting
+   * part: a result whose nodes were all already on screen adds nothing, and a
+   * bare "0" would read as a query that matched nothing.
+   */
+  showGraphResult(inResult: number, added: number): void {
+    this.queryResults.replaceChildren()
+    this.queryDiagnostics.replaceChildren()
+    this.showTableNote(null)
+    this.lastTable = null
+    this.sortBy = null
+    this.queryStatus.className = 'kglv-hint'
+    this.queryStatus.textContent =
+      `${count(inResult)} node${inResult === 1 ? '' : 's'} in the result — ` +
+      `${count(added)} new on screen`
+  }
+
   showQueryError(message: string): void {
     this.queryResults.replaceChildren()
     // The failed query's predecessor is not this query's result. Left in place,

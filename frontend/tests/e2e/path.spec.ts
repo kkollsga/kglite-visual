@@ -71,6 +71,14 @@ test('the path builder offers real hops, counts them, and runs what it shows', a
         'RETURN n0, r1, n1, r2, n2',
     )
 
+    // The card says what Run will do. On this fixture the answer is well under
+    // the server's row ceiling, so it is the plain sentence; the warning that
+    // replaces it above the ceiling is `showNote`'s other branch, and it was
+    // observed firing on sodir at 1 941 015 rows.
+    await expect(page.locator('[data-testid="path-note"]')).toContainText(
+      'exactly what Run sends',
+    )
+
     // …and the count probes answer, per hop, before anything is drawn.
     await expect(page.locator('[data-testid="path-count-1"]')).toHaveText(
       `${WORKS_AT_ROWS} rows`,
@@ -95,6 +103,12 @@ test('the path builder offers real hops, counts them, and runs what it shows', a
     const after = await page.evaluate(() => window.__kglv)
     expect(after.slotCount).toBeGreaterThan(META_POINTS + WORKS_AT_ROWS)
     expect(after.linkCount).toBeGreaterThan(0)
+
+    // A query that answered with a graph says so, rather than leaving whatever
+    // row count was last on screen to describe it.
+    await expect(page.locator('[data-testid="query-status"]')).toContainText(
+      'nodes in the result —',
+    )
 
     // The assertion the whole card rests on: what ran is what was shown.
     expect(await queryText(page)).toBe(shown)
