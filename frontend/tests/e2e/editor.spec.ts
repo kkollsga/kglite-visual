@@ -141,3 +141,63 @@ test('completions come from this graph, not from a word list', async ({ page }) 
     server?.process.kill()
   }
 })
+
+test('diagnostics come from the engine, on an idle timer', async ({ page }) => {
+  let server: Launched | null = null
+  // Counted from the browser's side, so this measures the requests that were
+  // actually sent rather than the calls the editor believes it debounced.
+  let requests = 0
+  page.on('request', (request) => {
+    if (request.url().includes('/api/validate')) requests += 1
+  })
+  try {
+    server = await launch()
+    await page.goto(appUrl(server.info))
+    await ready(page)
+    await expect(page.locator(`${HOST} .cm-content`)).toBeVisible()
+
+    // ── a syntax error underlines, and is listed ────────────────────────
+    await fillQuery(page, 'MATCH (p:Person RETURN p')
+    const error = page.getByTestId('editor-error')
+    await expect(error).toHaveCount(1)
+    // kglite's own diagnostic, not a summary of it.
+    await expect(error).toContainText('Cypher syntax error')
+    // The underline, not just the list: the caret is the reason this endpoint
+    // reports a position at all.
+    await expect(page.locator(`${HOST} .cm-lintRange-error`)).toHaveCount(1)
+
+    // ── a valid query shows nothing ─────────────────────────────────────
+    await fillQuery(page, 'MATCH (p:Person) RETURN p.title LIMIT 3')
+    await expect(page.getByTestId('editor-diagnostics')).toBeEmpty()
+    await expect(page.locator(`${HOST} .cm-lintRange-error`)).toHaveCount(0)
+
+    // ── a mistyped label is a warning, not an error ─────────────────────
+    // The query is legal Cypher and will run; it just answers nothing.
+    await fillQuery(page, 'MATCH (p:Persn) RETURN p')
+    await expect(page.getByTestId('editor-warning')).toContainText('Persn')
+    await expect(page.getByTestId('editor-error')).toHaveCount(0)
+
+    // ── typing does not spam the endpoint ───────────────────────────────
+    const before = requests
+    await page.locator(`${HOST} .cm-content`).click()
+    await page.keyboard.press('ControlOrMeta+a')
+    // Sixty characters over ~1.5 s — long enough that a linter with no idle
+    // delay gets to finish a request and start another, repeatedly.
+    //
+    // The bound is calibrated rather than guessed, because a request bound is
+    // exactly the shape that passes vacuously. Measured 2026-08-30 on this
+    // burst: **1** request with the 750 ms delay, **42** with the delay set to
+    // zero. Three leaves room for scheduling jitter and is nowhere near 42.
+    await page.keyboard.type(
+      'MATCH (p:Person)-[:KNOWS]->(q:Person) RETURN p.title, q.title',
+      { delay: 25 },
+    )
+    await expect(page.getByTestId('editor-diagnostics')).toBeEmpty()
+    const burst = requests - before
+    expect(burst, `the burst sent ${burst} validate requests`).toBeLessThanOrEqual(3)
+    // And it did send at least one, or the bound above would pass vacuously.
+    expect(burst).toBeGreaterThan(0)
+  } finally {
+    server?.process.kill()
+  }
+})

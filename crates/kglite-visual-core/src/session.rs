@@ -30,6 +30,7 @@ use crate::request::{
     CypherRequest, ExpandRequest, Request, SearchRequest, SlotRequest, TypeRequest,
 };
 use crate::stats::{self, NodeDetail, PropertyStatsResponse};
+use crate::validate::{validate_query, ValidateResponse};
 use crate::values::value_to_display;
 use crate::view::{Compaction, GraphSliceMeta, SliceKind, SliceNode, SlotEntry, View, ViewEdge};
 use crate::{bound::BoundInfo, layout};
@@ -323,6 +324,20 @@ impl Session {
             core_type_count: self.meta_graph.meta.stats.core_type_count,
             schema: schema_overview_to_json(&schema),
         }
+    }
+
+    /// Parse-only validation of one query. Nothing is executed (`validate`).
+    ///
+    /// Not a [`Request`] variant, and not on the binary wire: the editor asks
+    /// this while the user is typing, the answer is a handful of strings, and
+    /// putting it on the socket that carries typed arrays would mean a message
+    /// type and a protocol bump for it. `queries.rs` documents the same
+    /// boundary from the browser's side.
+    ///
+    /// **Blocking**, like everything else here — parsing runs kglite's parser,
+    /// which is what [`crate::query::QUERY_THREAD_STACK_BYTES`] exists for.
+    pub fn validate(&self, query: &str) -> ValidateResponse {
+        validate_query(&self.graph, query)
     }
 
     /// Dispatch one request.

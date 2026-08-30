@@ -8,6 +8,16 @@
  * `panels.ts`, which is what puts the editor in its own chunk.
  */
 
+import type { Diagnostic } from '../generated/Diagnostic'
+
+/**
+ * What a validation request answers, seen from the editor.
+ *
+ * Re-exported here rather than imported from `generated/` inside the editor's
+ * own files, so every one of the editor's inputs arrives through one door.
+ */
+export type { Diagnostic }
+
 /** The editor, as the panel drives it. A `<textarea>` satisfies this too. */
 export type QueryEditor = {
   /** The query text as it stands. */
@@ -43,4 +53,21 @@ export type QueryEditorOptions = {
   onRun: () => void
   /** Labels, relationship types and per-type properties, already in hand. */
   schema: SchemaSource
+  /**
+   * Ask the server what is wrong with this query, without running it.
+   *
+   * Called on an idle timer while the user types, so it must be cheap and it
+   * must never throw: the editor turns the answer into underlines, and an
+   * exception would become a red squiggle claiming the query is invalid on the
+   * evidence that the connection dropped.
+   */
+  validate(query: string): Promise<Diagnostic[]>
+  /**
+   * The same findings, for the panel to list under the editor.
+   *
+   * The underline is easy to miss in a 340px column and its message lives in a
+   * hover tooltip, which is a place a user has to already suspect something to
+   * look. One request, two renderings.
+   */
+  onDiagnostics(found: Diagnostic[]): void
 }

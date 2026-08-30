@@ -31,8 +31,17 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
   editor cannot bind to a label offers nothing rather than every property of
   every type.
 
+  And it marks mistakes **before you run anything**. A pause in typing sends the
+  query to the engine's own parser — parsed, never executed — and what comes
+  back is underlined where kglite put the caret and listed under the editor in
+  kglite's own words: `ORDR BY` is a syntax error at line 3, column 1; a
+  mistyped `:Wellbor` is a *warning* with "did you mean 'Wellbore'?", because a
+  pattern that matches nothing is legal Cypher; and a `CREATE` says up front
+  that this viewer runs read-only. It is a new `POST /api/validate` endpoint, so
+  `curl` and an agent can ask the same question.
+
   It is CodeMirror 6 with hand-picked extensions rather than a stock setup, and
-  it arrives in **its own chunk, fetched after the page is already usable** (96
+  it arrives in **its own chunk, fetched after the page is already usable** (102
   KB gzipped, no change to the main bundle). The plain text box is what you get
   until it lands, and what you keep if it never does — in which case the panel
   says so in one line rather than quietly handing you a worse editor.

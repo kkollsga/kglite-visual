@@ -32,11 +32,13 @@ import {
   startCompletion,
 } from '@codemirror/autocomplete'
 import { history, historyKeymap } from '@codemirror/commands'
+import { linter } from '@codemirror/lint'
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 
 import { cypherCompletions } from './completions'
 import type { QueryEditor, QueryEditorOptions } from './contract'
+import { toLintDiagnostic } from './diagnostics'
 import { cypherLanguage } from './cypher'
 import { cypherTheme } from './theme'
 
@@ -68,6 +70,27 @@ export function mountCypherEditor(options: QueryEditorOptions): QueryEditor {
           icons: false,
           override: [cypherCompletions(options.schema)],
         }),
+        // 750 ms is CodeMirror's own default idle delay and is left at it
+        // deliberately: the request goes to a real parser over HTTP while the
+        // user is still typing, and a shorter delay buys nothing but requests.
+        // No gutter — a 340px panel has no width for one, and the underline
+        // plus the list under the editor already say where and what.
+        linter(
+          async (view) => {
+            const doc = view.state.doc
+            const text = doc.toString()
+            // An empty box is not a mistake, and the server agrees; asking
+            // anyway would be a request per emptied editor.
+            if (text.trim() === '') {
+              options.onDiagnostics([])
+              return []
+            }
+            const found = await options.validate(text)
+            options.onDiagnostics(found)
+            return found.map((one) => toLintDiagnostic(doc, one))
+          },
+          { delay: 750 },
+        ),
         cypherLanguage,
         cypherTheme,
         EditorView.lineWrapping,

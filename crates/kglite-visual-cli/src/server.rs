@@ -195,6 +195,8 @@ fn router(state: AppState) -> Router {
         .route("/api/collapse", post(api::collapse))
         .route("/api/node", post(api::node_detail))
         .route("/api/property-stats", post(api::property_stats))
+        // Parse-only; it runs nothing and moves nothing (plan E3).
+        .route("/api/validate", post(api::validate))
         // Saved queries (E4). A GET to read, POSTs to mutate — the store is a
         // file on this machine, so the read is idempotent and the writes carry
         // bodies. There is deliberately NO `/api/queries/run`: a saved query is

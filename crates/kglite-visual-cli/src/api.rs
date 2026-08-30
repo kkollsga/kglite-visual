@@ -236,6 +236,46 @@ pub async fn property_stats(state: State<AppState>, Json(body): Json<TypeRequest
     dispatch(state, Request::PropertyStats(body)).await
 }
 
+/// What `POST /api/validate` takes. One field, because one is all it needs.
+#[derive(serde::Deserialize)]
+pub struct ValidateRequest {
+    #[serde(default)]
+    pub query: String,
+}
+
+/// `POST /api/validate` — `{"query": "..."}`. What is wrong with this Cypher,
+/// **without running it**.
+///
+/// **Parse-only, and that is a property of the call rather than a promise.**
+/// `core::validate` reaches `kglite::api::cypher::parse_cypher`, which takes a
+/// `&str` and returns an AST — it has no graph argument and therefore cannot
+/// touch data. `EXPLAIN` was the fallback this endpoint was scoped against and
+/// is not used: it plans, and planning is more work than answering "does this
+/// parse". A core test validates a `CREATE` and asserts the node count is
+/// unchanged, so the guarantee has an observable half rather than only a
+/// signature to point at.
+///
+/// **HTTP only, never the binary protocol** (plan E3). The editor asks this
+/// while a user types, the answer is a handful of strings, and putting it on
+/// the wire that carries typed arrays would mean a message type and a protocol
+/// bump for three fields. Same boundary the saved-query store draws.
+///
+/// **It does not move the view**, so unlike the request-shaped POSTs above it
+/// publishes nothing to attached browsers.
+pub async fn validate(
+    State(state): State<AppState>,
+    Json(body): Json<ValidateRequest>,
+) -> Response {
+    let session = Arc::clone(&state.session);
+    // Parsing runs kglite's parser, which is what the runtime's enlarged stack
+    // size exists for, and it is synchronous — off the reactor it goes, like
+    // every other engine call in this file.
+    match tokio::task::spawn_blocking(move || session.validate(&body.query)).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => task_failed("validate", &err),
+    }
+}
+
 /// `GET /api/queries` — this graph's saved queries and recent history.
 ///
 /// Includes the store's own path, because a store that silently went nowhere —

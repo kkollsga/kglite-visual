@@ -21,6 +21,7 @@ pub mod request;
 pub mod session;
 pub mod slots;
 pub mod stats;
+pub mod validate;
 pub mod values;
 pub mod view;
 
@@ -45,6 +46,7 @@ pub use session::{
 };
 pub use slots::SlotAllocator;
 pub use stats::{NodeDetail, PropertyStatsResponse};
+pub use validate::{validate_query, Diagnostic, DiagnosticSeverity, ValidateResponse};
 pub use view::View;
 
 /// This crate's version, so consumers report one number rather than each

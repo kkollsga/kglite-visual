@@ -41,6 +41,7 @@ import { Panels } from './panels'
 import { assertLittleEndian, fnv1a, ResponseAssembler, type Completed } from './protocol'
 import * as store from './queries'
 import { SchemaCache } from './schema'
+import { validateQuery } from './validate'
 import { axesFor, layoutModeFromSearch, mountGraph, type Appearance, type Surface } from './render'
 import { connectedAtom } from './state'
 import { rendersGraph } from './tiers'
@@ -168,6 +169,9 @@ const panels = new Panels(root, {
   setSizeBy: (property) => applySizeBy(property),
   saveQuery: (name, query) => void refreshQueries(store.saveQuery(name, query)),
   deleteQuery: (name) => void refreshQueries(store.deleteQuery(name)),
+  // Parse-only, over plain HTTP, on the editor's idle timer. It never runs the
+  // query and never moves the view.
+  validateQuery: (query) => validateQuery(query),
 }, schema)
 
 /**

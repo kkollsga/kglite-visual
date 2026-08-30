@@ -15,6 +15,7 @@
  */
 
 import { statLabel } from './appearance'
+import type { Diagnostic } from './generated/Diagnostic'
 import type { QueryEditor, SchemaSource } from './editor/contract'
 import type { EdgeDirection } from './generated/EdgeDirection'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
@@ -44,6 +45,8 @@ export type PanelHandlers = {
   saveQuery(name: string, query: string): void
   /** Forget a saved query. */
   deleteQuery(name: string): void
+  /** Ask the server what is wrong with this query, without running it. */
+  validateQuery(query: string): Promise<Diagnostic[]>
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -68,6 +71,8 @@ export class Panels {
   /** Where the CodeMirror view mounts, and what holds the textarea until it does. */
   private readonly queryHost: HTMLDivElement
   private readonly editorNote: HTMLDivElement
+  /** kglite's parse-only findings, listed under the editor. */
+  private readonly editorDiagnostics: HTMLDivElement
   /** The textarea, or CodeMirror once its chunk has landed. Never null. */
   private editor: QueryEditor
   private readonly queryAsGraph: HTMLInputElement
@@ -173,6 +178,11 @@ export class Panels {
     }
     this.editorNote = element('div', 'kglv-hint')
     this.editorNote.setAttribute('data-testid', 'editor-note')
+    // Under the editor and above the Run button, because it is about the query
+    // that has not run yet — the block below the button is about the one that
+    // has.
+    this.editorDiagnostics = element('div', 'kglv-diagnostics')
+    this.editorDiagnostics.setAttribute('data-testid', 'editor-diagnostics')
     const queryRow = element('div', 'kglv-row')
     const run = element('button', 'kglv-button', 'Run')
     run.setAttribute('data-testid', 'query-run')
@@ -225,6 +235,7 @@ export class Panels {
     query.append(
       this.queryHost,
       this.editorNote,
+      this.editorDiagnostics,
       queryRow,
       savedRow,
       this.savedNote,
@@ -236,6 +247,31 @@ export class Panels {
     this.root.appendChild(this.section('Cypher', query))
 
     void this.upgradeEditor()
+  }
+
+  /**
+   * List what the engine said about the query that has not run yet.
+   *
+   * The editor underlines each finding where kglite positioned it, and the
+   * message lives in a hover tooltip — a place a user has to already suspect
+   * something to look. In a 340px column that is easy to miss entirely, so the
+   * same findings are also read out here, in the same warn/error voice the
+   * post-run diagnostics use.
+   */
+  private showEditorDiagnostics(found: Diagnostic[]): void {
+    this.editorDiagnostics.replaceChildren()
+    for (const one of found) {
+      const line = element(
+        'div',
+        one.severity === 'error' ? 'kglv-hint kglv-error' : 'kglv-hint kglv-warn',
+      )
+      line.setAttribute('data-testid', `editor-${one.severity}`)
+      // kglite's own wording, first line only: the engine renders its own ASCII
+      // caret under the offending line, and the editor is already drawing that
+      // caret as an underline. The whole message is in the hover tooltip.
+      line.textContent = one.message.split('\n')[0] ?? one.message
+      this.editorDiagnostics.appendChild(line)
+    }
   }
 
   /** Run whatever is in the editor — the one path both the button and the chord take. */
@@ -263,6 +299,8 @@ export class Panels {
         doc: text,
         onRun: () => this.runCurrentQuery(),
         schema: this.schema,
+        validate: (query) => this.handlers.validateQuery(query),
+        onDiagnostics: (found) => this.showEditorDiagnostics(found),
       })
       this.editorNote.remove()
     } catch (err) {

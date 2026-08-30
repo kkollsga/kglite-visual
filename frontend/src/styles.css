@@ -263,6 +263,15 @@
   max-width: 100%;
 }
 
+/* The lint tooltip carries kglite's message verbatim, and kglite renders its
+   own ASCII caret under the offending line. Monospace and preserved
+   whitespace, or that caret points at the wrong column. */
+.cm-tooltip .cm-diagnostic {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  white-space: pre-wrap;
+  max-width: 460px;
+}
+
 .kglv-button {
   padding: 4px 10px;
   border-radius: 4px;
