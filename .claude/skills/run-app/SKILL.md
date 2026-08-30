@@ -93,6 +93,21 @@ request is **400** and names what it refused; a query the engine rejected is
 **422** and carries kglite's own diagnostic verbatim — quote it, don't
 summarise it.
 
+Saved queries live in a file store keyed by the graph's absolute path
+(`$KGLITE_VISUAL_CONFIG_DIR` overrides the config dir). Every face reads the
+same one, `show()` included.
+
+    curl -s   $B/api/queries
+    curl -s -XPOST $B/api/queries/save    -H "$C" -d '{"name":"wells","query":"MATCH (w:Wellbore) RETURN w LIMIT 5"}'
+    curl -s -XPOST $B/api/queries/delete  -H "$C" -d '{"name":"wells"}'
+    curl -s -XPOST $B/api/queries/history -H "$C" -d '{"query":"…"}'
+
+Ceilings are refusals naming their number (400), never truncations. The store
+is a durable tier: `make prune` does not know it exists — `kglite-visual
+queries {list,rm,prune}` is the owner, and `prune` only removes stores whose
+graph is gone from disk. **Point `KGLITE_VISUAL_CONFIG_DIR` at a tempdir in
+any harness**, or it reads and writes the developer's own saved queries.
+
 `--query-timeout-secs N` (default 30) raises the wall-clock ceiling for one
 Cypher query. Leave it alone unless a deliberate analytical query needs it.
 
@@ -147,9 +162,10 @@ nodes, same links, same truncation, a different arrangement — never claim
 ## 3c. Drive the live view over MCP
 
 The running server speaks MCP at the `mcp` URL its stdout line printed —
-streamable HTTP, no second process, no discovery file. Nine tools:
+streamable HTTP, no second process, no discovery file. Eleven tools:
 `view_state`, `show_cypher`, `expand`, `collapse`, `highlight`, `focus`,
-`set_appearance`, `reset_view`, `render`.
+`set_appearance`, `reset_view`, `render`, `list_saved_queries`,
+`run_saved_query`.
 
 ```bash
 M="$(python3 -c 'import json,sys;print(json.load(sys.stdin)["mcp"])' < server.json)"

@@ -18,14 +18,14 @@ localhost CLI and a Python wheel.
 > Three crates (`core`, `cli`, `py`), a Vite/TypeScript frontend that
 > renders the type-level meta-graph through cosmos.gl — GPU force layout by
 > default, the D2 deterministic mode behind an explicit `?deterministic=1`
-> switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v2)
+> switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v3)
 > with an exact framing baseline, an axum server on localhost with the
 > frontend embedded, **a Python wheel whose `show()` runs that same server
 > lib-linked into the extension**, **`kglite-visual render` /
 > `POST /api/render`** — the meta-graph, a Cypher result or a bounded
 > expansion drawn as a deterministic SVG or PNG with the app's own visual
 > encoding and the truncation banner in the picture — **an MCP server at
-> `/mcp` on the running instance** — nine tools an agent uses to show,
+> `/mcp` on the running instance** — eleven tools an agent uses to show,
 > expand, collapse, highlight, focus and re-colour the live view, with
 > every change broadcast to every attached browser, so the user's screen
 > follows the agent in real time — a source distribution
@@ -179,9 +179,9 @@ cargo test --workspace
 cd frontend && npm ci && npm run typecheck && npm run build
 ```
 
-`make gate` runs seventeen real checks: the `dev-docs/` size bound (`R4`), the
+`make gate` runs eighteen real checks: the `dev-docs/` size bound (`R4`), the
 instruction-mirror check (`R7`), the two structural bans (`@cosmograph/*` and
-`#[global_allocator]`), the build-directory report, the frontend typecheck,
+`#[global_allocator]`), the bundled-dependency licence check, the build-directory report, the frontend typecheck,
 the frontend **production** build, the embedded-bundle freshness check,
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`, the generated-TypeScript freshness check, the
@@ -203,7 +203,7 @@ fails for reasons unrelated to the change is a gate people learn to bypass. CI
 owns the failing version of that check; here it reports and moves on.
 
 **CI is live; its first run earned its keep.** `.github/workflows/ci.yml`
-runs fifteen of the gate's seventeen checks across five jobs plus a
+runs sixteen of the gate's eighteen checks across five jobs plus a
 `ci-success` aggregate that `release.yml` waits on — an aggregate, never
 a list of check names, because an allowlist is how a red job ships a release
 by not being on it. The two gate checks with no CI job are local-only *by
