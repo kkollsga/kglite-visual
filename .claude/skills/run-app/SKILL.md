@@ -81,6 +81,10 @@ curl -s -XPOST $B/api/search         -H "$C" -d '{"query":"ada","node_type":"Per
 curl -s -XPOST $B/api/property-stats -H "$C" -d '{"node_type":"Person"}'
 curl -s -XPOST $B/api/validate       -H "$C" -d '{"query":"MATCH (n:Persn) RETRN n"}'
 curl -s -XPOST $B/api/layout         -H "$C" -d '{"kernel":"islands"}'
+# The one GET in the vocabulary (E8). A download is `<a href download>`, an
+# anchor issues a GET, and this route reads the view and mutates nothing.
+# formats: graphml | gexf | csv | csv-edges | json. `source` is `live-view`.
+curl -sD- "$B/api/export?format=graphml&source=live-view" -o view.graphml
 ```
 
 Same structs as the binary WebSocket protocol — divergence between the twin
@@ -94,6 +98,17 @@ read as a whole one. A bad
 request is **400** and names what it refused; a query the engine rejected is
 **422** and carries kglite's own diagnostic verbatim — quote it, don't
 summarise it.
+
+**`/api/export` answers with a file and three headers.** `x-kglv-nodes` is
+what it wrote, `x-kglv-format` which one, and **`x-kglv-note` carries the two
+caveats the file itself cannot**: the edge set is every edge between the
+exported nodes and so can exceed what the canvas drew, and kglite's GraphML
+has no Gephi `label` key (its titles land under `attr.name="title"`, so a
+GraphML import shows `n0`, `n1`, …; GEXF does not have this problem). Report
+those, don't discover them in Gephi. The scope is **the view** — an export
+over the entry screen is a **400** naming what to load first, never a
+whole-graph dump. `kglite-visual export <file>` is the CLI half and the only
+place a whole graph is on offer.
 
 **`/api/validate` is the one endpoint that answers about a query without
 running it.** It parses through kglite's own parser — no graph argument,
@@ -198,10 +213,16 @@ neither.
 ## 3c. Drive the live view over MCP
 
 The running server speaks MCP at the `mcp` URL its stdout line printed —
-streamable HTTP, no second process, no discovery file. Twelve tools:
+streamable HTTP, no second process, no discovery file. Thirteen tools:
 `view_state`, `show_cypher`, `expand`, `collapse`, `highlight`, `focus`,
 `set_appearance`, `set_layout`, `reset_view`, `render`,
-`list_saved_queries`, `run_saved_query`.
+`list_saved_queries`, `run_saved_query`, `export_view`.
+
+`export_view` is the one that hands something back rather than moving the
+screen: it writes the nodes currently in the view as GraphML / GEXF / CSV /
+D3 JSON and returns the text. Its scope is the VIEW, so load what you want
+first — on an empty view it refuses by name rather than dumping the graph —
+and read the `notes` in the reply before telling the user what they have.
 
 ```bash
 M="$(python3 -c 'import json,sys;print(json.load(sys.stdin)["mcp"])' < server.json)"
@@ -246,6 +267,37 @@ broadcast without an MCP client. The steering endpoints answer with
 `{"clients":n}`: a command that reached nobody is otherwise indistinguishable
 from one that reached the user.
 
+## 3d. The two surfaces that write Cypher for you
+
+Both generate a query, **show it**, and run it down the ordinary bounded
+`cypher` path — no new endpoint, no request variant, no second bound. The
+generated text is the contract: what is on screen is what runs.
+
+- **A type's table.** Select a type node (click it, or
+  `POST /api/highlight {"slots":[n],"concept":"selected"}`), then the type
+  panel offers `table of N on screen`. It generates
+  `MATCH (n:Type) WHERE id(n) IN $ids RETURN id(n) AS …, n.p AS p, …` over
+  the twelve best-covered properties and puts it in the Cypher box. Columns
+  sort by clicking a header — typed, so a numeric column compares as
+  numbers. `data-testid`s: `type-table`, `query-table`, `sort-<column>`,
+  `table-note`.
+- **The path builder.** `path-start`, `path-add`, `path-hop-<i>`,
+  `path-filter-<i>` / `path-op-<i>` / `path-value-<i>`, `path-count-<i>`,
+  `path-query`, `path-note`, `path-run`, `path-copy`. A hop's value is
+  `NAME|direction|OtherType` — the picker offers only relationships the
+  meta-graph actually has. Each hop carries a `count(*)` preview, and the
+  note turns into a warning when the last count is past `max_query_rows`.
+
+**Read `path-count-<i>` before clicking `path-run`.** Measured on sodir:
+a three-hop path previewing at 1,941,015 rows took the engine past its own
+deadline and 7.3GB of RSS before the OS killed the server. The preview is
+the cheap way to learn that; the run is not.
+
+**Prefer a running server's `/api/render` over one-shot CLI renders** when a
+server is already up: each CLI render loads the whole graph fresh (~627MB
+resident for a 546k-node file), while the server's endpoint reuses the one
+already in memory.
+
 ## 4. Drive the real frontend
 
 - Scripted: `make e2e` (Playwright, headless Chromium with
@@ -258,14 +310,20 @@ from one that reached the user.
   simRunning, lastMessageSeq, positionsHash, deviceFeatures, lastSliceKind,
   compactions, truncation, zoomLevel, focusedSlots, colorBy, sizeBy,
   hoveredSlot, emphasizedCount, highlightedCount, selectedCount,
-  previewRows, queryRows, searchHits, legendEntries, filteredOut,
-  appearanceCandidates, approximateStats, error}`. `pointCount` is *live*
+  previewRows, queryRows, searchHits, legendEntries, exportNodes,
+  filteredOut, namedSlots, appearanceCandidates, approximateStats, error}`. `pointCount` is *live*
   points **and excludes whatever the client-side filter is hiding** —
   `filteredOut` is that count, and the two together are the honest pair.
-  `slotCount` includes tombstones. `layoutMode` is `force` /
-  `deterministic` / `static` and `layoutKernel` names the arrangement in
-  force; `positionsHash` only means something where nothing is moving the
-  points. `truncation` carries the banner text the user is
+  `slotCount` includes tombstones. **`namedSlots` is the second honest
+  pair**, with `slotCount`: a client holds a position for every slot it was
+  told about and an *identity* only for the ones whose `SliceNode` it
+  received — unequal on any browser that joined mid-session until the
+  connect-time resync (G5). `exportNodes` is what the Export card would
+  write: instance nodes on screen, filter or no filter, because the server's
+  export walks the slot space rather than the client's appearance arrays.
+  `layoutMode` is `force` / `deterministic` / `static` and `layoutKernel`
+  names the arrangement in force; `positionsHash` only means something where
+  nothing is moving the points. `truncation` carries the banner text the user is
   actually reading, so an assertion checks the words rather than a boolean
   beside them. Assert on state; screenshots are artifacts. `error` non-null
   explains any `ready:false`.

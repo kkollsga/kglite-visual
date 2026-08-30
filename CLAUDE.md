@@ -29,9 +29,9 @@ localhost CLI and a Python wheel.
 > `POST /api/render`** — the meta-graph, a Cypher result or a bounded
 > expansion drawn as a deterministic SVG or PNG with the app's own visual
 > encoding and the truncation banner in the picture — **an MCP server at
-> `/mcp` on the running instance** — twelve tools an agent uses to show,
-> expand, collapse, highlight, focus, re-arrange and re-colour the live
-> view, with every change broadcast to every attached browser, so the
+> `/mcp` on the running instance** — thirteen tools an agent uses to show,
+> expand, collapse, highlight, focus, re-arrange, re-colour and **export**
+> the live view, with every change broadcast to every attached browser, so the
 > user's screen follows the agent in real time — a source distribution
 > that installs without Node, a CHANGELOG, and a gate that builds, lints,
 > tests and
