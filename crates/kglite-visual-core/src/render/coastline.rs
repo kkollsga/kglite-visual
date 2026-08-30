@@ -90,6 +90,12 @@ pub enum Resolution {
 /// either side of a boundary does not swing between visibly different
 /// backgrounds. Worst-case coastline path bytes per band, at 900×600: 250 KB
 /// just under 25°, 190 KB just under 120°, 66 KB for a whole world.
+///
+/// **900×600 is the small end of what this project renders**, and the
+/// approximation errs in the safe direction because of it: the CLI's default
+/// document is 2000×1250, where a frame resolves more detail than the study
+/// could, not less. A larger canvas therefore never wants a *coarser* file than
+/// these lines give it.
 const COARSE_SPAN_DEG: f64 = 120.0;
 const MEDIUM_SPAN_DEG: f64 = 25.0;
 
