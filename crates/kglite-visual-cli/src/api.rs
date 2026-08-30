@@ -30,7 +30,7 @@ use kglite_visual_core::control::{
 use kglite_visual_core::error::CoreError;
 use kglite_visual_core::render::RenderRequest;
 use kglite_visual_core::request::{
-    CypherRequest, ExpandRequest, Request, SearchRequest, SlotRequest, TypeRequest,
+    CypherRequest, ExpandRequest, LayoutRequest, Request, SearchRequest, SlotRequest, TypeRequest,
 };
 
 use crate::broadcast::AppState;
@@ -229,6 +229,24 @@ fn steer(state: &AppState, slots: &[u32], build: impl FnOnce(Vec<u32>) -> Comman
 
 fn steered(clients: usize) -> Response {
     Json(serde_json::json!({ "clients": clients })).into_response()
+}
+
+/// `POST /api/layout` — `{"kernel": "auto"|"radial"|"islands"|"force"|
+/// "simulation", "seed_slot": n}` (plan E5).
+///
+/// Compute a static arrangement for the live view and push it to every attached
+/// client. It allocates no slot, tombstones nothing and changes no link — what
+/// it changes is where the picture is drawn and, with it, whether the server
+/// knows: under a static kernel the viewer's simulation is off and dragging is
+/// disabled, so `GET /api/view-state` reports the kernel and the geometry
+/// caveat that goes with it. `"simulation"` hands the arrangement back to the
+/// viewer's GPU.
+///
+/// It goes through the ordinary request dispatch — and therefore the ordinary
+/// broadcast — rather than through `steer`, because unlike a steering command
+/// it carries a payload the client has to apply.
+pub async fn layout(state: State<AppState>, Json(body): Json<LayoutRequest>) -> Response {
+    dispatch(state, Request::Layout(body)).await
 }
 
 /// `POST /api/property-stats` — `{"node_type": "..."}`.

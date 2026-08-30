@@ -22,4 +22,21 @@ numeric_candidates: Array<string>,
 /**
  * Properties suitable for color-by.
  */
-categorical_candidates: Array<string>, };
+categorical_candidates: Array<string>, 
+/**
+ * The property this type's nodes would be best *named* by, when one is
+ * clearly better than kglite's `title` (plan E11).
+ *
+ * **The failure it answers is a screen of identical labels.** kglite picks
+ * a title column per type, and on a real schema that choice is sometimes a
+ * code: sodir draws forty wellbores as forty numbers, and the name a
+ * geologist would recognise is sitting in a neighbouring column nobody
+ * looked at. The client applies this to its label overlay — see
+ * [`caption_candidate`] for how the choice is scored, and note it is a
+ * *suggestion*: the panel offers an override, because a heuristic about
+ * what a human finds readable is not a fact the server owns.
+ *
+ * `None` when nothing beat the title, which is the common case and the
+ * right default.
+ */
+caption_candidate: string | null, };

@@ -52,8 +52,17 @@ import { Graph } from '@cosmos.gl/graph'
 
 import type { SlotView } from './view'
 
-/** A named combination of {@link LayoutAxes}. Reported as `__kglv.layoutMode`. */
-export type LayoutMode = 'force' | 'deterministic'
+/**
+ * A named combination of {@link LayoutAxes}. Reported as `__kglv.layoutMode`.
+ *
+ * `force` and `deterministic` are chosen at startup and never move; `static` is
+ * entered and left at runtime, when the server sends an arrangement (plan E5).
+ * Which *kernel* that arrangement came from is `__kglv.layoutKernel` — one
+ * field for "how is the layout driven" and another for "which layout", because
+ * a picker with five entries and a mode with three is not the same question
+ * asked twice.
+ */
+export type LayoutMode = 'force' | 'deterministic' | 'static'
 
 /**
  * Who owns a slot's position when the server sends one the GPU already has.
@@ -232,10 +241,10 @@ export class Surface {
    * sizes the response bound permits (D5: 5 000 points) a full upload is a few
    * hundred kilobytes, which is cheaper than the bookkeeping a diff would need.
    */
-  upload(view: SlotView, appearance: Appearance): void {
+  upload(view: SlotView, appearance: Appearance, authority?: SeedAuthority): void {
     // `true` = do not rescale: the second argument is `dontRescale`, and
     // letting cosmos.gl rescale would rewrite the server's coordinates.
-    this.graph.setPointPositions(this.positionsFor(view), true)
+    this.graph.setPointPositions(this.positionsFor(view, authority), true)
     this.graph.setPointSizes(appearance.sizes)
     this.graph.setPointColors(appearance.colors)
     this.graph.setLinks(view.links)
@@ -281,12 +290,25 @@ export class Surface {
     this.graph.setZoomLevel(zoomFor(view.positions))
   }
 
-  /** The positions to upload, resolved by {@link LayoutAxes.seedAuthority}. */
-  private positionsFor(view: SlotView): Float32Array {
+  /**
+   * The positions to upload, resolved by {@link LayoutAxes.seedAuthority} —
+   * unless this one upload says otherwise.
+   *
+   * **Per-upload, and that is the whole mechanic** (plan E5, pre-mortem #1). A
+   * server-computed layout arriving while the force simulation is live has to
+   * win *for that upload*: under the mode's standing `gpu` authority it would
+   * be merged away point by point, because every slot on screen already has a
+   * GPU position — so switching kernels would work in deterministic mode and do
+   * visibly nothing in the mode users run. An axis-level flip is not the answer
+   * either: the very next expansion's slice must go back to seeding only the
+   * new slots, or the settled picture rebuilds itself on every click.
+   */
+  private positionsFor(view: SlotView, authority?: SeedAuthority): Float32Array {
+    const resolved = authority ?? this.axes.seedAuthority
     return mergePositions(
       toRendererSpace(view.positions),
-      this.axes.seedAuthority === 'gpu' ? this.graph.getPointPositions() : null,
-      this.axes.seedAuthority,
+      resolved === 'gpu' ? this.graph.getPointPositions() : null,
+      resolved,
     )
   }
 }

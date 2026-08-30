@@ -33,6 +33,7 @@
 pub mod encoding;
 pub mod labels;
 pub mod layout;
+pub mod live_layout;
 pub mod raster;
 pub mod structure;
 pub mod svg;
@@ -50,6 +51,7 @@ use crate::session::{GraphSlice, Response, Session};
 use crate::view::{SliceKind, SlotEntry};
 
 pub use encoding::Theme;
+pub use live_layout::{layout_live_view, LayoutMeta, LayoutResult};
 
 /// Canvas defaults, in pixels.
 ///

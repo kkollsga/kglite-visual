@@ -226,6 +226,37 @@ pub struct QueryTable {
     /// The engine's truncation warning is filtered out here; see the module
     /// header for why that one, and only that one.
     pub warnings: Vec<String>,
+    /// Per-clause execution statistics, when the query ran under `PROFILE`.
+    ///
+    /// **Declared in G3 and populated in G6** (plan E10). It is here now
+    /// because the v4 bump was happening anyway for
+    /// [`crate::protocol::MessageType::Layout`], and one shape change on the
+    /// wire is cheaper to reason about than two — an additive JSON key needs no
+    /// bump of its own, so the alternative was not "a smaller v4" but "a v4 and
+    /// a later shape change at no version". Always `None` until the `PROFILE`
+    /// path lands; the mirror struct is [`ClauseStat`], and the field it
+    /// mirrors is kglite's `ClauseStats`.
+    pub profile: Option<Vec<ClauseStat>>,
+}
+
+/// One clause's cost, as kglite's `PROFILE` mode reports it.
+///
+/// A mirror of `kglite::api::ClauseStats` rather than a re-export, for the
+/// reason every other type in this file is one: `ts-rs` generates the
+/// TypeScript from what is declared *here*, and deriving it on an engine type
+/// would make this project the owner of a shape kglite owns. Field for field,
+/// name for name — a rename on either side is a compile error at the
+/// conversion, which is where it should be.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/generated/")]
+pub struct ClauseStat {
+    /// The engine's human-readable clause name (`Match`, `Return`, …).
+    pub clause_name: String,
+    pub rows_in: u32,
+    pub rows_out: u32,
+    /// Microseconds, as the engine measures them. Not milliseconds: a clause
+    /// that took 200 µs would round to `0 ms` and read as free.
+    pub elapsed_us: u64,
 }
 
 /// Run a read-only Cypher query.
@@ -422,6 +453,8 @@ fn to_table(
         explain: false,
         timed_out: false,
         warnings: Vec::new(),
+        // G6 sends `PROFILE` and fills this; nothing on this path asks for it.
+        profile: None,
     }
 }
 

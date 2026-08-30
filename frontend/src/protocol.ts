@@ -19,6 +19,7 @@ import type { Focus } from './generated/Focus'
 import type { Highlight } from './generated/Highlight'
 import type { ExpansionPreview } from './generated/ExpansionPreview'
 import type { GraphSliceMeta } from './generated/GraphSliceMeta'
+import type { LayoutMeta } from './generated/LayoutMeta'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
 import type { NodeDetail } from './generated/NodeDetail'
 import type { PropertyStatsResponse } from './generated/PropertyStatsResponse'
@@ -131,6 +132,18 @@ export type GraphSliceMessage = {
   links: Float32Array
 }
 
+/**
+ * A server-computed arrangement (plan E5).
+ *
+ * `points` covers the **whole** slot space, not a range from `first_slot`: a
+ * layout moves every point at once, so there is nothing to splice. A tombstone
+ * arrives as NaN, exactly as it does in a slice.
+ */
+export type LayoutMessage = {
+  meta: LayoutMeta
+  points: Float32Array
+}
+
 /** Everything a completed response can be. */
 export type Completed =
   | { kind: 'meta-graph'; value: MetaGraphMessage }
@@ -147,6 +160,9 @@ export type Completed =
   | { kind: 'focus'; value: Focus }
   | { kind: 'highlight'; value: Highlight }
   | { kind: 'appearance'; value: Appearance }
+  // v4's layout (plan E5). Unsolicited like the three above — a layout the
+  // human picked in another tab, or an agent's `set_layout`, arrives here.
+  | { kind: 'layout'; value: LayoutMessage }
   | { kind: 'error'; value: string }
 
 /**
@@ -170,6 +186,7 @@ export class ResponseAssembler {
   private focus: Focus | null = null
   private highlight: Highlight | null = null
   private appearance: Appearance | null = null
+  private layout: LayoutMeta | null = null
   private readonly chunks = new Map<number, { offset: number; bytes: Uint8Array }[]>()
   lastSeq = -1
 
@@ -217,6 +234,9 @@ export class ResponseAssembler {
       case MessageType.APPEARANCE:
         this.appearance = asJson<Appearance>(frame)
         break
+      case MessageType.LAYOUT:
+        this.layout = asJson<LayoutMeta>(frame)
+        break
       case MessageType.POINTS:
       case MessageType.LINKS: {
         const bucket = this.chunks.get(frame.msgType) ?? []
@@ -250,6 +270,7 @@ export class ResponseAssembler {
     this.focus = null
     this.highlight = null
     this.appearance = null
+    this.layout = null
     this.chunks.clear()
     return finished
   }
@@ -292,6 +313,12 @@ export class ResponseAssembler {
     if (this.focus !== null) return { kind: 'focus', value: this.focus }
     if (this.highlight !== null) return { kind: 'highlight', value: this.highlight }
     if (this.appearance !== null) return { kind: 'appearance', value: this.appearance }
+    if (this.layout !== null) {
+      return {
+        kind: 'layout',
+        value: { meta: this.layout, points: this.joinFloats(MessageType.POINTS) },
+      }
+    }
     if (this.session !== null) return { kind: 'session', value: this.session }
     throw new ProtocolError('a response ended without carrying anything')
   }

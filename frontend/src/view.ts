@@ -195,6 +195,22 @@ export class SlotView {
   }
 
   /**
+   * Take a server-computed arrangement (plan E5).
+   *
+   * Whole-array, from slot zero, because that is what a layout is: every point
+   * moved at once, so there is no `first_slot` and nothing to splice around. A
+   * tombstone arrives as NaN and stays one.
+   *
+   * Written through the same splice as an expansion so a layout that was
+   * computed *before* a slice this client has already applied leaves the newer
+   * slots alone rather than truncating them off the end. The next layout covers
+   * them; a shortened positions array would unrender them immediately.
+   */
+  applyLayout(points: Float32Array): void {
+    this.splicePositions(0, points)
+  }
+
+  /**
    * Rewrite every slot-keyed map through an old→new remap.
    *
    * Exported behaviour rather than an internal detail because this is the one

@@ -37,12 +37,14 @@ pub use protocol::{
 };
 pub use query::{QueryConfig, QueryTable, SearchResponse, QUERY_THREAD_STACK_BYTES};
 pub use render::{
-    render, render_for, ExpandSource, RenderFormat, RenderRequest, RenderSource, Rendered, Theme,
+    layout_live_view, render, render_for, ExpandSource, LayoutMeta, LayoutResult, RenderFormat,
+    RenderRequest, RenderSource, Rendered, Theme,
 };
-pub use request::Request;
+pub use request::{LayoutKernel, LayoutRequest, Request};
 pub use session::{
-    response_frames, DescribeResponse, ErrorMessage, GraphSlice, LastSlice, Response, Session,
-    SessionInfo, ViewBounds, ViewState, ViewTypeNode, GEOMETRY_CAVEAT,
+    geometry_caveat, response_frames, DescribeResponse, ErrorMessage, GraphSlice, LastSlice,
+    Response, Session, SessionInfo, ViewBounds, ViewState, ViewTypeNode, GEOMETRY_CAVEAT,
+    GEOMETRY_STATIC_CAVEAT,
 };
 pub use slots::SlotAllocator;
 pub use stats::{NodeDetail, PropertyStatsResponse};

@@ -38,11 +38,24 @@ import type { Request } from './generated/Request'
 import { InteractionState } from './interaction'
 import { LabelOverlay } from './labels'
 import { Panels } from './panels'
-import { assertLittleEndian, fnv1a, ResponseAssembler, type Completed } from './protocol'
+import {
+  assertLittleEndian,
+  fnv1a,
+  ResponseAssembler,
+  type Completed,
+  type LayoutMessage,
+} from './protocol'
 import * as store from './queries'
 import { SchemaCache } from './schema'
 import { validateQuery } from './validate'
-import { axesFor, layoutModeFromSearch, mountGraph, type Appearance, type Surface } from './render'
+import {
+  axesFor,
+  layoutModeFromSearch,
+  mountGraph,
+  type Appearance,
+  type SeedAuthority,
+  type Surface,
+} from './render'
 import { connectedAtom } from './state'
 import { rendersGraph } from './tiers'
 import { WebSocketTransport } from './transport'
@@ -269,6 +282,23 @@ function applyHighlight(command: Highlight): void {
   redraw()
 }
 
+/**
+ * Take a server-computed arrangement, whoever asked for it (plan E5).
+ *
+ * **`'server'` authority for this one upload, and only this one.** The
+ * standing authority in force mode is `gpu`, which is right for a slice — the
+ * server's lattice is a seed and a seed for a slot already on screen is stale.
+ * It is exactly wrong here: every slot the layout covers is already drawn, so
+ * the merge would discard the whole answer and the picture would not move.
+ * That is pre-mortem #1, and it is why the axis is resolved per upload rather
+ * than switched.
+ */
+function applyLayout(message: LayoutMessage): void {
+  if (message.meta.kernel_chosen === 'simulation') return
+  view.applyLayout(message.points)
+  redraw('server')
+}
+
 /** Drive both appearance channels from a remote command. */
 function applyAppearance(command: AppearanceCommand): void {
   panels.setAppearanceSelection(command.color_by, command.size_by)
@@ -411,6 +441,9 @@ async function handle(completed: Completed): Promise<void> {
     case 'appearance':
       applyAppearance(completed.value)
       break
+    case 'layout':
+      applyLayout(completed.value)
+      break
     case 'error':
       // A query failure is the panel's business, not the whole app's: the graph
       // on screen is still valid and blanking it would lose the user's place.
@@ -464,9 +497,9 @@ async function showMetaGraph(message: {
  * place that talks to the GPU — and so the debug counts can never describe a
  * frame that was not drawn.
  */
-function redraw(): void {
+function redraw(authority?: SeedAuthority): void {
   if (surface === null) return
-  surface.upload(view, appearance())
+  surface.upload(view, appearance(), authority)
   interaction.apply(surface.graph)
   refreshLabelSpecs()
   positionLabels(surface)

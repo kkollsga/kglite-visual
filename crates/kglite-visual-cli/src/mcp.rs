@@ -9,8 +9,8 @@
 //!
 //! **The tool surface is small on purpose.** Data-heavy querying belongs to
 //! `kglite-mcp-server`, which owns the schema, the Cypher reference and the
-//! result formatting. These eleven tools do the one thing that server cannot:
-//! move a *shared* view. Nine of them are verbs about the screen; the two
+//! result formatting. These twelve tools do the one thing that server cannot:
+//! move a *shared* view. Ten of them are verbs about the screen; the two
 //! saved-query tools are the exception that proves the rule — they read a
 //! store that belongs to *this* window and to the human who filled it, which
 //! is not a fact any other server has.
@@ -22,10 +22,13 @@
 //!
 //! **What an agent can and cannot know.** It can know the content of the view
 //! exactly: [`kglite_visual_core::ViewState`] is the same truth the browser's
-//! `window.__kglv` reports. It cannot know the geometry — the layout runs on
-//! the viewer's GPU and the server never receives the final positions — so
-//! every surface here repeats `core`'s one
-//! [`GEOMETRY_CAVEAT`](kglite_visual_core::GEOMETRY_CAVEAT).
+//! `window.__kglv` reports. Whether it can know the *geometry* is now a
+//! question with two answers, and `set_layout` is what moves between them: with
+//! the viewer's GPU simulation running the server never receives the final
+//! positions, and under a static kernel the server computed the arrangement and
+//! the client is holding it still. Which caveat applies is
+//! [`geometry_caveat`](kglite_visual_core::geometry_caveat)'s answer, from
+//! `view_state.layout_kernel`, and no surface here writes its own wording.
 
 use std::sync::Arc;
 
@@ -34,9 +37,10 @@ use kglite_visual_core::control::{Appearance, Command, Focus, Highlight, Highlig
 use kglite_visual_core::error::CoreError;
 use kglite_visual_core::render::{RenderFormat, RenderRequest, RenderSource, Theme};
 use kglite_visual_core::request::{
-    CypherRequest, EdgeDirection, ExpandRequest, Request, SearchRequest, SlotRequest,
+    CypherRequest, EdgeDirection, ExpandRequest, LayoutKernel, LayoutRequest, Request,
+    SearchRequest, SlotRequest,
 };
-use kglite_visual_core::{Response, GEOMETRY_CAVEAT};
+use kglite_visual_core::{geometry_caveat, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo};
@@ -64,7 +68,9 @@ pub const MCP_PATH: &str = "/mcp";
 /// - *last writer wins* — otherwise an agent assumes the view it left is the
 ///   view it returns to.
 /// - *geometry caveat* — otherwise an agent says "as you can see, top left",
-///   which is a claim about a screen it has never seen.
+///   which is a claim about a screen it has never seen. Conditional since G3:
+///   the claim is false under a static layout the server itself computed, and
+///   an unconditional caveat would be a rule agents learn to ignore.
 /// - *data querying belongs elsewhere* — otherwise this becomes a worse
 ///   `kglite-mcp-server`, one tool at a time.
 /// - *look at the saved queries first* — otherwise an agent writes its own
@@ -88,12 +94,18 @@ What you can and cannot know:
 - `view_state` is exact about CONTENT — slots, types, counts, tombstones, and \
 what the response bound last truncated. It is the same truth the page's own \
 debug hook reports.
-- You cannot know GEOMETRY. The layout runs on the viewer's GPU and the server \
-never receives the final positions. `render` draws the same content with its \
-own deterministic layout: content-identical, geometry-different. Never tell the \
-user where something is on their screen. Use `focus` and `highlight` to point \
-at things instead — those move THEIR view, which is the honest way to say \
-'look at this'.
+- GEOMETRY depends on `view_state.layout_kernel`, and you can change which \
+answer applies. While it says `simulation` — the default — the layout runs on \
+the viewer's GPU and the server never receives the final positions: never tell \
+the user where something is on their screen, and use `focus` and `highlight` to \
+point at things instead, because those move THEIR view. Call `set_layout` with \
+a static kernel and the arrangement becomes this server's own: their simulation \
+stops, dragging is disabled, and relative position is then safe to describe. \
+Read the `geometry_caveat` that comes back rather than remembering which mode \
+you are in.
+- `render` is a separate pass either way. It draws the same content with its \
+own fold and its own separation, so its picture can differ from the screen even \
+under a static kernel: content-identical, geometry-similar at best.
 
 Scope: this server steers a picture. It is not the place to mine the graph. \
 Bulk querying, schema exploration and result tables belong to the graph's own \
@@ -270,6 +282,57 @@ struct AppearanceArgs {
     pub size_by: Option<String>,
 }
 
+/// Which arrangement `set_layout` asks for. A local mirror of core's
+/// [`LayoutKernel`], for the reason [`DirectionArg`] is one: the schema an
+/// agent reads should be a plain enum with a sentence per variant.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum KernelArg {
+    /// Read the graph's structure and choose. The default: a neighbourhood
+    /// becomes hop rings, a community-structured graph becomes packed islands,
+    /// anything shapeless falls back to a force pass.
+    #[default]
+    Auto,
+    /// Hop rings around one node. Pass `seed_slot` to say which.
+    Radial,
+    /// Communities laid out separately and packed, so a group reads as a group.
+    /// Falls back to `force` on a graph with no community structure, and says
+    /// so in `kernel_chosen`.
+    Islands,
+    /// A seeded force layout, computed here and held still.
+    Force,
+    /// A geographic projection. Not implemented yet — asking for it is refused
+    /// with a sentence rather than silently served something else.
+    Geo,
+    /// Hand the arrangement back to the viewer's own GPU simulation, which is
+    /// where every session starts. After this you can no longer know where
+    /// anything is.
+    Simulation,
+}
+
+impl From<KernelArg> for LayoutKernel {
+    fn from(value: KernelArg) -> Self {
+        match value {
+            KernelArg::Auto => LayoutKernel::Auto,
+            KernelArg::Radial => LayoutKernel::Radial,
+            KernelArg::Islands => LayoutKernel::Islands,
+            KernelArg::Force => LayoutKernel::Force,
+            KernelArg::Geo => LayoutKernel::Geo,
+            KernelArg::Simulation => LayoutKernel::Simulation,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct LayoutArgs {
+    #[serde(default)]
+    pub kernel: KernelArg,
+    /// The slot a `radial` layout should be centred on. `view_state` lists the
+    /// slots. Ignored by every other kernel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed_slot: Option<u32>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
 struct SavedQueryArgs {
     /// The saved query's name, exactly as `list_saved_queries` reports it.
@@ -324,8 +387,11 @@ impl ViewControl {
                        and their drill-in state, instance counts by type, tombstones, and what \
                        the response bound did to the last change. Read this before acting and \
                        after anything surprising — another party may have moved the view. \
-                       CONTENT only: it says nothing about where anything is on the user's \
-                       screen, and it cannot."
+                       `layout_kernel` says who owns the arrangement: `simulation` means the \
+                       viewer's GPU does and this server cannot know where anything is; any \
+                       other value is a static layout it computed, under which relative \
+                       position is describable. `geometry_caveat` spells out whichever \
+                       applies — read it rather than assuming."
     )]
     async fn view_state(&self) -> Result<CallToolResult, McpError> {
         let mut value = serde_json::to_value(self.state.session.view_state())
@@ -504,6 +570,52 @@ impl ViewControl {
     }
 
     #[tool(
+        description = "Re-arrange the shared view with a layout computed HERE, and hold it \
+                       still. This is the one tool that changes what you can know: under a \
+                       static kernel the viewer's simulation is off and dragging is disabled, \
+                       so the arrangement on their screen is the one this server sent, and \
+                       relative position ('the ring around X', 'the island on the left') \
+                       becomes safe to describe. `auto` reads the structure and picks; \
+                       `radial` needs a `seed_slot` to centre on; `islands` groups \
+                       communities; `simulation` hands the layout back to their GPU and takes \
+                       that knowledge away again. Check `kernel_chosen` in the answer — a \
+                       kernel with nothing to work with falls back and says so. Changes \
+                       nothing about what is loaded."
+    )]
+    async fn set_layout(
+        &self,
+        Parameters(args): Parameters<LayoutArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let request = Request::Layout(LayoutRequest {
+            kernel: args.kernel.into(),
+            seed_slot: args.seed_slot,
+        });
+        let response = match self.run(request).await? {
+            Ok(response) => response,
+            Err(err) => return Ok(refused(&err)),
+        };
+        self.state.bus.publish_if_view_mutating(&response);
+        let Response::Layout(result) = &response else {
+            return Err(McpError::internal_error(
+                "a layout request answered with something other than a layout",
+                None,
+            ));
+        };
+        // The caveat is re-stated per call rather than left to `view_state`,
+        // because this is the call that changed which one is true — and an
+        // agent that acts on the old one describes a screen it cannot see.
+        ok_json(&serde_json::json!({
+            "kernel_requested": result.meta.kernel_requested,
+            "kernel_chosen": result.meta.kernel_chosen,
+            "seed_slot": result.meta.seed_slot,
+            "slots_placed": result.meta.live_count,
+            "layout_ms": result.meta.layout_ms,
+            "connected_viewers": self.state.bus.client_count(),
+            "geometry_caveat": geometry_caveat(result.meta.kernel_chosen),
+        }))
+    }
+
+    #[tool(
         description = "Collapse everything back to the entry screen — the type-level meta-graph \
                        the session opened with. Destructive to the human's place in the graph, \
                        so prefer `collapse` on what you added. The type nodes stay; only \
@@ -523,10 +635,12 @@ impl ViewControl {
         description = "Draw an image you can actually look at. `target: live-view` (the default) \
                        draws exactly the nodes and links on the human's screen; `meta` and \
                        `cypher` draw something new WITHOUT touching their view. \
-                       GEOMETRY DIFFERS FROM THEIR SCREEN: the arrangement here is this \
-                       server's own deterministic layout, not the GPU simulation they are \
-                       watching. Same nodes, same links, same truncation banner, different \
-                       positions — so describe what is in the picture, never where it sits."
+                       GEOMETRY DIFFERS FROM THEIR SCREEN: this is a separate layout pass \
+                       with its own fold and its own separation — even under a static kernel \
+                       set by `set_layout` it is not a photograph of the canvas, and with \
+                       their GPU simulation running it is a different arrangement entirely. \
+                       Same nodes, same links, same truncation banner, different positions — \
+                       so describe what is in the picture, never where it sits."
     )]
     async fn render(
         &self,
@@ -592,7 +706,11 @@ impl ViewControl {
             "banners": rendered.banners,
             "width": rendered.width,
             "height": rendered.height,
-            "geometry_caveat": GEOMETRY_CAVEAT,
+            // The caveat about the *view*, not about this picture: what an
+            // agent does with a render is talk to the user about their screen,
+            // and which claims that permits is the live view's question. The
+            // description above is where this pass's own independence is said.
+            "geometry_caveat": geometry_caveat(self.state.session.layout_kernel()),
         });
         // Added rather than always present, so a key that *is* there always
         // carries a number: the canvas clipped the schema, or the grid thinned
@@ -827,13 +945,15 @@ fn into_params(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kglite_visual_core::{GEOMETRY_CAVEAT, GEOMETRY_STATIC_CAVEAT};
 
-    /// The tool surface, by name: D14's nine, plus E4's two saved-query tools.
+    /// The tool surface, by name: D14's nine, E4's two saved-query tools, and
+    /// E5's `set_layout`.
     ///
-    /// A list, not a count: "eleven tools" would still pass if `focus` were
+    /// A list, not a count: "twelve tools" would still pass if `focus` were
     /// renamed to `zoom`, and the name is the API — an agent's prompt refers to
     /// it and a rename breaks every conversation that mentions one.
-    const EXPECTED: [&str; 11] = [
+    const EXPECTED: [&str; 12] = [
         "collapse",
         "expand",
         "focus",
@@ -843,6 +963,7 @@ mod tests {
         "reset_view",
         "run_saved_query",
         "set_appearance",
+        "set_layout",
         "show_cypher",
         "view_state",
     ];
@@ -894,7 +1015,10 @@ mod tests {
         for phrase in [
             "human being is looking at",
             "Last writer wins",
-            "geometry-different",
+            // Conditional since G3, so the phrase asserted is the condition
+            // rather than the old absolute claim: an agent that reads only
+            // "you cannot know geometry" would never reach for `set_layout`.
+            "depends on `view_state.layout_kernel`",
             "kglite-mcp-server",
         ] {
             assert!(
@@ -905,9 +1029,25 @@ mod tests {
     }
 
     #[test]
-    fn the_geometry_caveat_is_cores_one_copy() {
-        // Two wordings of this caveat is one wording that stops being true.
+    fn the_geometry_caveat_is_cores_one_copy_and_switches_on_the_kernel() {
+        // Two wordings of this caveat is one wording that stops being true —
+        // and since G3 there are two *caveats*, so the thing that must stay
+        // single is the function choosing between them.
         assert!(GEOMETRY_CAVEAT.contains("geometry-different"));
+        assert_eq!(geometry_caveat(LayoutKernel::Simulation), GEOMETRY_CAVEAT);
+        assert_eq!(geometry_caveat(LayoutKernel::Auto), GEOMETRY_CAVEAT);
+        for kernel in [
+            LayoutKernel::Radial,
+            LayoutKernel::Islands,
+            LayoutKernel::Force,
+        ] {
+            assert_eq!(
+                geometry_caveat(kernel),
+                GEOMETRY_STATIC_CAVEAT,
+                "{kernel:?} is a layout this server computed and can describe"
+            );
+        }
+
         let render = router()
             .get("render")
             .expect("render is in the surface")

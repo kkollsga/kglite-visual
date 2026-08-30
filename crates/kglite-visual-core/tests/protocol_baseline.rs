@@ -20,6 +20,16 @@
 //! at the first word of the first frame instead. The twelve v1/v2 message
 //! codes are unchanged, which is what the per-case dumps below still prove.
 //!
+//! **The v3 -> v4 regeneration, 2026-08-30 (G3), and its reason.** Same
+//! mechanism, same deliberateness: `MessageType::Layout` lets the server
+//! compute a *static* arrangement for the live view and push it to every client
+//! (plan E5), so a v3 client attached to a v4 server would meet a frame it has
+//! no case for. The bump also carries two additive JSON fields
+//! (`QueryTable.profile`, `PropertyStatsResponse.caption_candidate`) which
+//! would have needed no bump alone — they ride this one so the program has one
+//! skew point rather than three (E6). The fifteen v1/v2/v3 message codes are
+//! unchanged, which the per-case dumps below still prove.
+//!
 //! **Both are exact baselines, so both fail the moment "make it pass" is
 //! cheaper than "explain the diff"** (CLAUDE.md → "Gate honesty"). A red
 //! baseline after a deliberate protocol change is a conscious decision:
@@ -171,6 +181,17 @@ fn generate_framing_golden() {
         ("appearance", {
             let mut enc = ResponseEncoder::new();
             enc.push_json(MessageType::Appearance, r#"{"color_by":"field"}"#);
+            enc.finish()
+        }),
+        // v4's layout (E5). Two frames, and the pairing is the point: the
+        // metadata says which kernel ran and the Points frame that follows
+        // covers the WHOLE slot space rather than starting at a `first_slot`,
+        // which is the one framing rule a reader of the constants alone would
+        // not learn.
+        ("layout", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::Layout, r#"{"kernel_chosen":"islands"}"#);
+            enc.push_f32(MessageType::Points, &[1.0, -2.0, 3.0, 4.0]);
             enc.finish()
         }),
     ];

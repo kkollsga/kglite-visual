@@ -26,8 +26,10 @@ use crate::expand::{self, ExpansionPreview, PreviewScope};
 use crate::meta_graph::{self, DetailTier, MetaGraphResponse, MetaGraphStats};
 use crate::protocol::{MessageType, ResponseEncoder, PROTOCOL_VERSION};
 use crate::query::{self, QueryConfig, QueryTable, SearchResponse};
+use crate::render::live_layout::{layout_live_view, LayoutResult};
 use crate::request::{
-    CypherRequest, ExpandRequest, Request, SearchRequest, SlotRequest, TypeRequest,
+    CypherRequest, ExpandRequest, LayoutKernel, LayoutRequest, Request, SearchRequest, SlotRequest,
+    TypeRequest,
 };
 use crate::stats::{self, NodeDetail, PropertyStatsResponse};
 use crate::validate::{validate_query, ValidateResponse};
@@ -98,16 +100,58 @@ pub struct DescribeResponse {
     pub schema: serde_json::Value,
 }
 
-/// The caveat every agent-facing surface has to repeat.
+/// The caveat every agent-facing surface has to repeat **while the viewer's own
+/// simulation owns the geometry** — which is where every session starts.
 ///
-/// One constant, because it is asserted by the MCP tool descriptions, returned
-/// inside [`ViewState`], and true of every `render` this server can produce.
-/// Three copies of a caveat is three places for it to stop being true.
+/// One constant, because it is asserted by the MCP tool descriptions and
+/// returned inside [`ViewState`]. Three copies of a caveat is three places for
+/// it to stop being true.
+///
+/// **It stopped being unconditional in G3** (`R17`). Until the layout wire
+/// existed, "the server does not know where the points ended up" was a fact
+/// about the architecture: the only positions the server ever sent were a seed
+/// the GPU immediately overwrote. A static kernel (plan E5) inverts that — the
+/// server computes the arrangement, the client applies it authoritatively, the
+/// simulation is destroyed and dragging is off — so the sentence below would be
+/// a false claim on exactly the views a peer most wants to describe. Which of
+/// the two applies is [`geometry_caveat`]'s answer, and
+/// [`ViewState::layout_kernel`] is the field it reads.
 pub const GEOMETRY_CAVEAT: &str = "The live layout runs on the viewer's GPU and the server does \
-     not know where the points ended up. A render of this view is \
-     content-identical and geometry-different: same nodes, same links, same \
+     not know where the points ended up (`layout_kernel` is `simulation`). A render of this view \
+     is content-identical and geometry-different: same nodes, same links, same \
      truncation, a different arrangement. Describe what is in the view, never \
-     where it is on the user's screen.";
+     where it is on the user's screen — or ask for a static layout, after which \
+     the arrangement is this server's own and can be described.";
+
+/// …and the caveat that replaces it once a static kernel is in force.
+///
+/// Still a caveat, because two things stay unknowable. The **camera** is the
+/// viewer's — they zoom and pan freely — so relative position is describable
+/// and screen position is not, which is the same rule as before applied one
+/// level down. And `render` is a *separate* pass with its own fold, its own
+/// separation and its own choice of kernel, so its picture is not a photograph
+/// of the screen either.
+pub const GEOMETRY_STATIC_CAVEAT: &str =
+    "This view is under a static layout THIS SERVER computed (`layout_kernel` names the \
+     kernel): the viewer's simulation is off, dragging is disabled, and nothing moves a point \
+     until the next layout request. So the arrangement on their screen is the one that was \
+     sent, and relative position is safe to describe — 'the ring around X', 'the island on \
+     the left'. Their camera is still their own, so never name a screen coordinate; and \
+     `render` lays out independently (it folds fans and separates circles for the page it \
+     draws), so its picture may still differ from what they see.";
+
+/// Which caveat is true right now.
+///
+/// One function rather than a branch at each surface: the whole reason the
+/// caveat is a constant is that a second copy is a second place for it to rot,
+/// and a second `if` is exactly that in another shape.
+pub const fn geometry_caveat(kernel: LayoutKernel) -> &'static str {
+    if kernel.is_static() {
+        GEOMETRY_STATIC_CAVEAT
+    } else {
+        GEOMETRY_CAVEAT
+    }
+}
 
 /// What the last view-mutating response did, kept so an agent can ask.
 ///
@@ -172,8 +216,17 @@ pub struct ViewState {
     pub instances_by_type: Vec<(String, u32)>,
     pub last_slice: Option<LastSlice>,
     pub bounds: ViewBounds,
-    /// [`GEOMETRY_CAVEAT`], carried in the payload so a client that only ever
-    /// reads tool *results* still meets it.
+    /// Who owns the arrangement on screen (plan E5).
+    ///
+    /// `simulation` — the session default — means the viewer's GPU does, and
+    /// the server does not know where anything is. Any other value is a kernel
+    /// this server computed and broadcast, under which the simulation is off
+    /// and dragging is disabled: the arrangement is knowable, which is what
+    /// [`geometry_caveat`] switches on.
+    pub layout_kernel: LayoutKernel,
+    /// [`GEOMETRY_CAVEAT`] or [`GEOMETRY_STATIC_CAVEAT`], whichever
+    /// `layout_kernel` makes true — carried in the payload so a client that
+    /// only ever reads tool *results* still meets it.
     pub geometry_caveat: &'static str,
 }
 
@@ -215,6 +268,7 @@ pub enum Response {
     NodeDetail(NodeDetail),
     Search(SearchResponse),
     PropertyStats(PropertyStatsResponse),
+    Layout(LayoutResult),
 }
 
 /// An open graph.
@@ -229,6 +283,16 @@ pub struct Session {
     /// asking "what did the bound last do" must not be blocked by an expansion
     /// that is still walking the graph.
     last_slice: RwLock<Option<LastSlice>>,
+    /// Who owns the geometry right now (plan E5). Its own lock for the same
+    /// reason `last_slice` has one: it is written on the way out of a layout
+    /// request and read by every `view_state`, and neither should wait on a
+    /// walk of the graph.
+    ///
+    /// **Session state rather than per-client state, because the view is
+    /// shared** (D14): one slot space, one arrangement, and a second browser
+    /// attaching to a statically laid-out view has to be told which mode it
+    /// joined.
+    layout_kernel: RwLock<LayoutKernel>,
 }
 
 impl Session {
@@ -251,6 +315,8 @@ impl Session {
             meta_graph,
             config,
             last_slice: RwLock::new(None),
+            // The viewer's GPU owns the layout until somebody asks otherwise.
+            layout_kernel: RwLock::new(LayoutKernel::Simulation),
         }
     }
 
@@ -354,7 +420,31 @@ impl Session {
             Request::NodeDetail(req) => self.node_detail(req).map(Response::NodeDetail),
             Request::Search(req) => self.search(req).map(Response::Search),
             Request::PropertyStats(req) => self.property_stats(req).map(Response::PropertyStats),
+            Request::Layout(req) => self.layout(req).map(Response::Layout),
         }
+    }
+
+    /// Compute a static arrangement for the live view (plan E5).
+    ///
+    /// The kernel is recorded **only after the layout succeeded**: a refused
+    /// `geo` must not leave the session claiming it knows a geometry it never
+    /// computed, and that is the same order every other state write here takes.
+    fn layout(&self, request: &LayoutRequest) -> Result<LayoutResult, CoreError> {
+        let result = layout_live_view(self, request)?;
+        *self
+            .layout_kernel
+            .write()
+            .expect("the layout lock was poisoned by a panicking request") =
+            result.meta.kernel_chosen;
+        Ok(result)
+    }
+
+    /// Who owns the arrangement on screen. See [`ViewState::layout_kernel`].
+    pub fn layout_kernel(&self) -> LayoutKernel {
+        *self
+            .layout_kernel
+            .read()
+            .expect("the layout lock was poisoned by a panicking request")
     }
 
     fn cypher(&self, request: &CypherRequest) -> Result<Response, CoreError> {
@@ -701,10 +791,12 @@ impl Session {
     /// What is on the shared screen, as structured truth (D14).
     ///
     /// The answer to "what is the user looking at" for a peer that cannot look.
-    /// Everything here is a fact about *content*; nothing here is a fact about
-    /// geometry, and [`GEOMETRY_CAVEAT`] rides along saying so.
+    /// Everything here but one field is a fact about *content*; the exception
+    /// is [`ViewState::layout_kernel`], which says who owns the geometry, and
+    /// [`geometry_caveat`] rides along saying what that permits.
     pub fn view_state(&self) -> ViewState {
         let view = self.read();
+        let layout_kernel = self.layout_kernel();
 
         let mut instances: std::collections::BTreeMap<&str, u32> =
             std::collections::BTreeMap::new();
@@ -759,7 +851,8 @@ impl Session {
                 max_query_rows: query::MAX_QUERY_ROWS as u32,
                 query_timeout_secs: self.config.timeout.as_secs().min(u64::from(u32::MAX)) as u32,
             },
-            geometry_caveat: GEOMETRY_CAVEAT,
+            layout_kernel,
+            geometry_caveat: geometry_caveat(layout_kernel),
         }
     }
 
@@ -876,6 +969,14 @@ pub fn response_frames(response: &Response) -> Vec<Vec<u8>> {
             }
             enc.push_f32(MessageType::Points, &slice.points);
             enc.push_f32(MessageType::Links, &slice.links);
+        }
+        Response::Layout(result) => {
+            // Metadata then positions, the same order every other array-bearing
+            // response uses. No links frame: a layout moves points and touches
+            // no edge, and sending the link list again would be re-stating what
+            // the client already holds.
+            enc.push_json(MessageType::Layout, &json_of(&result.meta));
+            enc.push_f32(MessageType::Points, &result.points);
         }
     }
     enc.finish()

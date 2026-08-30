@@ -60,7 +60,19 @@ use std::fmt;
 /// exactly the reason it moved at v2: the skew belongs at the first word of
 /// the first frame, not at the first unfamiliar message. The layout rules
 /// above did not move, and the twelve v1/v2 codes keep their values.
-pub const PROTOCOL_VERSION: u32 = 3;
+///
+/// **v4 (G3)** added [`MessageType::Layout`] — the server computing a *static*
+/// arrangement for the live view and pushing it to every client (plan E5) —
+/// and it moves the number for the v3 reason exactly: a v3 client attached to
+/// a v4 server would meet a `Layout` frame it has no case for, mid-session,
+/// after drawing correctly for a while. The same bump also carries two
+/// **additive JSON fields** — `QueryTable.profile` and
+/// `PropertyStatsResponse.caption_candidate` — which on their own would need
+/// no bump at all: a decoder that ignores an unknown key is not broken by one.
+/// They ride here because the message type forced a bump anyway and one skew
+/// point is cheaper to reason about than three (plan E6). The layout rules
+/// above did not move, and the fifteen v1/v2/v3 codes keep their values.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Header size in bytes (6 × `u32`).
 pub const HEADER_BYTES: usize = 24;
@@ -144,6 +156,12 @@ pub enum MessageType {
     /// UTF-8 JSON: drive the colour-by / size-by channels
     /// (`control::Appearance`, D14).
     Appearance = 15,
+    /// UTF-8 JSON: the metadata half of a server-computed static layout
+    /// (`render::LayoutMeta`, plan E5). The accompanying
+    /// [`MessageType::Points`] frame carries one position per slot over the
+    /// **whole** slot space, tombstones included as NaN — unlike a slice's
+    /// points, which start at `first_slot`.
+    Layout = 16,
 }
 
 impl MessageType {
@@ -155,7 +173,7 @@ impl MessageType {
     /// Every variant, in wire order — the one list the TypeScript mirror and
     /// the decoder are both generated from, so a new variant cannot be added
     /// to one and forgotten in the other.
-    pub const ALL: [MessageType; 15] = [
+    pub const ALL: [MessageType; 16] = [
         MessageType::MetaGraphMeta,
         MessageType::Points,
         MessageType::Links,
@@ -171,6 +189,7 @@ impl MessageType {
         MessageType::Focus,
         MessageType::Highlight,
         MessageType::Appearance,
+        MessageType::Layout,
     ];
 
     /// The TypeScript constant name for this variant.
@@ -191,6 +210,7 @@ impl MessageType {
             MessageType::Focus => "FOCUS",
             MessageType::Highlight => "HIGHLIGHT",
             MessageType::Appearance => "APPEARANCE",
+            MessageType::Layout => "LAYOUT",
         }
     }
 
@@ -603,7 +623,9 @@ mod tests {
         assert_eq!(MessageType::Focus.code(), 13);
         assert_eq!(MessageType::Highlight.code(), 14);
         assert_eq!(MessageType::Appearance.code(), 15);
-        assert_eq!(MessageType::ALL.len(), 15, "a new variant must join ALL");
+        // v4's static layout. Appended, never renumbered.
+        assert_eq!(MessageType::Layout.code(), 16);
+        assert_eq!(MessageType::ALL.len(), 16, "a new variant must join ALL");
     }
 
     #[test]

@@ -53,7 +53,10 @@ test('MCP protocol: initialize, list_tools, call_tool over streamable HTTP', asy
     // its four load-bearing claims, asserted where they actually ship.
     expect(info.instructions).toContain('human being is looking at')
     expect(info.instructions).toContain('Last writer wins')
-    expect(info.instructions).toContain('geometry-different')
+    // The geometry rule is CONDITIONAL since G3 (plan E5): an agent that read
+    // only "you cannot know geometry" would never reach for `set_layout`, and
+    // the caveat it must not lose is the one naming the condition.
+    expect(info.instructions).toContain('depends on `view_state.layout_kernel`')
 
     const tools = await mcp.listTools()
     expect(tools.map((tool) => tool.name).sort()).toEqual([
@@ -66,6 +69,7 @@ test('MCP protocol: initialize, list_tools, call_tool over streamable HTTP', asy
       'reset_view',
       'run_saved_query',
       'set_appearance',
+      'set_layout',
       'show_cypher',
       'view_state',
     ])

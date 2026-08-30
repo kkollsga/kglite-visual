@@ -124,6 +124,13 @@ impl Bus {
             // collapse, "show in graph" and a search's load-into-view all
             // arrive as one.
             Response::Slice(_) => true,
+            // A layout changes no slot — but it changes what every attached
+            // screen looks like, and the mode it is in. Two clients disagreeing
+            // about whether the simulation is running is the same divergence
+            // this module exists to close, one level up from the slot space:
+            // one of them would be dragging points the other believes are
+            // pinned. So it broadcasts, exactly like a steering command (D14).
+            Response::Layout(_) => true,
             // Answers *about* the graph, not changes to what is drawn. A query
             // table, an expansion preview, one node's properties, a search hit
             // list and a type's property statistics leave the slot space

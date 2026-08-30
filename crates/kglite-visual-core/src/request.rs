@@ -47,6 +47,68 @@ pub enum SearchMode {
     StartsWith,
 }
 
+/// Which arrangement the server should compute for the live view (plan E5).
+///
+/// **A vocabulary, not a string**, so a kernel this build does not implement is
+/// refused by name — `serde` reports the value it could not read — rather than
+/// silently falling through to the default. [`LayoutKernel::Geo`] is the case
+/// that makes the distinction load-bearing: it is a *named* kernel with no
+/// implementation until G4, and a caller asking for it deserves the sentence
+/// saying so instead of a force layout it did not ask for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/generated/")]
+#[serde(rename_all = "kebab-case")]
+pub enum LayoutKernel {
+    /// Let `render::structure::plan` read the scene and choose. The default,
+    /// because the structure-aware choice is what the headless render already
+    /// makes and a caller with no opinion wants the same answer.
+    #[default]
+    Auto,
+    /// Hop rings around one centre.
+    Radial,
+    /// Communities laid out separately and packed.
+    Islands,
+    /// The seeded Fruchterman–Reingold fallback.
+    Force,
+    /// Geographic projection. Named here and refused until G4 lands it, so the
+    /// refusal is a sentence rather than a parse error.
+    Geo,
+    /// **Not a kernel: the absence of one.** Hand the geometry back to the
+    /// viewer's GPU force simulation, which is where it starts.
+    ///
+    /// It is a request rather than a purely client-side switch because the
+    /// server has to know: the whole value of a static layout, for a peer that
+    /// cannot see the screen, is that the arrangement is then *knowable* — and
+    /// a client that dropped back to its own simulation without saying so would
+    /// leave `view_state` claiming knowledge of a picture the GPU is now
+    /// moving. It is also what keeps two clients and an agent agreeing about
+    /// which mode the shared view is in.
+    Simulation,
+}
+
+impl LayoutKernel {
+    /// The wire spelling, for a message that has to name the kernel it chose.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Radial => "radial",
+            Self::Islands => "islands",
+            Self::Force => "force",
+            Self::Geo => "geo",
+            Self::Simulation => "simulation",
+        }
+    }
+
+    /// True while the server knows where the points are.
+    ///
+    /// The one question [`crate::session::geometry_caveat`] asks, kept beside
+    /// the vocabulary rather than in the caveat, so a kernel added later
+    /// answers it here and every caveat follows.
+    pub const fn is_static(self) -> bool {
+        matches!(self, Self::Radial | Self::Islands | Self::Force | Self::Geo)
+    }
+}
+
 /// Everything a client can ask for.
 ///
 /// Externally tagged on `"type"`, kebab-case, so a hand-written `curl` body and
@@ -71,6 +133,10 @@ pub enum Request {
     Search(SearchRequest),
     /// Per-property statistics for a type, for the color-by / size-by menus.
     PropertyStats(TypeRequest),
+    /// Compute a static arrangement for the live view and push it to every
+    /// client (plan E5). Changes no slot, tombstones nothing, adds no link —
+    /// it moves the picture, not the graph.
+    Layout(LayoutRequest),
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -138,6 +204,18 @@ pub struct TypeRequest {
     pub node_type: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/generated/")]
+pub struct LayoutRequest {
+    #[serde(default)]
+    pub kernel: LayoutKernel,
+    /// The slot a radial layout should be centred on. Ignored by every other
+    /// kernel, and optional even for `radial`: with no hint the structure pass
+    /// picks the centre it would have picked on its own.
+    #[serde(default)]
+    pub seed_slot: Option<u32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +253,35 @@ mod tests {
         };
         assert!(cypher.params.is_empty());
         assert!(!cypher.as_graph);
+    }
+
+    #[test]
+    fn a_layout_request_defaults_to_auto_and_names_an_unknown_kernel() {
+        let request: Request = serde_json::from_str(r#"{"type":"layout"}"#).expect("minimal body");
+        let Request::Layout(layout) = request else {
+            panic!("wrong variant");
+        };
+        assert_eq!(layout.kernel, LayoutKernel::Auto);
+        assert_eq!(layout.seed_slot, None);
+
+        let request: Request =
+            serde_json::from_str(r#"{"type":"layout","kernel":"islands","seed_slot":4}"#)
+                .expect("the documented body must parse");
+        let Request::Layout(layout) = request else {
+            panic!("wrong variant");
+        };
+        assert_eq!(layout.kernel, LayoutKernel::Islands);
+        assert_eq!(layout.seed_slot, Some(4));
+
+        // A kernel this build has never heard of is refused BY NAME rather
+        // than defaulting to `auto`: an arrangement the caller did not ask for
+        // is indistinguishable on screen from the one it did.
+        let err = serde_json::from_str::<Request>(r#"{"type":"layout","kernel":"spiral"}"#)
+            .expect_err("an unknown kernel must not parse");
+        assert!(
+            err.to_string().contains("spiral"),
+            "the message must name the kernel it refused: {err}"
+        );
     }
 
     #[test]
