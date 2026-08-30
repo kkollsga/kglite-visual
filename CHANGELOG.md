@@ -11,6 +11,8 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-30
+
 ### Fixed
 
 - **The table of a type's nodes asked for the wrong nodes.** kglite's Cypher
