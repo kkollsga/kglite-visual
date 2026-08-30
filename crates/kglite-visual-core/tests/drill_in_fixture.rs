@@ -788,3 +788,116 @@ fn an_expansion_that_triggers_a_compaction_still_reports_the_nodes_it_added() {
         "the whole array, from slot zero"
     );
 }
+
+/// The resync a newly connected client is handed, against a view that has
+/// already moved (G5 commit 0).
+///
+/// The defect it replaces was structural rather than arithmetical: the greeting
+/// described the session's *opening* state, so a client joining a drilled-into
+/// view was given a slot space whose middle it had never been told about, and
+/// the next broadcast's `first_slot` spliced positions in over the top of the
+/// gap. Every assertion below is about the newcomer having no gap to fall into.
+#[test]
+fn a_resync_describes_the_whole_view_including_its_holes() {
+    let session = open_fixture();
+    // Expand 60 Person, then collapse 40 of them by tombstoning City's members
+    // — a view with instances AND holes, which is the shape a naive "send the
+    // slices again" resync gets wrong.
+    slice(&session, &expand_request("KNOWS", EdgeDirection::Out, None));
+    let city_slot = session
+        .slot_of_type("City")
+        .expect("City is on the meta-graph");
+    slice(
+        &session,
+        &expand_request("LIVES_IN", EdgeDirection::Out, None),
+    );
+    slice(
+        &session,
+        &Request::Collapse(SlotRequest { slot: city_slot }),
+    );
+
+    let before = session.view_state();
+    let sync = session.sync_slice();
+
+    assert_eq!(sync.meta.kind, SliceKind::Sync);
+    assert_eq!(
+        sync.meta.first_slot, 0,
+        "a newcomer has nothing to splice into"
+    );
+    assert_eq!(sync.meta.slot_count, before.slot_count);
+    assert_eq!(
+        sync.points.len(),
+        before.slot_count as usize * 2,
+        "positions for the whole space, meta-graph slots included"
+    );
+    assert!(sync.compaction.is_none(), "a resync reclaims nothing");
+    assert_eq!(sync.meta.tombstones.len(), before.tombstone_count as usize);
+    assert_eq!(
+        sync.meta.nodes.len() as u32,
+        before.live_count - before.types.len() as u32,
+        "every live instance is named; the type nodes came with the meta-graph"
+    );
+    for node in &sync.meta.nodes {
+        assert!(
+            !sync.meta.tombstones.contains(&node.slot),
+            "slot {} is named and a hole at the same time",
+            node.slot
+        );
+        assert!(!node.title.is_empty(), "slot {} arrived unnamed", node.slot);
+    }
+    assert_eq!(sync.meta.edges.len(), before.link_count as usize);
+
+    // …and it changed nothing. `last_slice` is what the bound last did, and a
+    // client connecting is not something that happened to the view.
+    let after = session.view_state();
+    assert_eq!(after.slot_count, before.slot_count);
+    assert_eq!(after.tombstone_count, before.tombstone_count);
+    assert_eq!(
+        after.last_slice.map(|s| s.kind),
+        Some(SliceKind::Collapse),
+        "the resync overwrote the report of the collapse that preceded it"
+    );
+}
+
+/// The layout half of the resync: what the newcomer is told about *where*.
+///
+/// `None` under the simulation is the load-bearing case — the server does not
+/// know where anything is there, and shipping a remembered static arrangement
+/// to a client whose peers are all simulating would put it in a picture nobody
+/// else is looking at.
+#[test]
+fn the_remembered_layout_is_offered_only_while_the_server_owns_the_geometry() {
+    use kglite_visual_core::request::{LayoutKernel, LayoutRequest};
+
+    let session = open_fixture();
+    assert!(
+        session.last_layout().is_none(),
+        "a session starts under the viewer's GPU"
+    );
+
+    session
+        .handle(&Request::Layout(LayoutRequest {
+            kernel: LayoutKernel::Islands,
+            seed_slot: None,
+        }))
+        .expect("a layout over the meta-graph succeeds");
+    let held = session
+        .last_layout()
+        .expect("a static kernel is remembered");
+    assert!(held.meta.kernel_chosen.is_static());
+    assert_eq!(
+        held.points.len(),
+        session.view_state().slot_count as usize * 2
+    );
+
+    session
+        .handle(&Request::Layout(LayoutRequest {
+            kernel: LayoutKernel::Simulation,
+            seed_slot: None,
+        }))
+        .expect("handing the layout back succeeds");
+    assert!(
+        session.last_layout().is_none(),
+        "the arrangement is the viewer's again, so the server has none to offer"
+    );
+}

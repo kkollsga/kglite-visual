@@ -84,6 +84,18 @@ export class SlotView {
     return this.slotCount - this.tombstones.size
   }
 
+  /**
+   * Slots this client holds an identity for.
+   *
+   * Equal to `liveCount` on a client that has seen every slice; smaller on one
+   * that joined a session already in progress and was never told what the
+   * earlier slices added. That gap is the defect `Session::sync_slice` closes,
+   * and this is the number it is measured by.
+   */
+  get namedCount(): number {
+    return this.labels.size
+  }
+
   get linkCount(): number {
     return this.links.length / 2
   }

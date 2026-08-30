@@ -15,6 +15,8 @@ import path from 'node:path'
 
 import type { Page } from '@playwright/test'
 
+import { ResponseAssembler, decodeFrame, type Completed } from '../../src/protocol'
+
 // Playwright runs with the config's directory as cwd, so the repo root is one
 // level up. Derived rather than hard-coded, and verified below: a wrong root
 // would otherwise surface as "binary not found", which reads like a build
@@ -114,6 +116,67 @@ export async function launch(): Promise<Launched> {
   })
 
   return { process: child, info, stderr }
+}
+
+/**
+ * A bare protocol client: no browser, no renderer, just the socket.
+ *
+ * Node 22 ships a global `WebSocket`, so a multi-client test needs no
+ * dependency the app does not already have — and a client with no renderer is
+ * the honest shape for "what did the *transport* hand this peer", which is the
+ * question both the broadcast and the resync specs ask.
+ */
+export class Listener {
+  private readonly socket: WebSocket
+  private readonly assembler = new ResponseAssembler()
+  readonly received: Completed[] = []
+
+  constructor(url: string) {
+    this.socket = new WebSocket(url)
+    this.socket.binaryType = 'arraybuffer'
+    this.socket.onmessage = (event: MessageEvent<unknown>) => {
+      if (!(event.data instanceof ArrayBuffer)) return
+      const done = this.assembler.push(decodeFrame(event.data))
+      if (done !== null) this.received.push(done)
+    }
+  }
+
+  /**
+   * Connect and wait out the greeting.
+   *
+   * The opening messages every client gets are session info, the meta-graph,
+   * and the resync slice that says what the view holds *now* (`resync.spec.ts`
+   * is where that one is under test). Waiting for the last of them means a
+   * later `waitFor` cannot pass on the greeting instead of on the broadcast it
+   * is actually asserting.
+   */
+  async open(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      this.socket.onopen = () => resolve()
+      this.socket.onerror = () => reject(new Error(`websocket failed: ${this.socket.url}`))
+    })
+    await this.waitFor((done) => done.kind === 'slice' && done.value.meta.kind === 'sync')
+  }
+
+  async waitFor(predicate: (done: Completed) => boolean, timeoutMs = 15_000): Promise<Completed> {
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      const found = this.received.find(predicate)
+      if (found !== undefined) return found
+      if (Date.now() > deadline) {
+        throw new Error(
+          `no matching message in ${timeoutMs}ms; got ${this.received
+            .map((m) => m.kind)
+            .join(', ')}`,
+        )
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+  }
+
+  close(): void {
+    this.socket.close()
+  }
 }
 
 /**

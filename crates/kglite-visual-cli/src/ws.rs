@@ -10,6 +10,12 @@
 //! a `curl`, another tab. See [`crate::broadcast`] for who receives what and
 //! why the initiating socket deliberately does not get a private copy of its
 //! own slice.
+//!
+//! **A socket also opens onto a session in progress.** The greeting is
+//! therefore three things, not two: who this server is, the entry screen, and
+//! the view as it stands right now ([`resync_frames`]). A client that was told
+//! only the first two would be assuming the session had not moved since it
+//! opened, which is exactly what a second browser cannot assume.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -17,7 +23,10 @@ use axum::response::Response;
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use kglite_visual_core::session::{error_frames, response_frames};
+// Aliased: `axum::response::Response` is already in scope here, and the two
+// mean very different things — an HTTP response, and one answer from core.
 use kglite_visual_core::Request;
+use kglite_visual_core::Response as CoreResponse;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::broadcast::{AppState, Update};
@@ -79,9 +88,18 @@ async fn serve(socket: WebSocket, state: AppState) {
     // Session info first, then the meta-graph: a client that cannot decode
     // this server's protocol version learns it from the smallest possible
     // message rather than after buffering an entire meta-graph.
+    //
+    // …and then the view as it stands. The meta-graph is where a session
+    // *starts*, and a client attaching to one that has been drilled into would
+    // otherwise assume that start is the present — see `Session::sync_slice`
+    // for what that assumption cost. Sent unconditionally rather than only when
+    // the view has moved: a sync over an untouched session is the meta-graph's
+    // own slot space restated, which costs one small frame and removes the
+    // branch that would have to decide correctly what "has moved" means.
     for frames in [
         state.session.session_info_frames(),
         state.session.meta_graph_frames(),
+        resync_frames(&state).await,
     ] {
         if !send_all(&mut sink, &frames).await {
             return;
@@ -104,6 +122,40 @@ async fn serve(socket: WebSocket, state: AppState) {
                     return;
                 }
             }
+        }
+    }
+}
+
+/// The session's current state, for the socket that has just opened.
+///
+/// Two frames' worth, and the pair is the point: `sync_slice` says what is in
+/// the view, and the remembered layout says where — a client that got the first
+/// without the second would draw the right nodes under its own simulation while
+/// every other client holds a static arrangement this server computed.
+///
+/// **Addressed to this socket, not published.** Every other client already has
+/// all of it.
+async fn resync_frames(state: &AppState) -> Vec<Vec<u8>> {
+    let session = std::sync::Arc::clone(&state.session);
+    // A walk of the slot space, not of the graph — but it allocates a position
+    // array and the whole link list, and this runs on the reactor that is
+    // feeding every other socket.
+    match tokio::task::spawn_blocking(move || {
+        let mut frames = response_frames(&CoreResponse::Slice(session.sync_slice()));
+        if let Some(layout) = session.last_layout() {
+            frames.extend(response_frames(&CoreResponse::Layout(layout)));
+        }
+        frames
+    })
+    .await
+    {
+        Ok(frames) => frames,
+        Err(err) => {
+            eprintln!("kglite-visual: resync task failed: {err}");
+            error_frames(
+                "the server could not describe the current view to this client; \
+                 reload the page to try again",
+            )
         }
     }
 }

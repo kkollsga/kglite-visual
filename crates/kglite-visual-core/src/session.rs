@@ -293,6 +293,15 @@ pub struct Session {
     /// attaching to a statically laid-out view has to be told which mode it
     /// joined.
     layout_kernel: RwLock<LayoutKernel>,
+    /// The last arrangement this server computed, kept so a client that
+    /// connects afterwards can be handed the **same** one.
+    ///
+    /// Recomputing it on connect would not do: `radial` centres on a
+    /// `seed_slot` the session does not store, and re-running the kernel
+    /// without it would place the newcomer's rings around a different node
+    /// than the incumbent's. The answer that was broadcast is the only one that
+    /// is definitionally in agreement with what every other client is holding.
+    last_layout: RwLock<Option<LayoutResult>>,
 }
 
 impl Session {
@@ -317,6 +326,7 @@ impl Session {
             last_slice: RwLock::new(None),
             // The viewer's GPU owns the layout until somebody asks otherwise.
             layout_kernel: RwLock::new(LayoutKernel::Simulation),
+            last_layout: RwLock::new(None),
         }
     }
 
@@ -436,6 +446,18 @@ impl Session {
             .write()
             .expect("the layout lock was poisoned by a panicking request") =
             result.meta.kernel_chosen;
+        // `simulation` hands the arrangement back to the viewer's GPU, and from
+        // that moment the server does not know where anything is. Keeping the
+        // last static answer around would let a later resync push a stale
+        // arrangement onto a newcomer whose peers are all simulating.
+        *self
+            .last_layout
+            .write()
+            .expect("the layout lock was poisoned by a panicking request") = result
+            .meta
+            .kernel_chosen
+            .is_static()
+            .then(|| result.clone());
         Ok(result)
     }
 
@@ -445,6 +467,20 @@ impl Session {
             .layout_kernel
             .read()
             .expect("the layout lock was poisoned by a panicking request")
+    }
+
+    /// The arrangement every attached client is currently holding, if the
+    /// server owns it. `None` under the simulation, where nobody does.
+    ///
+    /// The second half of the resync: [`Session::sync_slice`] tells a newcomer
+    /// what is in the view, and this tells it where — see the field's own
+    /// documentation for why it is the remembered answer rather than a fresh
+    /// one.
+    pub fn last_layout(&self) -> Option<LayoutResult> {
+        self.last_layout
+            .read()
+            .expect("the layout lock was poisoned by a panicking request")
+            .clone()
     }
 
     fn cypher(&self, request: &CypherRequest) -> Result<Response, CoreError> {
@@ -786,6 +822,87 @@ impl Session {
                 links: BoundInfo::new(0, 0),
             },
         )
+    }
+
+    /// The whole view, from slot zero, for a client that has just connected.
+    ///
+    /// **The session's truth, not an assumption the newcomer has to make.** A
+    /// client used to be greeted with the session info and the meta-graph and
+    /// nothing else — slots `0..n`, the entry screen — which is the *opening*
+    /// state of a session, not necessarily its current one. Attach to a session
+    /// somebody has already drilled into and the two disagree: the next
+    /// broadcast arrives with a `first_slot` past the end of the positions
+    /// array this client holds, [`crate::view::SliceKind`]'s splice grows the
+    /// array over the gap, and every slot in between draws as a point with no
+    /// label, no id and nothing to click. Measured in G4 on sodir: 144 of them.
+    ///
+    /// **An ordinary [`GraphSlice`], deliberately, rather than a frame of its
+    /// own.** `first_slot = 0` with positions for the whole space is a shape
+    /// the client already decodes — it is what a compaction sends, minus the
+    /// remap — so the fix needs no message type, no protocol bump and no second
+    /// assembly path that could drift from the first. What it does need is its
+    /// own [`SliceKind`], because it is not a change to anything.
+    ///
+    /// It therefore also does **not** touch `last_slice`: that field answers
+    /// "what did the bound do to the last thing that happened", and a client
+    /// connecting is not a thing that happened to the view. Nor is it published
+    /// to the bus — it is addressed to one socket, and broadcasting a full view
+    /// to everyone on every connect would re-upload the whole space to clients
+    /// that already hold it.
+    pub fn sync_slice(&self) -> GraphSlice {
+        let view = self.read();
+        let mut nodes: Vec<SliceNode> = Vec::new();
+        let mut tombstones: Vec<u32> = Vec::new();
+        for (slot, entry) in view.entries_with_tombstones() {
+            match entry {
+                SlotEntry::Node {
+                    node_id,
+                    node_type,
+                    title,
+                } => nodes.push(SliceNode {
+                    slot,
+                    node_id: *node_id,
+                    node_type: node_type.clone(),
+                    title: title.clone(),
+                }),
+                SlotEntry::Tombstone => tombstones.push(slot),
+                // The type nodes are already this client's: they arrived in the
+                // meta-graph frames immediately before this one, with their
+                // names, counts and capability badges. Re-sending them as
+                // instance nodes would overwrite that richer label with a
+                // poorer one.
+                SlotEntry::Type { .. } => {}
+            }
+        }
+
+        let links: Vec<f32> = view
+            .edges()
+            .iter()
+            .flat_map(|e| [e.source_slot as f32, e.target_slot as f32])
+            .collect();
+        let node_count = nodes.len();
+        let link_count = view.edges().len();
+        GraphSlice {
+            meta: GraphSliceMeta {
+                protocol_version: PROTOCOL_VERSION,
+                kind: SliceKind::Sync,
+                first_slot: 0,
+                nodes,
+                tombstones,
+                edges: view.edges().to_vec(),
+                slot_count: view.slot_count(),
+                tombstone_count: view.tombstone_count(),
+                // Nothing was cut from this: it is the view, whole. The bounds
+                // that shaped it fired on the slices that built it, and those
+                // are reported by `last_slice`, which this deliberately leaves
+                // alone.
+                bound: BoundInfo::new(node_count, node_count),
+                link_bound: BoundInfo::new(link_count, link_count),
+            },
+            compaction: None,
+            points: layout::positions_for(view.slot_count()),
+            links,
+        }
     }
 
     /// What is on the shared screen, as structured truth (D14).

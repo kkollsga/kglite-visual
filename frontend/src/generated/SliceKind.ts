@@ -4,4 +4,4 @@
  * Why a slice was produced. The client shows a different banner for each, and
  * a collapse that arrived looking like an expansion would read as data loss.
  */
-export type SliceKind = "expand" | "collapse" | "query" | "search";
+export type SliceKind = "expand" | "collapse" | "query" | "search" | "sync";

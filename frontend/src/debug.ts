@@ -72,6 +72,17 @@ export type DebugState = {
   /** Slots allocated, tombstones included. */
   slotCount: number
   tombstoneCount: number
+  /**
+   * Slots this client can put a name to.
+   *
+   * Beside `slotCount`, because the two separate a drawn view from a drawn
+   * cloud: a client holds a position for every slot it was told about, and an
+   * identity only for the ones whose `SliceNode` it received. A client that
+   * joined a session mid-drill-in used to have the first and not the second —
+   * points with no label, no id and nothing to click — and no counter here
+   * moved when that happened. `Session::sync_slice` is what keeps them equal.
+   */
+  namedSlots: number
   ready: boolean
   simRunning: boolean
   lastMessageSeq: number
@@ -153,6 +164,7 @@ export const debugState: DebugState = {
   linkCount: 0,
   slotCount: 0,
   tombstoneCount: 0,
+  namedSlots: 0,
   ready: false,
   simRunning: false,
   lastMessageSeq: -1,

@@ -13,8 +13,7 @@
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { ResponseAssembler, decodeFrame, type Completed } from '../../src/protocol'
-import { appUrl, launch, type Launched } from './harness'
+import { Listener, appUrl, launch, type Launched } from './harness'
 
 /** The fixture's Person type: 60 members, largest type, therefore slot 0. */
 const PERSON_SLOT = 0
@@ -23,63 +22,6 @@ const KNOWS_REACHABLE = 60
 
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => window.__kglv?.ready === true, undefined, { timeout: 30_000 })
-}
-
-/**
- * A bare protocol client: no browser, no renderer, just the socket.
- *
- * Node 22 ships a global `WebSocket`, so the multi-client test needs no
- * dependency the app does not already have — and a client with no renderer is
- * the honest shape for "did the *transport* fan out", which is the question.
- */
-class Listener {
-  private readonly socket: WebSocket
-  private readonly assembler = new ResponseAssembler()
-  readonly received: Completed[] = []
-
-  constructor(url: string) {
-    this.socket = new WebSocket(url)
-    this.socket.binaryType = 'arraybuffer'
-    this.socket.onmessage = (event: MessageEvent<unknown>) => {
-      if (!(event.data instanceof ArrayBuffer)) return
-      const done = this.assembler.push(decodeFrame(event.data))
-      if (done !== null) this.received.push(done)
-    }
-  }
-
-  async open(): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      this.socket.onopen = () => resolve()
-      this.socket.onerror = () => reject(new Error(`websocket failed: ${this.socket.url}`))
-    })
-    // The opening pair every client gets on connect — session info, then the
-    // meta-graph. Waiting for them here means a later `waitFor` cannot pass on
-    // the greeting instead of on the broadcast it is actually asserting.
-    await this.waitFor((done) => done.kind === 'meta-graph')
-  }
-
-  async waitFor(
-    predicate: (done: Completed) => boolean,
-    timeoutMs = 15_000,
-  ): Promise<Completed> {
-    const deadline = Date.now() + timeoutMs
-    for (;;) {
-      const found = this.received.find(predicate)
-      if (found !== undefined) return found
-      if (Date.now() > deadline) {
-        throw new Error(
-          `no matching message in ${timeoutMs}ms; got ${this.received
-            .map((m) => m.kind)
-            .join(', ')}`,
-        )
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25))
-    }
-  }
-
-  close(): void {
-    this.socket.close()
-  }
 }
 
 test('one HTTP expand reaches every connected websocket client', async () => {
@@ -114,9 +56,10 @@ test('one HTTP expand reaches every connected websocket client', async () => {
     expect(body.meta.nodes).toHaveLength(KNOWS_REACHABLE)
 
     for (const [index, listener] of listeners.entries()) {
-      const slice = await listener.waitFor((done) => done.kind === 'slice')
+      const slice = await listener.waitFor(
+        (done) => done.kind === 'slice' && done.value.meta.kind === 'expand',
+      )
       if (slice.kind !== 'slice') throw new Error('unreachable')
-      expect(slice.value.meta.kind, `client ${index}`).toBe('expand')
       expect(slice.value.meta.nodes, `client ${index}`).toHaveLength(KNOWS_REACHABLE)
       expect(slice.value.meta.slot_count, `client ${index}`).toBe(META_POINTS + KNOWS_REACHABLE)
       // Positions and links ride with it, not just the metadata — a client

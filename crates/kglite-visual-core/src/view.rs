@@ -97,6 +97,14 @@ pub enum SliceKind {
     Collapse,
     Query,
     Search,
+    /// The whole view, handed to a client that has just connected
+    /// ([`crate::Session::sync_slice`]). Not a change to anything: it adds no
+    /// slot, tombstones nothing and is sent to exactly one socket. It is its
+    /// own kind because a client that received it as an `expand` would show an
+    /// expansion banner for a view it merely joined, and because a reader of
+    /// `lastSliceKind` needs to be able to tell "I arrived here" from "this
+    /// happened while I watched".
+    Sync,
 }
 
 /// One instance node a slice added.
@@ -267,6 +275,19 @@ impl View {
             .iter()
             .enumerate()
             .filter(|(_, entry)| !matches!(entry, SlotEntry::Tombstone))
+            .map(|(slot, entry)| (slot as u32, entry))
+    }
+
+    /// Every slot and what is in it, tombstones included, in slot order.
+    ///
+    /// The counterpart of [`Self::live_entries`], for the one caller that has
+    /// to describe the *space* rather than the screen: a resync has to tell a
+    /// newcomer which slots are holes, and a hole is invisible to an iterator
+    /// that skips it.
+    pub fn entries_with_tombstones(&self) -> impl Iterator<Item = (u32, &SlotEntry)> {
+        self.entries
+            .iter()
+            .enumerate()
             .map(|(slot, entry)| (slot as u32, entry))
     }
 

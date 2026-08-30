@@ -1229,6 +1229,7 @@ function syncCounts(): void {
   debugState.linkCount = view.linkCount
   debugState.slotCount = view.slotCount
   debugState.tombstoneCount = view.tombstoneCount
+  debugState.namedSlots = view.namedCount
   debugState.hoveredSlot = interaction.hoveredSlot()
   debugState.emphasizedCount = interaction.emphasizedSlots().length
   debugState.highlightedCount = interaction.highlightedSlots().length

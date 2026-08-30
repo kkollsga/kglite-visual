@@ -11,6 +11,19 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Fixed
+
+- **A browser that joins a session already in progress now sees the session.**
+  Every client used to be greeted with the entry screen — the type-level
+  meta-graph, slots `0..n` — whatever the shared view had been drilled into
+  since. Attach a second tab to a view an agent had expanded and the next
+  change arrived indexing slots that browser had never been told about: the
+  points appeared with no label, no id and nothing to click (144 of them,
+  measured on the sodir graph). The greeting now carries the whole current
+  view — every live node named, holes marked, positions from slot zero — and
+  the static arrangement in force, if there is one, so the newcomer lands on
+  the same picture everyone else is looking at.
+
 ### Added
 
 - **A geographic layout: `--layout geo`, `kernel: "geo"`.** Every node whose
