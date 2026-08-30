@@ -474,10 +474,25 @@ export async function mountGraph(
  * hashes, and shifting it in place would make the determinism assert describe
  * the renderer's convention instead of the server's answer. A NaN stays NaN —
  * that is the tombstone, and cosmos.gl reads it as absence.
+ *
+ * **`y` is negated, because the two sides disagree about which way is up.** The
+ * server lays out in canvas coordinates — `y` grows downward, the SVG
+ * convention its own emitter draws in — and cosmos.gl's `y` grows upward. Every
+ * server layout has therefore always arrived here mirrored, and nothing noticed:
+ * a hop ring, a packed island field and a force cloud all look the same
+ * reflected, so there was no picture that could tell. The geographic kernel is
+ * the one that can. Measured on sodir (2026-08-30): the live view drew Goliat
+ * at 71°N *below* Yme at 59°N, and put the no-coordinate tray — which the
+ * server places at the foot of its canvas — along the top of the screen. Fixed
+ * at this seam rather than in the kernel: the disagreement is between the
+ * server's space and the renderer's, and this function is where that conversion
+ * lives.
  */
-function toRendererSpace(points: Float32Array): Float32Array {
+export function toRendererSpace(points: Float32Array): Float32Array {
   const shifted = new Float32Array(points.length)
-  for (const [i, coordinate] of points.entries()) shifted[i] = coordinate + SPACE_SIZE / 2
+  for (const [i, coordinate] of points.entries()) {
+    shifted[i] = (i % 2 === 0 ? coordinate : -coordinate) + SPACE_SIZE / 2
+  }
   return shifted
 }
 

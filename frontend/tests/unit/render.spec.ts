@@ -11,7 +11,7 @@
 
 import { expect, test } from '@playwright/test'
 
-import { axesFor, layoutModeFromSearch, mergePositions } from '../../src/render'
+import { axesFor, layoutModeFromSearch, mergePositions, toRendererSpace } from '../../src/render'
 
 test('the query flag selects the deterministic preset and nothing else does', () => {
   expect(layoutModeFromSearch('?deterministic=1')).toBe('deterministic')
@@ -73,4 +73,34 @@ test('a non-finite live position is ignored rather than uploaded', () => {
     'gpu',
   )
   expect([...merged]).toEqual([3, 3])
+})
+
+/**
+ * North is up, on both sides of the wire.
+ *
+ * The server lays out in canvas coordinates (`y` down, the SVG convention its
+ * own emitter draws in); cosmos.gl's `y` grows up. Every server layout has
+ * always crossed that boundary, and until the geographic kernel there was no
+ * picture that could tell — a ring, an island field and a force cloud all look
+ * the same reflected. On sodir the live view drew Goliat at 71 deg N below Yme
+ * at 59, and put the no-coordinate tray along the top of the screen.
+ */
+test('the server-to-renderer conversion flips y and shifts both axes', () => {
+  const shifted = [...toRendererSpace(new Float32Array([10, 20, -10, -20]))]
+  // x keeps its sign, y does not; both land centred in the renderer's space.
+  expect((shifted[0] ?? 0) - (shifted[2] ?? 0)).toBe(20)
+  expect((shifted[1] ?? 0) - (shifted[3] ?? 0)).toBe(-40)
+  // Two points at the same x differ only in y, and the one the server put
+  // LOWER on its canvas is the one the renderer draws lower.
+  const [northX, northY, southX, southY] = [
+    ...toRendererSpace(new Float32Array([0, -100, 0, 100])),
+  ]
+  expect(northX).toBe(southX)
+  expect(northY ?? 0).toBeGreaterThan(southY ?? 0)
+})
+
+test('a tombstone survives the conversion as a NaN on both axes', () => {
+  const shifted = [...toRendererSpace(new Float32Array([Number.NaN, Number.NaN, 1, 1]))]
+  expect(Number.isNaN(shifted[0] ?? 0)).toBe(true)
+  expect(Number.isNaN(shifted[1] ?? 0)).toBe(true)
 })
