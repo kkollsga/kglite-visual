@@ -179,10 +179,11 @@ ships the whole build-out.
 - **An agent can drive the window you are looking at.** The running server now
   speaks the Model Context Protocol at `/mcp` — the URL is printed on the same
   stdout line as everything else, so attaching an agent is pointing it at a
-  URL, with no second process to start and nothing to install. Nine tools: read
-  what is on screen, put a Cypher result into it, expand or collapse a
-  selection, highlight things, zoom to them, change how they are coloured and
-  sized, reset, and draw a picture of the current view. The tools are for
+  URL, with no second process to start and nothing to install. Nine tools for
+  the view: read what is on screen, put a Cypher result into it, expand or
+  collapse a selection, highlight things, zoom to them, change how they are
+  coloured and sized, reset, and draw a picture of the current view. The
+  tools are for
   *navigating* a graph together; querying one is still the graph's own MCP
   server's job.
 - **The picture follows, live.** Whoever changes the view — you, an agent, a
