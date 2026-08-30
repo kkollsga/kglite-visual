@@ -177,6 +177,8 @@ make check-packaged-consumer   # install the built wheel elsewhere and drive it
 make py-venv        # create/reuse the project-local venv (py-venv-refresh re-installs)
 make prune          # purge the disposable tiers by age (dev-docs' temp/, bench/out/,
                     # bin/, and stale Playwright artifacts). --dry-run to look first.
+make docs           # sphinx-build -W into target/docs (own venv in target/docs-venv);
+                    # CI-only until it earns gate membership — deliberately not in the gate.
 kglite-visual render g.kgl --meta            # one image, no browser; SVG by
 kglite-visual render g.kgl --cypher "…"      # default, --format png for PNG.
 kglite-visual render g.kgl --expand type=T rel=R dir=out
@@ -209,7 +211,9 @@ fails for reasons unrelated to the change is a gate people learn to bypass. CI
 owns the failing version of that check; here it reports and moves on.
 
 **CI is live; its first run earned its keep.** `.github/workflows/ci.yml`
-runs sixteen of the gate's eighteen checks across five jobs plus a
+runs sixteen of the gate's eighteen checks across six jobs (a 19s docs
+job — `sphinx-build -W` — joined in the docs program and sits in the
+`ci-success` needs) plus a
 `ci-success` aggregate that `release.yml` waits on — an aggregate, never
 a list of check names, because an allowlist is how a red job ships a release
 by not being on it. The two gate checks with no CI job are local-only *by
