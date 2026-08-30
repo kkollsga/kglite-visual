@@ -147,8 +147,20 @@ test('force mode: switch to a static kernel, expand under it, switch back', asyn
     }))
     expect(restored).toEqual({ simulation: true, drag: true })
     // The reheat the switch back triggers actually runs, and settles.
-    await page.waitForFunction(() => window.__kglv.simRunning === false, undefined, {
+    //
+    // **Both edges, in order, and the first one is the point.** Under a static
+    // kernel the simulation is destroyed, so `simRunning` is ALREADY false when
+    // the switch is made — waiting only for `false` is a wait that a reheat
+    // which has not started yet satisfies immediately, and the arrangement read
+    // after it is still the static one. That is a check which passes without
+    // the thing it checks having happened, and on a loaded machine it inverts
+    // into a failure instead: seen twice inside `make gate` (where the full
+    // suite runs first) while passing standalone.
+    await page.waitForFunction(() => window.__kglv.simRunning === true, undefined, {
       timeout: 30_000,
+    })
+    await page.waitForFunction(() => window.__kglv.simRunning === false, undefined, {
+      timeout: 60_000,
     })
     const resettled = await arrangement(page)
     expect(resettled).not.toBe(withInstances)

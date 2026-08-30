@@ -13,6 +13,16 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Fixed
 
+- **The table of a type's nodes asked for the wrong nodes.** kglite's Cypher
+  `id(n)` reads the node's `id` **field** — whatever the source data called its
+  key — and the generated table query was filling `$ids` with this app's
+  internal node indices instead. On sodir that answered **0 rows** for
+  `FieldReserves` (keys 1–2 329 against indices near 41 000) and, worse, the
+  **wrong 120 rows** for `Wellbore`, whose key range overlaps its index range
+  so the count came out right and the table looked correct. A slice now carries
+  each node's `id` field beside its index, the query names nodes by the field,
+  and a node with no `id` field is reported rather than silently missing.
+
 - **A query that drew a graph left the previous query's row count on screen.**
   "Show in graph" answers with a slice rather than a table, so the results card
   kept describing whatever ran before it — a path run after a table read as
@@ -59,7 +69,8 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
   read and edit it**, and runs it down the ordinary bounded path. The columns
   sort by clicking a header — stably, and by type: a numeric column compares as
   numbers, so a column of ids does not put 100 before 58. The panel says when
-  the twelve-column cap dropped something.
+  the twelve-column cap dropped something, and when a node on screen carries no
+  `id` field for a query to name it by.
 - **Export: the view, as a file somebody else's tool can open.** GraphML,
   GEXF, node CSV, edge CSV or D3 JSON, from an Export card beside the legend,
   from `GET /api/export?format=…&source=live-view`, and from the MCP
