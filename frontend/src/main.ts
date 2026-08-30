@@ -39,6 +39,14 @@ import type { NodeDetail } from './generated/NodeDetail'
 import type { PropertyStat } from './generated/PropertyStat'
 import type { Request } from './generated/Request'
 import { InteractionState } from './interaction'
+import {
+  filterLine,
+  matches,
+  parseFilter,
+  unknownKeys,
+  type FilterTerm,
+  type SlotFacts,
+} from './filter'
 import { LabelOverlay } from './labels'
 import { Legend, type LegendEntry, type LegendSection } from './legend'
 import { formatCell, Panels } from './panels'
@@ -222,6 +230,7 @@ const panels = new Panels(root, {
   setColorBy: (property) => applyColorBy(property),
   setSizeBy: (property) => applySizeBy(property),
   setLayoutKernel: (kernel) => requestLayout(kernel),
+  setFilter: (query) => applyFilter(query),
   saveQuery: (name, query) => void refreshQueries(store.saveQuery(name, query)),
   deleteQuery: (name) => void refreshQueries(store.deleteQuery(name)),
   // Parse-only, over plain HTTP, on the editor's idle timer. It never runs the
@@ -632,6 +641,10 @@ async function showMetaGraph(message: {
  */
 function redraw(authority?: SeedAuthority): void {
   if (surface === null) return
+  // Before the arrays are compiled, and on every redraw rather than only on a
+  // keystroke: the view moves underneath a filter, and slots an expansion just
+  // added have never been matched against the terms.
+  recomputeFilter()
   surface.upload(view, appearance(), authority)
   interaction.apply(surface.graph)
   refreshLabelSpecs()
@@ -649,7 +662,10 @@ function appearance(): Appearance {
   const largestType = maxTypeCount()
   for (let slot = 0; slot < slots; slot += 1) {
     const label = view.label(slot)
-    if (label === undefined) {
+    // A tombstone and a filtered-out node draw the same nothing. The filter's
+    // half is reversible and the tombstone's is not, but the appearance arrays
+    // cannot tell them apart and do not need to.
+    if (label === undefined || hiddenSlots.has(slot)) {
       sizes[slot] = 0
       continue
     }
@@ -693,12 +709,20 @@ function linkWidths(): Float32Array {
     const source = view.links[link * 2]
     const target = view.links[link * 2 + 1]
     if (source === undefined || target === undefined) continue
+    // A link to a node that is not drawn is a line into empty space. cosmos.gl
+    // fades a link whose endpoint is NaN, but a filtered node's position is
+    // perfectly valid — it is only invisible — so the width has to say so.
+    if (hiddenSlots.has(source) || hiddenSlots.has(target)) {
+      counts[link] = -1
+      continue
+    }
     const count = view.typeLinkWeight(source, target)
     counts[link] = count
     heaviest = Math.max(heaviest, count)
   }
   for (let link = 0; link < widths.length; link += 1) {
-    widths[link] = linkWidth(counts[link] ?? 0, heaviest)
+    const count = counts[link] ?? 0
+    widths[link] = count < 0 ? 0 : linkWidth(count, heaviest)
   }
   return widths
 }
@@ -721,6 +745,10 @@ function linkWidths(): Float32Array {
 function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rgba {
   const label = view.label(slot)
   if (label === undefined) return UNSET_COLOR
+  // Size zero already stops the point drawing; alpha zero is the belt to that
+  // brace, because a size the renderer clamps to a floor would otherwise leave
+  // a coloured speck where the filter said there was nothing.
+  if (hiddenSlots.has(slot)) return HIDDEN_COLOR
   if (colorOf !== null && appearanceValues.has(slot)) return colorOf(appearanceValues.get(slot))
   // An instance node takes its type's hue; a type node keeps the
   // capability/supporting encoding, which is a different fact and would be
@@ -732,6 +760,81 @@ function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rg
     ? [0.35, 0.65, 0.98, 0.92]
     : [0.98, 0.75, 0.32, 0.92]
   return label.supporting ? [r, g, b, a * 0.45] : [r, g, b, a]
+}
+
+/**
+ * The filter box's terms, and the slots they are hiding (plan E7).
+ *
+ * Hidden, not removed: the nodes are still loaded, still in the slot space,
+ * still what the server believes is on screen. What changes is what this client
+ * DRAWS — sizes and colours to nothing, link widths to zero, no label, and the
+ * interaction sets projected without them. Tombstoning instead would be a
+ * protocol-level operation that destroys edges, triggers compaction, and makes
+ * "clear the filter" a re-fetch.
+ */
+let filterTerms: FilterTerm[] = []
+let hiddenSlots: ReadonlySet<number> = new Set()
+
+/**
+ * Property values this client has actually fetched, by lower-cased name.
+ *
+ * The whole of what a filter can match on beyond titles and types — and the
+ * reason a term naming anything else is refused rather than served: answering
+ * it would mean a query, and a filter that fetches is a search wearing the
+ * wrong label (plan E7).
+ */
+function loadedPropertyKeys(): Set<string> {
+  const keys = new Set<string>()
+  if (colorByStat !== null) keys.add(colorByStat.name.toLowerCase())
+  if (sizeByName !== null) keys.add(sizeByName.toLowerCase())
+  return keys
+}
+
+/** What one slot offers the matcher, from what this client already holds. */
+function slotFacts(slot: number): SlotFacts {
+  const label = view.label(slot)
+  const values = new Map<string, unknown>()
+  if (colorByStat !== null && appearanceValues.has(slot)) {
+    values.set(colorByStat.name.toLowerCase(), appearanceValues.get(slot))
+  }
+  if (sizeByName !== null && sizeValues.has(slot)) {
+    values.set(sizeByName.toLowerCase(), sizeValues.get(slot))
+  }
+  return { text: label?.text ?? '', nodeType: label?.nodeType ?? null, values }
+}
+
+/**
+ * Recompute what the filter hides, and say so.
+ *
+ * Runs on every keystroke and again on every redraw, because the *view* moves
+ * underneath a filter: an expansion brings slots the terms have never been
+ * applied to, and leaving them visible would make the box quietly stop meaning
+ * what it says.
+ */
+function applyFilter(query: string): void {
+  filterTerms = parseFilter(query)
+  recomputeFilter()
+  redraw()
+}
+
+function recomputeFilter(): void {
+  const refused = unknownKeys(filterTerms, loadedPropertyKeys())
+  if (filterTerms.length === 0 || refused.length > 0) {
+    // A refused term hides NOTHING. Applying the terms it could answer would
+    // be filtering on less than the user typed while looking like it worked —
+    // the failure the refusal exists to prevent, arriving one term later.
+    hiddenSlots = new Set()
+    interaction.setHidden(hiddenSlots)
+    panels.showFilterState(null, refused)
+    return
+  }
+  const hidden = new Set<number>()
+  for (const slot of view.liveSlots()) {
+    if (!matches(filterTerms, slotFacts(slot))) hidden.add(slot)
+  }
+  hiddenSlots = hidden
+  interaction.setHidden(hiddenSlots)
+  panels.showFilterState(filterLine(view.liveCount - hidden.size, view.liveCount), [])
 }
 
 /**
@@ -824,6 +927,9 @@ function instanceTypesOnScreen(): string[] {
   return [...types].sort()
 }
 
+/** A slot the filter is hiding: no size, and no colour either. */
+const HIDDEN_COLOR: Rgba = [0, 0, 0, 0]
+
 function maxTypeCount(): number {
   let max = 1
   for (const slot of view.liveSlots()) {
@@ -905,7 +1011,7 @@ function applyInteraction(): void {
 function refreshLabelSpecs(): void {
   const selected = new Set(interaction.selectedSlots())
   labels.setLabels(
-    view.liveSlots().map((slot) => {
+    view.liveSlots().filter((slot) => !hiddenSlots.has(slot)).map((slot) => {
       const label = view.label(slot)
       return {
         slot,
@@ -974,6 +1080,7 @@ function everyPoint(current: Surface): { indices: number[]; positions: number[] 
   const indices: number[] = []
   const positions: number[] = []
   for (const slot of view.liveSlots()) {
+    if (hiddenSlots.has(slot)) continue
     const x = live[slot * 2]
     const y = live[slot * 2 + 1]
     if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) {
@@ -989,7 +1096,11 @@ function syncCounts(): void {
   // Read back from the renderer, not from whatever this file last asked for:
   // a zoom the GPU did not take is a zoom that did not happen.
   debugState.zoomLevel = surface?.graph.getZoomLevel() ?? null
-  debugState.pointCount = view.liveCount
+  // Points that draw something, which a filter changes: a count that kept
+  // reporting hidden nodes would be the instrument every agent and every e2e
+  // assertion reads, describing a screen nobody is looking at.
+  debugState.pointCount = view.liveCount - hiddenSlots.size
+  debugState.filteredOut = hiddenSlots.size
   debugState.linkCount = view.linkCount
   debugState.slotCount = view.slotCount
   debugState.tombstoneCount = view.tombstoneCount
@@ -1153,6 +1264,16 @@ function renderStatus(): void {
         ? ` / ${view.tombstoneCount.toLocaleString('en-US')} collapsed`
         : ''
     lines.push(`${drawn}${dead}`)
+  }
+  // The filter's own honesty line, in the truncation banner's voice and beside
+  // it, because they say the same kind of thing: you are not looking at all of
+  // it. Its own testid, because the two have different causes and a test that
+  // could not tell them apart would pass on either.
+  const filtered = filterLine(view.liveCount - hiddenSlots.size, view.liveCount)
+  if (filtered !== null) {
+    lines.push(
+      `<span class="kglv-warn" data-testid="filter-banner">${escapeHtml(filtered)}</span>`,
+    )
   }
   if (truncationBanner !== null) {
     lines.push(

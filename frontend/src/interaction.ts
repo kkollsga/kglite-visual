@@ -54,6 +54,22 @@ export class InteractionState {
   private emphasizedLinks: number[] = []
   private highlighted: number[] = []
   private selected: number[] = []
+  /**
+   * Slots a client-side filter is currently hiding (plan E7).
+   *
+   * **A view over the four sets, not an edit of them.** Filtering is reversible
+   * — the nodes are still loaded, still in the slot space, still the server's
+   * idea of what is on screen — so clearing the box has to give the selection
+   * back. `dropSlots` is the other operation and stays destructive, because a
+   * tombstone is not coming back.
+   *
+   * Applied in one place, {@link visible}, which every getter and the renderer
+   * projection go through: the counts `window.__kglv` publishes are what an
+   * agent and every e2e assertion read, and a selection count that kept
+   * describing a node the filter had hidden would be the same class of lie
+   * `dropSlots` exists to prevent.
+   */
+  private hidden: ReadonlySet<number> = new Set()
 
   /**
    * Set the hover and recompute its 1-hop neighbourhood.
@@ -112,20 +128,31 @@ export class InteractionState {
     }
   }
 
+  /** Replace the hidden set. See {@link hidden}. */
+  setHidden(slots: ReadonlySet<number>): void {
+    this.hidden = slots
+  }
+
+  private visible(list: number[]): number[] {
+    if (this.hidden.size === 0) return [...list]
+    return list.filter((slot) => !this.hidden.has(slot))
+  }
+
   hoveredSlot(): number | null {
+    if (this.hovered !== null && this.hidden.has(this.hovered)) return null
     return this.hovered
   }
 
   emphasizedSlots(): number[] {
-    return [...this.emphasized]
+    return this.visible(this.emphasized)
   }
 
   highlightedSlots(): number[] {
-    return [...this.highlighted]
+    return this.visible(this.highlighted)
   }
 
   selectedSlots(): number[] {
-    return [...this.selected]
+    return this.visible(this.selected)
   }
 
   /**
@@ -136,13 +163,16 @@ export class InteractionState {
    * that only a browser can check is a decision nothing checks.
    */
   toConfig(): InteractionConfig {
+    const emphasized = this.emphasizedSlots()
+    const selected = this.selectedSlots()
     return {
-      focusedPointIndex: this.hovered ?? undefined,
+      focusedPointIndex: this.hoveredSlot() ?? undefined,
       // `undefined`, not `[]`: an empty array means "highlight nothing", which
-      // greys out the entire graph. Not hovering must leave the view alone.
-      highlightedPointIndices: this.emphasized.length > 0 ? this.emphasized : undefined,
+      // greys out the entire graph. Not hovering must leave the view alone —
+      // and so must a filter that hid everything the hover was emphasising.
+      highlightedPointIndices: emphasized.length > 0 ? emphasized : undefined,
       highlightedLinkIndices: this.emphasizedLinks.length > 0 ? this.emphasizedLinks : undefined,
-      outlinedPointIndices: this.selected.length > 0 ? this.selected : undefined,
+      outlinedPointIndices: selected.length > 0 ? selected : undefined,
     }
   }
 

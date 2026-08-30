@@ -47,6 +47,11 @@ export type PanelHandlers = {
    * layout back to the viewer's GPU (plan E5).
    */
   setLayoutKernel(kernel: LayoutKernel): void
+  /**
+   * Hide everything on screen that does not match (plan E7). Client-only —
+   * a term that would need a fetch is refused, not fetched.
+   */
+  setFilter(query: string): void
   /** Keep this query under this name. The store's ceilings answer as refusals. */
   saveQuery(name: string, query: string): void
   /** Forget a saved query. */
@@ -88,6 +93,17 @@ const LAYOUT_CHOICES: readonly (readonly [LayoutKernel, string])[] = [
   ['force', 'force, held still'],
 ]
 
+/**
+ * What the filter box is for, said where the two boxes sit together.
+ *
+ * One constant because it is written twice — once at construction and once
+ * when a filter is cleared — and two copies of the sentence that keeps Search
+ * and Filter apart is one copy that stops saying it.
+ */
+const FILTER_HINT =
+  'hides what is already loaded — nothing is fetched. Try "type:Wellbore", or a property ' +
+  'you are colouring or sizing by. Use Search above to bring nodes in.'
+
 export class Panels {
   readonly root: HTMLDivElement
   private readonly queryInput: HTMLTextAreaElement
@@ -107,6 +123,8 @@ export class Panels {
   private readonly searchInput: HTMLInputElement
   private readonly searchType: HTMLSelectElement
   private readonly searchResults: HTMLDivElement
+  private readonly filterInput: HTMLInputElement
+  private readonly filterNote: HTMLDivElement
   private readonly colorBy: HTMLSelectElement
   private readonly sizeBy: HTMLSelectElement
   private readonly appearanceNote: HTMLDivElement
@@ -164,6 +182,32 @@ export class Panels {
     this.searchResults = element('div', 'kglv-results')
     searchBox.append(searchRow, this.searchResults)
     this.root.appendChild(this.section('Search', searchBox))
+
+    // ── filter ────────────────────────────────────────────────────────────
+    // Its own card, directly under Search, and the hint under the box exists
+    // to keep them apart: they are the two boxes you type a name into, and one
+    // brings nodes IN while the other takes them off the screen. A user who
+    // confuses them either loses their view or wonders why nothing arrived.
+    const filterBox = element('div', 'kglv-card')
+    const filterRow = element('div', 'kglv-row')
+    this.filterInput = element('input', 'kglv-input')
+    this.filterInput.placeholder = 'hide all but…'
+    this.filterInput.setAttribute('data-testid', 'filter-input')
+    this.filterInput.addEventListener('input', () =>
+      this.handlers.setFilter(this.filterInput.value),
+    )
+    const clear = element('button', 'kglv-button kglv-button-small', 'clear')
+    clear.setAttribute('data-testid', 'filter-clear')
+    clear.addEventListener('click', () => {
+      this.filterInput.value = ''
+      this.handlers.setFilter('')
+    })
+    filterRow.append(this.filterInput, clear)
+    this.filterNote = element('div', 'kglv-hint')
+    this.filterNote.setAttribute('data-testid', 'filter-note')
+    this.filterNote.textContent = FILTER_HINT
+    filterBox.append(filterRow, this.filterNote)
+    this.root.appendChild(this.section('Filter', filterBox))
 
     // ── appearance ────────────────────────────────────────────────────────
     const appearance = element('div', 'kglv-card')
@@ -456,6 +500,32 @@ export class Panels {
       row.addEventListener('click', () => this.setQueryText(entry.query))
       this.historyList.appendChild(row)
     }
+  }
+
+  /**
+   * What the filter is doing, in the truncation banner's voice.
+   *
+   * `refused` is the honest half: a term naming a property this client has not
+   * loaded cannot be answered without a fetch, and a filter that quietly
+   * dropped the term would be filtering on less than the user typed while
+   * looking like it worked.
+   */
+  showFilterState(line: string | null, refused: string[]): void {
+    if (refused.length > 0) {
+      this.filterNote.className = 'kglv-hint kglv-error'
+      this.filterNote.textContent =
+        `nothing loaded carries ${refused.map((key) => `"${key}"`).join(', ')} — this box only ` +
+        'reads values already on screen. Colour or size by it first, or use Search above to ' +
+        'ask the server for it.'
+      return
+    }
+    if (line === null) {
+      this.filterNote.className = 'kglv-hint'
+      this.filterNote.textContent = FILTER_HINT
+      return
+    }
+    this.filterNote.className = 'kglv-hint kglv-warn'
+    this.filterNote.textContent = line
   }
 
   /** A store refusal, in the store's own words. */

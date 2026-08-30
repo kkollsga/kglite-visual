@@ -118,6 +118,15 @@ export type DebugState = {
    * plus whatever else the card lists, and it moves when the encoding does.
    */
   legendEntries: number
+  /**
+   * Slots the client-side filter is hiding (plan E7).
+   *
+   * Beside `pointCount`, which already excludes them, because the two together
+   * are the honest pair: "12 drawn" alone cannot be distinguished from a view
+   * that only ever held twelve. It is also what an e2e asserts a filter
+   * actually did, and what proves clearing one gave everything back.
+   */
+  filteredOut: number
   /** Property-stat rows offered as appearance channels, and how many are approximate. */
   appearanceCandidates: number
   approximateStats: number
@@ -164,6 +173,7 @@ export const debugState: DebugState = {
   queryRows: 0,
   searchHits: 0,
   legendEntries: 0,
+  filteredOut: 0,
   appearanceCandidates: 0,
   approximateStats: 0,
   error: null,
