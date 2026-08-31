@@ -40,3 +40,36 @@ ts-rs = "12.0.1"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# Dependencies keep file/line for backtraces and lose variable inspection; this
+# workspace's own three crates keep full debug info. A debug `libkglite` rlib is
+# roughly two-thirds DWARF type-name strings and about 5% machine code, and
+# cargo never garbage-collects a superseded one, so every engine release strands
+# another copy of it.
+#
+# Measured here on 2026-08-31, `cargo build --workspace --all-targets` after a
+# full `cargo clean`, kglite 0.16.17, both arms reproduced: the kglite rlib
+# 265 -> 180 MB (-32%), `debug/deps/` 2 308 -> 2 177 MB, `target/` whole
+# 3 301 -> 3 167 MB (-4.1%), `debug/incremental/` unmoved at ~306 MB.
+#
+# **The tree number is small on purpose, and it is the honest one.** KGLite
+# measured -22% on their own tree; this workspace does not see that, because
+# its debug bulk is not dependencies — it is our own three crates and their
+# test binaries (`libkglite_visual_cli.rlib` 156 MB, the integration test
+# binaries 50-107 MB each, the py `.dylib` 93 MB), all of which keep full debug
+# info by design and are untouched by this. What the setting actually buys is
+# the -85 MB *per kglite generation*: cargo never garbage-collects a superseded
+# rlib, and this project moved its engine floor four times in three days.
+# Do not quote the -22% here; measure again if the ratio matters.
+#
+# Recipe from KGLite's compile-footprint review; the estate's shared build
+# volume reached zero bytes free the same day, and kglite debug trees were the
+# top consumers.
+#
+# `"*"` covers registry dependencies and deliberately does NOT cover workspace
+# members — which is what we want, and which is also the gotcha: a locally
+# path-patched kglite (see the `[patch.crates-io]` recipe in the core manifest)
+# becomes a workspace member and would need naming explicitly to be covered.
+# `strip` and `split-debuginfo` have no effect on rlibs; only this does.
+[profile.dev.package."*"]
+debug = "line-tables-only"
