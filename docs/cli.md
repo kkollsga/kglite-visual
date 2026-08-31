@@ -116,8 +116,8 @@ Full page: **[export](export.md)**.
 
 | | |
 |---|---|
-| `graphml` | Gephi, yEd, Cytoscape — see the note it prints to stderr about node labels |
-| `gexf` | Gephi's native XML. The one whose labels Gephi reads directly |
+| `graphml` | Gephi, yEd, Cytoscape |
+| `gexf` | Gephi's native XML |
 | `csv` | `id,type,title`, one row per node |
 | `csv-edges` | `source,target,type`, one row per edge |
 | `json` | D3's `{"nodes": [...], "links": [...]}` |

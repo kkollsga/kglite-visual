@@ -20,7 +20,7 @@ import { apiUrl } from './urls'
 /** The formats offered, in the order a user reads them. */
 const FORMATS: readonly (readonly [string, string, string])[] = [
   ['graphml', 'GraphML', 'Gephi, yEd, Cytoscape'],
-  ['gexf', 'GEXF', "Gephi's own — keeps node labels"],
+  ['gexf', 'GEXF', "Gephi's own"],
   ['csv', 'CSV nodes', 'id, type, title'],
   ['csv-edges', 'CSV edges', 'source, target, type'],
   ['json', 'JSON', "D3's nodes and links"],

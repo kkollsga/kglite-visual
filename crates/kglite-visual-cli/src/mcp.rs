@@ -815,11 +815,10 @@ impl ViewControl {
                        GraphML, GEXF, CSV or D3 JSON — and hand back the text so you can read \
                        or save it. The SCOPE IS THE VIEW: exactly the instance nodes on the \
                        human's screen, never the whole graph, so `expand` or `show_cypher` \
-                       what you want first and check `view_state` before calling. Two things \
+                       what you want first and check `view_state` before calling. One thing \
                        the file will not tell you and this answer does: the edge set can be a \
-                       superset of what the canvas drew, and kglite's GraphML carries no Gephi \
-                       `label` key. Reading `notes` in the reply is how you avoid explaining \
-                       either one to the user after they hit it."
+                       superset of what the canvas drew. Reading `notes` in the reply is how \
+                       you avoid explaining that to the user after they hit it."
     )]
     async fn export_view(
         &self,

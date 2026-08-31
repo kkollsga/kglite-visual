@@ -8,8 +8,8 @@ subcommand. Agents get a fourth, the MCP `export_view` tool.
 
 | `--format` | What it is |
 |---|---|
-| `graphml` | XML that Gephi, yEd and Cytoscape all open. The default — and see the [label note](#the-graphml-label-note) |
-| `gexf` | Gephi's own XML. The one whose labels Gephi reads directly |
+| `graphml` | XML that Gephi, yEd and Cytoscape all open. The default — and it [names its nodes](#the-graphml-label-note) |
+| `gexf` | Gephi's own XML |
 | `csv` | `id,type,title`, one row per node |
 | `csv-edges` | `source,target,type`, one row per edge — the other half of `csv` |
 | `json` | D3's `{"nodes": [...], "links": [...]}` |
@@ -112,14 +112,14 @@ list and an incomplete link list — and a query that returned nodes without
 relationships never mentioned any edges at all.
 
 (the-graphml-label-note)=
-### GraphML has no Gephi `label` key
+### GraphML names its nodes
 
-> kglite writes the node title under `attr.name="title"`; Gephi reads
-> `attr.name="label"`, so a GraphML import shows `n0`, `n1`, … as the node
-> names. Map the `title` column after import, or export `gexf`, whose
-> `<node label=…>` Gephi reads directly.
+Every GraphML export declares an `attr.name="label"` key — `node_label` holds
+the node's title, `edge_label` the connection type — so Gephi, yEd and
+Cytoscape all show readable names on import rather than `n0`, `n1`, ….
 
-**If the destination is Gephi, export GEXF.** GraphML remains the default
-because it is the format yEd and Cytoscape want, and because silently renaming
-kglite's attribute to suit one tool would make the file disagree with the
-engine that wrote it.
+This was a caveat until kglite 0.16.16. Before that release kglite wrote the
+readable name only under `attr.name="title"`, which no importer looks at, and
+this page told you to export GEXF instead. The `title`, `id`, `type`,
+`connection_type` and `properties` keys are unchanged, so anything already
+reading them keeps working.

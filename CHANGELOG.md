@@ -11,6 +11,45 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.16.17**, exactly pinned (was 0.16.15). It carries
+  the fixes KGLite cut from this project's six findings, and every workaround
+  that existed for them is deleted rather than left standing.
+- **A runaway query no longer takes the server with it.** kglite polled a
+  query's deadline inside its pattern matcher but not in the row-building layer
+  above it, so a wide path query ran to completion however long ago the clock
+  had expired — measured here on a 546,850-node graph as more than 120 seconds
+  past a 30-second ceiling, 7.3 GB of RSS, and an OS kill. It now stops at the
+  deadline: three runs under a 5-second ceiling returned *"Query timed out"* at
+  5.4–5.6 seconds, the extra half second being cancellation plus dropping the
+  work already built, and the server answered the next request normally every
+  time. The three-hop path that previews at 1,941,015 rows now answers in about
+  a second, truncated to the row ceiling. The path builder's `count(*)` preview
+  stays — a query one hop wider is still refused, and still costs memory before
+  it is.
+- **A GraphML export names its nodes.** kglite writes a Gephi-readable
+  `attr.name="label"` key as of 0.16.16 — the node's title, and the connection
+  type on edges — so an import into Gephi, yEd or Cytoscape shows real names
+  instead of `n0`, `n1`, …. The export's second caveat note is gone with it;
+  the edge-superset note stays. The `title`, `id`, `type`, `connection_type`
+  and `properties` keys are unchanged.
+- **`LOC` and `GEO` badges are independent.** A type declaring both a lat/lon
+  pair and a WKT geometry showed only `GEO`, because kglite suppressed one
+  under the other. On a real dataset 37 of 38 spatial types declare both, so
+  the badge was hiding the cheap coordinates sitting next to the geometry. Both
+  badges now appear. Which layouts a view offers is unchanged — that has always
+  tested for either flag.
+
+### Removed
+
+- **`QueryTable.timed_out`.** The flag could never be `true`: a query that hits
+  its deadline errors and is answered `422` with the engine's own message, so
+  it never produces a result table at all. kglite deleted the diagnostic behind
+  it in 0.16.16 and this follows. Nothing else on the wire moved, and the
+  protocol version is unchanged — a client that still reads the key gets
+  `undefined`, which behaves exactly as the constant `false` it replaced.
+
 ## [0.1.2] - 2026-08-31
 
 ### Added

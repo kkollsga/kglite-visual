@@ -15,8 +15,9 @@ slot: number, name: string,
  */
 count: number, 
 /**
- * `ts` / `geo` / `loc` / `vec`, in kglite's own order and with its own
- * rule that `loc` is suppressed when `geo` is present.
+ * `ts` / `geo` / `loc` / `vec`, in kglite's own order. `loc` and `geo` are
+ * independent since kglite 0.16.16 — a type declaring both lat/lon columns
+ * and a WKT geometry carries both badges.
  */
 capabilities: Array<string>, 
 /**

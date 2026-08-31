@@ -194,9 +194,14 @@ export class PathBuilder {
    * Measured on sodir during G5 and the reason this exists: a two-hop path
    * assembled in four clicks — Field → Company ← Licence — previews at
    * 1 941 015 rows, and running it took the engine past its own wall-clock
-   * deadline and 7 GB of RSS before the OS killed the process. The preview is
-   * what makes that visible; this is what makes it *legible*, in the place the
-   * user is about to click.
+   * deadline and 7 GB of RSS before the OS killed the process.
+   *
+   * That run is now bounded rather than fatal — kglite 0.16.16 polls the
+   * deadline in the row-building layer, and the same query answers in about a
+   * second, truncated — but the card is not obsolete: one hop further out
+   * still costs +2.9 GB before the engine refuses it, so the size is still
+   * worth knowing before the click. The preview is what makes that visible;
+   * this is what makes it *legible*, in the place the user is about to click.
    */
   setRowCeiling(rows: number): void {
     this.rowCeiling = rows

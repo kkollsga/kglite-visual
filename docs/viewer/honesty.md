@@ -137,17 +137,19 @@ See [agents](../agents.md#what-an-agent-may-claim).
 
 ## The export names what the file cannot
 
-Two facts about an exported view are true of the file but not visible in it, so
-they ride in a response header and in the MCP reply's `notes`:
+One fact about an exported view is true of the file but not visible in it, so
+it rides in a response header and in the MCP reply's `notes`:
 
 ```text
 x-kglv-note: the nodes are exactly the ones selected; the edges are every edge
-  this graph holds between them, which can be MORE than you saw … | kglite
-  writes the node title under attr.name="title"; Gephi reads
-  attr.name="label", so a GraphML import shows n0, n1, … as the node names.
+  this graph holds between them, which can be MORE than you saw …
 ```
 
-Reporting a caveat beats discovering it in Gephi. See [export](../export.md).
+Reporting a caveat beats discovering it in Gephi. There used to be a second
+note here — kglite's GraphML carried no `attr.name="label"` key, so an import
+showed `n0`, `n1`, … kglite 0.16.16 added the key and the note went with it,
+which is the intended lifecycle for every caveat on this page. See
+[export](../export.md).
 
 ## Advisories reach the person who typed the query
 
@@ -162,6 +164,8 @@ drawn above it, in kglite's own words. The one warning still filtered out is
 the row-limit truncation notice, because the truncation banner already says
 that in this app's wording.
 
-`QueryTable` also carries a `timed_out` flag beside them, so a future engine
-that cancels a query at its deadline and returns partial rows cannot have them
-read as a complete answer.
+There is no "cancelled at its deadline" caption beside them, and that is the
+honest shape rather than a gap: kglite never returns partial rows for a query
+that hits its deadline. It errors, and the answer is a `422` carrying the
+engine's own message — so there is nothing that could be misread as a complete
+answer.

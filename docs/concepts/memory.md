@@ -60,9 +60,18 @@ The bound protects the *response*, not the query's own execution. A query the
 engine has to run through before it can return five rows still costs what it
 costs.
 
-Measured on a real graph: a three-hop path previewing at **1,941,015 rows**
-took the engine past its own deadline and **7.3 GB of RSS** before the OS
-killed the server.
+Measured on a 546,850-node graph: a three-hop path previewing at **1,941,015
+rows** answers in about a second under kglite 0.16.17, truncated to the row
+ceiling. Reaching the work-unit guard one hop further out cost **+2.9 GB of
+RSS** on a query the engine then refused, and a query cancelled at its deadline
+peaked at **4.9 GB**. The server survived every one of those.
+
+Under kglite 0.16.15 and earlier the same three-hop query ran more than 120
+seconds past a 30-second deadline and reached **7.3 GB** before the OS killed
+the server — the deadline was polled inside the pattern matcher but not in the
+row-building layer above it. kglite 0.16.16 fixed that, so a runaway is now a
+bounded wait; it is not a free one, because the memory a query allocated before
+it stopped was still allocated.
 
 That is exactly why every hop in the [path builder](../viewer/queries.md#the-path-builder)
 carries a `count(*)` preview, and why the card warns before the click rather

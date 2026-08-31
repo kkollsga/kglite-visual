@@ -39,10 +39,9 @@ use serde::Serialize;
 /// engine's public API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum FormatArg {
-    /// GraphML. Gephi, yEd, Cytoscape — see the note this prints to stderr
-    /// about node labels.
+    /// GraphML. Gephi, yEd, Cytoscape.
     Graphml,
-    /// Gephi's native XML. The one whose labels Gephi reads directly.
+    /// Gephi's native XML.
     Gexf,
     /// `id,type,title`, one row per node.
     Csv,
@@ -102,9 +101,9 @@ struct ExportSummary<'a> {
     format: &'a str,
     nodes: u32,
     bytes: usize,
-    /// What the file says that the file cannot: the edge superset, and the
-    /// GraphML label gap where it applies. Printed to stderr too, because a
-    /// person watching a shell will not parse this line.
+    /// What the file cannot say about itself — today, the edge superset.
+    /// Printed to stderr too, because a person watching a shell will not parse
+    /// this line.
     notes: Vec<&'a str>,
 }
 

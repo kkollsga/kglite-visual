@@ -188,9 +188,8 @@ fn default_export_source() -> String {
 ///
 /// The response says twice what the file cannot: `Content-Disposition` names
 /// it, in ASCII and again in RFC 5987 UTF-8 so a Norwegian graph keeps its
-/// letters, and `x-kglv-note` carries the edge-superset caveat (and, for
-/// GraphML, the upstream label-key gap) so a caller reading only headers still
-/// meets them.
+/// letters, and `x-kglv-note` carries the edge-superset caveat so a caller
+/// reading only headers still meets it.
 pub async fn export(
     State(state): State<AppState>,
     axum::extract::Query(query): axum::extract::Query<ExportQuery>,

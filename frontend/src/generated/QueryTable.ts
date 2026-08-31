@@ -39,28 +39,6 @@ relationships: Array<QueryRelationship>,
  */
 explain: boolean, 
 /**
- * The engine cancelled this query at its deadline, and the rows above are
- * whatever had been materialised when it did.
- *
- * **Always `false` against kglite 0.16.15**, and that is a fact about the
- * engine rather than about this field. `QueryDiagnostics::timed_out` is
- * declared and documented there ("the result rows are the partial set
- * materialised before cancellation") but never assigned `true`: grepped
- * across the whole crate on 2026-08-30, the only writes to any
- * `timed_out` are an unrelated local `AtomicBool` in
- * `graph/algorithms/centrality.rs`. Every deadline path in the Cypher
- * executor returns `Err("Query timed out")` instead, which reaches a
- * caller here as [`CoreError::Query`] and an HTTP 422 carrying kglite's
- * own message — verified against sodir at `--query-timeout-secs 1`.
- *
- * So this is carried, not derived from a symptom that exists today. The
- * day the engine wires the flag, a partial result would otherwise arrive
- * here indistinguishable from a complete one — `bound.truncated` is
- * `false` for it, because nothing was truncated; the query simply stopped.
- * Reported upstream rather than worked around: it is the engine's field.
- */
-timed_out: boolean, 
-/**
  * kglite's non-fatal advisories for this query, in the engine's own
  * wording — an unknown label, an unknown relationship type, an absent
  * property, each with its "did you mean?" hint.

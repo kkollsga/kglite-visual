@@ -779,24 +779,20 @@ export class Panels {
    * What the engine said about the query, beside what it answered.
    *
    * Two separate facts, and neither is the response bound: `truncated` means
-   * "there is more of this answer", `timed_out` means "this is not the answer",
-   * and a warning means "the answer may not be to the question you typed". The
-   * last one is the reason this block exists at all — kglite's unknown-label
-   * advisory used to reach only the *server's* stderr, so a mistyped label
-   * rendered as an empty result and read as an empty graph.
+   * "there is more of this answer", and a warning means "the answer may not be
+   * to the question you typed". The second is the reason this block exists at
+   * all — kglite's unknown-label advisory used to reach only the *server's*
+   * stderr, so a mistyped label rendered as an empty result and read as an
+   * empty graph.
+   *
+   * There is deliberately no "cancelled at its deadline" line here: a query
+   * that hits its deadline never produces a `QueryTable` at all. kglite errors
+   * (`Query timed out…`), the server answers 422, and the editor renders that
+   * as an error — which is the honest rendering, because there are no partial
+   * rows to caption.
    */
   private showQueryDiagnostics(table: QueryTable): void {
     this.queryDiagnostics.replaceChildren()
-    if (table.timed_out) {
-      const line = element(
-        'div',
-        'kglv-hint kglv-error',
-        'the engine cancelled this query at its time limit — the rows below are ' +
-          'a partial answer, not a short one',
-      )
-      line.setAttribute('data-testid', 'query-timed-out')
-      this.queryDiagnostics.appendChild(line)
-    }
     for (const warning of table.warnings) {
       // kglite's own wording, verbatim: it carries the offending name and a
       // "did you mean?" hint, which is the whole of what the user can act on.

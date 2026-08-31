@@ -15,20 +15,20 @@
 //! whose user typed `kglite-visual export <file>` at a terminal. The server has
 //! no route to it at all.
 //!
-//! **Two honesty notes travel with every export**, because both are things a
-//! user would otherwise discover in Gephi:
+//! **One honesty note travels with every export**, because it is a thing a user
+//! would otherwise discover in Gephi: **the edge set can be a superset of the
+//! canvas.** kglite writes every edge it holds between two exported nodes; the
+//! view drops links its byte budget refused (`GraphSliceMeta::link_bound`) and
+//! never learns about edges whose endpoints both arrived by different routes.
+//! So an export of a view is node-exact and edge-inclusive. That is the right
+//! direction to be wrong in — a file missing edges the screen showed would be
+//! worse — but it is not what "export what I see" sounds like.
 //!
-//! - **The edge set can be a superset of the canvas.** kglite writes every edge
-//!   it holds between two exported nodes; the view drops links its byte budget
-//!   refused (`GraphSliceMeta::link_bound`) and never learns about edges whose
-//!   endpoints both arrived by different routes. So an export of a view is
-//!   node-exact and edge-inclusive. That is the right direction to be wrong in
-//!   — a file missing edges the screen showed would be worse — but it is not
-//!   what "export what I see" sounds like.
-//! - **GraphML carries no `label` key.** kglite writes the node's title under
-//!   `attr.name="title"`, and Gephi looks for `attr.name="label"`, so a GraphML
-//!   import shows `n0`, `n1`, … See [`GRAPHML_LABEL_NOTE`]; the defect is the
-//!   engine's and is not patched here.
+//! There used to be a second note: GraphML carried no `attr.name="label"` key,
+//! so a Gephi import showed `n0`, `n1`, … kglite 0.16.16 added it (nodes carry
+//! the title, edges the connection type) and the note is gone. The test that
+//! asserted its absence now asserts the key's presence, so the two formats
+//! stay in step.
 
 use kglite::api::io::{to_csv, to_d3_json, to_gexf, to_graphml};
 use kglite::api::{CurrentSelection, DirGraph, NodeIndex};
@@ -46,7 +46,7 @@ use crate::error::CoreError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExportFormat {
-    /// XML. Gephi, yEd, Cytoscape. See [`GRAPHML_LABEL_NOTE`].
+    /// XML. Gephi, yEd, Cytoscape.
     Graphml,
     /// Gephi's own XML.
     Gexf,
@@ -134,19 +134,6 @@ pub const EDGE_SUPERSET_NOTE: &str =
      them, which can be MORE than you saw — a link the view's byte budget refused, or one a \
      query's rows never mentioned, is still an edge in this file";
 
-/// kglite's GraphML has no `label` key, and Gephi wants one.
-///
-/// **Not patched here.** The `.kgl` format and its exporters are the engine's,
-/// and a key this project bolted on would be a second GraphML dialect that
-/// disagrees with every other kglite binding's. It is reported upstream and
-/// asserted as *current behaviour* in this module's tests, so the day the
-/// engine adds the key the test fails and this note is retired by the same
-/// change that makes it false.
-pub const GRAPHML_LABEL_NOTE: &str =
-    "kglite writes the node title under attr.name=\"title\"; Gephi reads attr.name=\"label\", so \
-     a GraphML import shows n0, n1, … as the node names. Map the `title` column after import, \
-     or export `gexf`, whose <node label=…> Gephi reads directly.";
-
 /// One export, ready to write or to send.
 #[derive(Debug, Clone)]
 pub struct ExportedView {
@@ -161,14 +148,14 @@ pub struct ExportedView {
 }
 
 impl ExportedView {
-    /// The caveats that apply to *this* export, in the order a reader needs
-    /// them. Never empty: [`EDGE_SUPERSET_NOTE`] is true of every format.
+    /// The caveats that apply to *this* export.
+    ///
+    /// One today, and it is format-independent: [`EDGE_SUPERSET_NOTE`] is true
+    /// of every format. The signature stays a `Vec` because the per-format
+    /// shape is the honest one — GraphML carried a second note until kglite
+    /// 0.16.16 closed the gap, and the next format-specific caveat lands here.
     pub fn notes(&self) -> Vec<&'static str> {
-        let mut notes = vec![EDGE_SUPERSET_NOTE];
-        if self.format == ExportFormat::Graphml {
-            notes.push(GRAPHML_LABEL_NOTE);
-        }
-        notes
+        vec![EDGE_SUPERSET_NOTE]
     }
 }
 
@@ -366,9 +353,21 @@ mod tests {
             // written: its target id would name nothing in the file, and an
             // importer that resolves ids either drops the edge silently or
             // invents a node for it.
-            let edges = text.matches("LINKS").count();
+            //
+            // Counted structurally, per format, and not by counting the
+            // relationship type's name: kglite 0.16.16 made GraphML write the
+            // type twice per edge (`edge_type` and the new Gephi-readable
+            // `edge_label`), which doubled a name count on a file whose edge
+            // count had not changed.
+            let edges = match format {
+                ExportFormat::Graphml | ExportFormat::Gexf => text.matches("<edge ").count(),
+                ExportFormat::Json => text.matches(r#"{"source":"#).count(),
+                // Data rows, so the header line does not count as an edge.
+                ExportFormat::CsvEdges => text.lines().filter(|l| !l.is_empty()).count() - 1,
+                // The nodes-only CSV holds no relationship at all.
+                ExportFormat::Csv => 0,
+            };
             let expected = match format {
-                // The nodes-only CSV mentions no relationship at all.
                 ExportFormat::Csv => 0,
                 _ => 2,
             };
@@ -453,27 +452,55 @@ mod tests {
         }
     }
 
-    /// The upstream gap, asserted as *current behaviour* so it retires itself.
+    /// Both XML formats name their elements, and the export note says nothing
+    /// about labels any more.
     ///
-    /// See [`GRAPHML_LABEL_NOTE`]. When kglite adds the key this fails, and the
-    /// change that makes it fail is the change that should delete the note.
+    /// This test is the previous one inverted. It used to assert that GraphML
+    /// had **no** `attr.name="label"` key — the upstream gap, pinned as current
+    /// behaviour so it would retire itself — and it fired the moment the floor
+    /// moved to a kglite that closed it (0.16.16, verified on the exported
+    /// bytes: `node_label` carries the title, `edge_label` the connection
+    /// type). Kept in the presence direction so a regression on either side is
+    /// still a red test rather than a Gephi import full of `n0`, `n1`, ….
     #[test]
-    fn graphml_still_has_no_label_key_and_gexf_still_does() {
+    fn both_xml_formats_carry_a_label_and_graphml_keeps_its_title_key() {
         let graphml = text_of(ExportFormat::Graphml);
         assert!(
             graphml.contains(r#"attr.name="title""#),
-            "the title key moved; the note describes something else now"
+            "the title key went away; a reader consuming it is now broken"
         );
         assert!(
-            !graphml.contains(r#"attr.name="label""#),
-            "kglite now writes a GraphML label key — delete GRAPHML_LABEL_NOTE and this test"
+            graphml.contains(r#"attr.name="label""#),
+            "kglite stopped writing the GraphML label key — a Gephi import is back to n0, n1, …"
         );
-        // GEXF is the format that does carry it, which is what the note tells
-        // the user to reach for.
         assert!(
             text_of(ExportFormat::Gexf).contains("label="),
-            "the recommendation in GRAPHML_LABEL_NOTE no longer holds"
+            "GEXF stopped naming its nodes"
         );
+    }
+
+    /// The export notes stopped mentioning labels, and must not start again.
+    #[test]
+    fn no_export_note_still_warns_about_a_missing_graphml_label() {
+        for format in ExportFormat::ALL {
+            let view = ExportedView {
+                format,
+                bytes: Vec::new(),
+                nodes: 0,
+                filename: String::new(),
+            };
+            let notes = view.notes();
+            assert!(
+                !notes.is_empty(),
+                "{} lost its edge-superset note",
+                format.as_str()
+            );
+            assert!(
+                notes.iter().all(|note| !note.contains("label")),
+                "{} still carries a label caveat kglite 0.16.16 made false",
+                format.as_str()
+            );
+        }
     }
 
     #[test]

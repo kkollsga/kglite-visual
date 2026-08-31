@@ -67,11 +67,15 @@ test('the export endpoint writes the view, names the file and states its caveats
     ).toBe(KNOWS_REACHABLE)
     expect(rows.length - 1).toBeLessThan(FIXTURE_NODES)
 
-    // GraphML carries the upstream caveat as well as the edge one, because it
-    // is the format whose node names import wrong.
+    // GraphML carries the edge caveat and nothing else. It used to carry a
+    // second note about kglite writing no Gephi `label` key; kglite 0.16.16
+    // added the key, so the note is gone and the key must be in the bytes.
     const graphml = await fetch(url('format=graphml&source=live-view'))
-    expect(graphml.headers.get('x-kglv-note')).toContain('Gephi reads attr.name="label"')
-    expect(await graphml.text()).toContain('<graphml')
+    expect(graphml.headers.get('x-kglv-note')).toContain('every edge this graph holds')
+    expect(graphml.headers.get('x-kglv-note')).not.toContain('label')
+    const graphmlText = await graphml.text()
+    expect(graphmlText).toContain('<graphml')
+    expect(graphmlText).toContain('attr.name="label"')
 
     // A format nobody offers names the ones that exist, rather than answering
     // with a default the caller did not ask for.

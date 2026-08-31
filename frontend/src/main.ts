@@ -853,9 +853,12 @@ function redraw(authority?: SeedAuthority): void {
  * The test is kglite's own capability flag, read off the meta-graph the entry
  * screen already loaded: `geo` for a type with a WKT geometry, `loc` for one
  * with a lat/lon pair. They are two spellings of "this type declares where its
- * nodes are" — kglite suppresses `loc` whenever `geo` is present, so a type
- * with both reports only `geo`, and testing for either is the only way to catch
- * both. It is a *type-level* claim, so it can be true for a node whose own
+ * nodes are", they are independent facts (kglite 0.16.16 stopped suppressing
+ * `loc` under `geo`, so a type declaring both now reports both), and testing
+ * for either is what catches a type carrying only one of them. The gate is
+ * unaffected by that upstream change in either direction: `a || b` does not
+ * care whether `b` was being hidden. It is a *type-level* claim, so it can be
+ * true for a node whose own
  * fields turn out to be null; the server draws those in its tray and says how
  * many, which is the honest place for that count to appear.
  */

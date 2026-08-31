@@ -126,6 +126,35 @@ pub const MAX_QUERY_BYTES: usize = 2 * 1024 * 1024;
 /// job and this is an interactive viewer — a query that has materialised two
 /// million rows has already lost the user's attention, and the memory it costs
 /// comes out of the browser's host process.
+///
+/// **Re-examined at the 0.16.17 floor move, and deliberately unchanged.**
+/// kglite 0.16.16 fixed the bug this project reported — a deadline was polled
+/// only inside the pattern matcher, so the row-build layer above it ran to
+/// completion however long ago the clock had expired — and noted, correctly,
+/// that *this* budget contributed: 2M work units forces the matcher into its
+/// capped sequential mode (3.3× slower), which pushed the deadline out of the
+/// checked matcher and into the unchecked row loop. With the row loops now
+/// polling, the case for raising or dropping this number would be that the
+/// deadline covers what it covered. It does not, and the difference is
+/// measured, on sodir (546 850 nodes / 765 373 edges), release profile,
+/// 2026-08-31:
+///
+/// - The deadline bounds **time**, and now does so tightly: three runs of
+///   `MATCH (a:Field)-[*1..4]-(b:Field) RETURN count(*)` under a 5 s deadline
+///   answered `422 "Query timed out"` at 5.43 / 5.50 / 5.56 s wall — about
+///   0.5 s of cancel-detection plus teardown. The server stayed up.
+/// - It does not bound **memory**. Reaching exactly this budget cost
+///   +2.9 GB RSS (615 MB baseline → 4.57 GB) on a four-hop MATCH that the
+///   guard then refused in 1.3 s, and a cancelled query peaked at 4.92 GB.
+///   Thirty seconds of unchecked materialisation is the 7.29 GB OOM this
+///   project originally reported; a clock cannot prevent it.
+///
+/// Two guards for two resources, so both stay. The number itself is close to
+/// its work though, and knowingly so: the three-hop path query this project
+/// reported upstream produces 1 941 015 rows — 3% under the budget — and is
+/// answered, truncated and honest, in 975 ms. One more hop is refused at
+/// 2 000 001. Anything that moves this number moves that margin, so measure
+/// the path query again when it does.
 pub const MAX_QUERY_WORK_UNITS: usize = 2_000_000;
 
 /// Hits one search may return. Small on purpose: a search result is a list a
@@ -199,26 +228,6 @@ pub struct QueryTable {
     /// Whether the query was an `EXPLAIN`. The rows are a plan, not data, and a
     /// UI that offered "show in graph" for them would be offering nonsense.
     pub explain: bool,
-    /// The engine cancelled this query at its deadline, and the rows above are
-    /// whatever had been materialised when it did.
-    ///
-    /// **Always `false` against kglite 0.16.15**, and that is a fact about the
-    /// engine rather than about this field. `QueryDiagnostics::timed_out` is
-    /// declared and documented there ("the result rows are the partial set
-    /// materialised before cancellation") but never assigned `true`: grepped
-    /// across the whole crate on 2026-08-30, the only writes to any
-    /// `timed_out` are an unrelated local `AtomicBool` in
-    /// `graph/algorithms/centrality.rs`. Every deadline path in the Cypher
-    /// executor returns `Err("Query timed out")` instead, which reaches a
-    /// caller here as [`CoreError::Query`] and an HTTP 422 carrying kglite's
-    /// own message — verified against sodir at `--query-timeout-secs 1`.
-    ///
-    /// So this is carried, not derived from a symptom that exists today. The
-    /// day the engine wires the flag, a partial result would otherwise arrive
-    /// here indistinguishable from a complete one — `bound.truncated` is
-    /// `false` for it, because nothing was truncated; the query simply stopped.
-    /// Reported upstream rather than worked around: it is the engine's field.
-    pub timed_out: bool,
     /// kglite's non-fatal advisories for this query, in the engine's own
     /// wording — an unknown label, an unknown relationship type, an absent
     /// property, each with its "did you mean?" hint.
@@ -312,7 +321,6 @@ pub fn run_cypher(
 
     let diagnostics = outcome.result.diagnostics.as_ref();
     let total_rows = diagnostics.and_then(|d| d.total_rows);
-    let timed_out = diagnostics.is_some_and(|d| d.timed_out);
     // The engine's `elapsed_ms` is deliberately not adopted: it times parse +
     // plan + execute, and `elapsed_ms` here is what the *caller* waited for,
     // which is that plus the transpose and the byte bound. Two numbers under
@@ -346,7 +354,6 @@ pub fn run_cypher(
     );
     table.elapsed_ms = elapsed_ms;
     table.explain = outcome.explain;
-    table.timed_out = timed_out;
     table.warnings = warnings;
     table.profile = profile;
     Ok(table)
@@ -483,7 +490,6 @@ fn to_table(
         node_ids,
         relationships,
         explain: false,
-        timed_out: false,
         warnings: Vec::new(),
         // G6 sends `PROFILE` and fills this; nothing on this path asks for it.
         profile: None,
@@ -988,16 +994,18 @@ mod tests {
         assert_eq!(forwarded_warnings(&engine, false).len(), 2);
     }
 
-    /// Two additive fields whose absence is the failure, not their value.
+    /// An advisory field whose absence is the failure, not its value.
     ///
-    /// `timed_out` is `false` on every real result kglite 0.16.15 produces
-    /// (see the field's own doc), so nothing in this crate can observe it
-    /// firing. What *can* be observed — and what breaks the moment someone
-    /// adds `skip_serializing_if` or renames a field to match a Rust-side
-    /// tidy-up — is that both reach the wire at all, beside a `bound` that
-    /// reports a cancelled query as untruncated.
+    /// `warnings` carries the engine's "did you mean?" hints, and it breaks the
+    /// moment someone adds `skip_serializing_if` or renames the field to match
+    /// a Rust-side tidy-up: the panel would go quiet rather than go wrong, and
+    /// a mistyped label would render as an empty graph again.
+    ///
+    /// It used to assert a `timed_out` sibling too. That field is gone (kglite
+    /// 0.16.16 deleted `QueryDiagnostics::timed_out`, which was the only thing
+    /// that could ever have set it), so there is no second field to pin.
     #[test]
-    fn the_diagnostic_fields_are_on_the_wire_and_the_bound_does_not_cover_them() {
+    fn the_warnings_field_is_on_the_wire() {
         let mut table = to_table(
             vec!["n".into()],
             vec![vec![Value::Int64(1)]],
@@ -1007,18 +1015,17 @@ mod tests {
             },
             None,
         );
-        table.timed_out = true;
         table.warnings = vec!["absent property 'titel'".to_string()];
 
-        assert!(
-            !table.bound.truncated,
-            "a cancelled query is not a truncated one, which is why timed_out exists"
-        );
         let json = serde_json::to_value(&table).expect("serializes");
-        assert_eq!(json["timed_out"], serde_json::json!(true));
         assert_eq!(
             json["warnings"],
             serde_json::json!(["absent property 'titel'"])
+        );
+        assert!(
+            json.get("timed_out").is_none(),
+            "timed_out was removed with kglite 0.16.16's field; nothing may re-add \
+             a flag no deadline path can set"
         );
     }
 

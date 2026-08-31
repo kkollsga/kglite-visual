@@ -120,8 +120,9 @@ pub struct MetaTypeNode {
     pub name: String,
     /// Members of this type.
     pub count: u32,
-    /// `ts` / `geo` / `loc` / `vec`, in kglite's own order and with its own
-    /// rule that `loc` is suppressed when `geo` is present.
+    /// `ts` / `geo` / `loc` / `vec`, in kglite's own order. `loc` and `geo` are
+    /// independent since kglite 0.16.16 — a type declaring both lat/lon columns
+    /// and a WKT geometry carries both badges.
     pub capabilities: Vec<String>,
     /// True when this type has a parent in kglite's `is_a` forest. Supporting
     /// types do not count toward the tier classification.
@@ -189,16 +190,25 @@ pub struct MetaGraphResponse {
 /// kglite's four per-type capability flags, recomputed here because
 /// `TypeCapabilities` is still `pub(super)` inside kglite's introspection
 /// module — re-checked against the 0.16.14 sources on 2026-08-29, whose
-/// fourteen new facade exports do not include it, and against the 0.16.15
-/// sources on 2026-08-30. This is the one upstream mirror in this crate that
-/// the facade's growth has not retired; delete it in the change that sees the
-/// type exported, not before.
+/// fourteen new facade exports do not include it, against the 0.16.15
+/// sources on 2026-08-30, and against the 0.16.17 sources on 2026-08-31,
+/// where it is still `pub(super)` and still absent from `api/`. This is the
+/// one upstream mirror in this crate that the facade's growth has not
+/// retired; delete it in the change that sees the type exported, not before.
 ///
 /// Every source below is a `DirGraph` field the engine already maintains —
 /// three config maps and the embedding store's keys — so the whole scan is
 /// O(#types) and needs no node access. Mirrors
-/// `crates/kglite/src/graph/introspection/capabilities.rs::compute_type_capabilities`,
-/// including the `loc`-suppressed-by-`geo` rule in `flags_csv`.
+/// `crates/kglite/src/graph/introspection/capabilities.rs::compute_type_capabilities`
+/// and the flag order of `flags_csv` (`ts`, `geo`, `loc`, `vec`).
+///
+/// **`loc` and `geo` are independent**, and that is the corrected rule, not the
+/// original one: until kglite 0.16.16, `flags_csv` suppressed `loc` whenever
+/// `geo` was set, and this mirror copied the suppression. On sodir, 37 of 38
+/// types declare both, so the badge said "geometry" and hid the fact that plain
+/// lat/lon float columns were sitting next door — a reader trusting it would
+/// parse WKT polygons to recover coordinates it already had. Reported upstream
+/// and fixed there; mirrored here in the same change as the floor move.
 ///
 /// Deliberately **not** mirrored: `bubble_capabilities`, which `describe()`
 /// applies afterwards to merge a supporting type's flags into its parent. A
@@ -229,7 +239,7 @@ fn capabilities_for(graph: &DirGraph, node_type: &str) -> Vec<String> {
     if has_geometry {
         flags.push("geo".to_string());
     }
-    if has_location && !has_geometry {
+    if has_location {
         flags.push("loc".to_string());
     }
     if has_embeddings {

@@ -22,7 +22,12 @@ curl -s -XPOST $B/api/cypher -H 'content-type: application/json' \
 ```
 
 A graph result carries the slice; a table result carries columns, rows,
-`{returned, total, truncated}`, `elapsed_ms`, `warnings` and `timed_out`.
+`{returned, total, truncated}`, `elapsed_ms` and `warnings`.
+
+A query that runs past `--query-timeout-secs` does not arrive here at all: the
+engine cancels it and errors, and the response is `422` carrying kglite's own
+*"Query timed out…"* message. There are no partial rows — which is why the
+table carries no "cancelled" flag.
 
 The 5,000-row ceiling reaches kglite's executor, so rows above it are never
 built — `MATCH (n) RETURN id(n)` over a 546,850-node graph costs about 100 MB
@@ -160,10 +165,26 @@ Each hop carries a `count(*)` preview, so the size of the answer is known
 before anything is drawn. When the last hop's preview is past what the server
 will return, the card says so **before** the click rather than after the wait.
 
-**Read the hop counts before pressing Run.** Measured on a real graph: a
-three-hop path previewing at 1,941,015 rows took the engine past its own
-deadline and 7.3 GB of RSS before the OS killed the server. The preview is the
-cheap way to learn that; the run is not.
+**Read the hop counts before pressing Run.** A wide path is now a bounded wait
+rather than a lost server, but it is still a wait, and it is still expensive.
+Measured on a 546,850-node graph against kglite 0.16.17:
+
+- The three-hop path that previews at **1,941,015 rows** answers in about a
+  second, truncated to the row ceiling, and says what it truncated.
+- Add a fourth hop and the engine refuses it outright — *"Query produced
+  2000001 work units … exceeding the max_work_units budget"* — in about a
+  second. That is the runaway guard, not the clock.
+- A query that does run long stops at the deadline: three runs under a 5-second
+  ceiling ended at 5.4–5.6 seconds with *"Query timed out"*, the extra half
+  second being cancellation plus dropping the working set the query had already
+  built. **The server stays up.** Until kglite 0.16.16 it did not: the deadline
+  was checked in the pattern matcher but not in the row-building layer above
+  it, so this same query ran more than 120 seconds past a 30-second ceiling,
+  reached 7.3 GB of RSS, and was killed by the OS.
+
+None of it is free — a refused or cancelled query has still allocated whatever
+it built before it stopped. The preview is the cheap way to learn the size; the
+run is not.
 
 Run sends exactly the query on screen down the ordinary bounded path — no
 per-hop bound, one row ceiling, the same banner.

@@ -41,7 +41,7 @@ image and the app agree:
 | Circle area | Member count, log-scaled |
 | Link width | Number of edges the relationship type stands for |
 | Muted styling | A *supporting* type — one that hangs off another in the graph's own type hierarchy |
-| `GEO` / `TS` badge | The type declares coordinates or a timeseries |
+| `GEO` / `LOC` / `TS` / `VEC` badge | The type declares a WKT geometry / a lat/lon pair / a timeseries / embedding vectors. `GEO` and `LOC` are independent, so a type declaring both shows both |
 
 ### Detail tiers
 
