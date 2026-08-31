@@ -100,12 +100,11 @@ request is **400** and names what it refused; a query the engine rejected is
 summarise it.
 
 **`/api/export` answers with a file and three headers.** `x-kglv-nodes` is
-what it wrote, `x-kglv-format` which one, and **`x-kglv-note` carries the two
-caveats the file itself cannot**: the edge set is every edge between the
-exported nodes and so can exceed what the canvas drew, and kglite's GraphML
-has no Gephi `label` key (its titles land under `attr.name="title"`, so a
-GraphML import shows `n0`, `n1`, …; GEXF does not have this problem). Report
-those, don't discover them in Gephi. The scope is **the view** — an export
+what it wrote, `x-kglv-format` which one, and **`x-kglv-note` carries the one
+caveat the file itself cannot**: the edge set is every edge between the
+exported nodes and so can exceed what the canvas drew. Report that, don't
+discover it in Gephi. (GraphML carries proper `label` keys as of kglite
+0.16.16 — nodes get the title, edges the connection type.) The scope is **the view** — an export
 over the entry screen is a **400** naming what to load first, never a
 whole-graph dump. `kglite-visual export <file>` is the CLI half and the only
 place a whole graph is on offer.
@@ -292,10 +291,12 @@ generated text is the contract: what is on screen is what runs.
   meta-graph actually has. Each hop carries a `count(*)` preview, and the
   note turns into a warning when the last count is past `max_query_rows`.
 
-**Read `path-count-<i>` before clicking `path-run`.** Measured on sodir:
-a three-hop path previewing at 1,941,015 rows took the engine past its own
-deadline and 7.3GB of RSS before the OS killed the server. The preview is
-the cheap way to learn that; the run is not.
+**Read `path-count-<i>` before clicking `path-run`.** Measured on sodir
+(kglite 0.16.17): a three-hop path previewing at 1,941,015 rows now returns
+a truncated 200 in ~1 s — the deadline fix landed — but one hop wider is
+refused by the work-units guard after climbing ~3 GB of RSS, and the
+deadline bounds time, not memory. The preview is still the cheap way to
+learn the size; the count answers in ~100 ms.
 
 **Prefer a running server's `/api/render` over one-shot CLI renders** when a
 server is already up: each CLI render loads the whole graph fresh (~627MB

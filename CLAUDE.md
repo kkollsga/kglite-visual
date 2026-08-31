@@ -709,8 +709,8 @@ rewrites every site and verifies with a **resolving** `cargo metadata`
 above and run the resolving `cargo metadata` by hand.)*
 
 **The `kglite` floor is a second version surface, enumerated separately**
-(`R16`). It has **two declarations, counted by grepping on 2026-08-29 (P6),
-not assumed**:
+(`R16`). It has **four declarations, counted by grepping on 2026-08-31 (the
+0.16.17 move), not assumed**:
 
 1. `crates/kglite-visual-core/Cargo.toml` — the `kglite = "=X.Y.Z"` line,
    exact-pinned because kglite is pre-1.0 and ships documented breaking
@@ -720,6 +720,15 @@ not assumed**:
    naming a version is a declaration, and this one is one file away from the
    paragraph that says so — exactly the shape codingest shipped a skewed
    wheel through.
+3. `README.md` — the Requirements section's "this version pins
+   `kglite X.Y.Z`" sentence.
+4. `docs/getting-started.md` — the same sentence on the install page.
+
+Sites 3 and 4 arrived with the 0.1.2 docs release and were **missing from
+this enumeration for two floor moves** — KGLite's ecosystem notifier caught
+them, this list did not. A user-facing "this version pins" sentence is a
+declaration, not a citation; a doc page that states the pin joins this list
+in the same change that adds the sentence.
 
 The `path` component was **removed in P6** and its removal fixed a shipped
 defect, not a preference: the sibling checkout sits outside this workspace,
@@ -737,7 +746,12 @@ correctly: 0.16.15 stopped spilling for small files and
 `tests/shutdown.rs` refused to pass on an empty `$TMPDIR`. **A version
 that can compile and still misbehave must be run** — that is the same
 rule, collecting on a different dependency. `release.yml`'s sdist job
-asserts no foreign crate reappears.
+asserts no foreign crate reappears. The floor moved to `=0.16.17` on
+2026-08-31 — 0.16.16/0.16.17 are the pair cut from this project's
+six-findings program: `timed_out` deleted upstream (and our defensive carry
+with it, off the wire), GraphML `label` keys emitted, `loc`/`geo` badges
+independent, and the row-layer deadline fix, measured here at ~1 s on the
+1.94M-row path query that previously ran 120 s to a 7.29 GB OOM.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
