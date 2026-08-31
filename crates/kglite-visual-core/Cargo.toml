@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
 
 [dependencies]
-# The engine, from crates.io. `=0.16.17` is EXACT on purpose (D11): kglite is
+# The engine, from crates.io. `=0.16.18` is EXACT on purpose (D11): kglite is
 # pre-1.0 and ships documented breaking changes in patch releases, so a caret
 # range would let a routine `cargo update` swap the engine under us. Moving
 # this floor means reading kglite's CHANGELOG and re-greping every declaration
@@ -33,6 +33,10 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # manifest (verified 2026-08-31, four manifests, zero hits): a consumer that
 # relied on kglite to switch on geo's default features for its OWN direct geo
 # dependency would have to declare them itself, and we have no such dependency.
+# Re-checked 2026-08-31 (evening): `0.16.18` is published and current — its
+# entire surface is the MCP server binary (CSV port binding, lenient
+# source-root resolution, selftest reporting); nothing in the engine crate,
+# the `.kgl` format, or the Cypher dialect moved.
 #
 # NO `path` component, and its removal (P6) fixed a shipped defect rather than
 # tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
@@ -50,7 +54,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.16.17"
+kglite = "=0.16.18"
 
 # The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
 # MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest

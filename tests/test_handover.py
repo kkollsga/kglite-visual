@@ -16,7 +16,7 @@ from conftest import get_json
 kglite = pytest.importorskip(
     "kglite",
     reason="the object handover needs a real KnowledgeGraph; "
-    "`pip install kglite==0.16.17` into this venv to run it",
+    "`pip install kglite==0.16.18` into this venv to run it",
 )
 
 

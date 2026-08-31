@@ -11,6 +11,15 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.16.18**, exactly pinned (was 0.16.17). The
+  release's entire surface is kglite's own MCP server binary — CSV-export port
+  binding, lenient source-root resolution, selftest reporting; nothing in the
+  engine API, the `.kgl` format, or the Cypher dialect this viewer consumes
+  changed. The bump keeps the pin current so `pip install kglite` alongside
+  this wheel resolves to one engine version.
+
 ## [0.1.3] - 2026-08-31
 
 ### Changed

@@ -709,8 +709,8 @@ rewrites every site and verifies with a **resolving** `cargo metadata`
 above and run the resolving `cargo metadata` by hand.)*
 
 **The `kglite` floor is a second version surface, enumerated separately**
-(`R16`). It has **four declarations, counted by grepping on 2026-08-31 (the
-0.16.17 move), not assumed**:
+(`R16`). It has **four declarations, counted by grepping on 2026-08-31 (re-verified
+at the 0.16.18 move the same day), not assumed**:
 
 1. `crates/kglite-visual-core/Cargo.toml` — the `kglite = "=X.Y.Z"` line,
    exact-pinned because kglite is pre-1.0 and ships documented breaking
@@ -751,7 +751,11 @@ asserts no foreign crate reappears. The floor moved to `=0.16.17` on
 six-findings program: `timed_out` deleted upstream (and our defensive carry
 with it, off the wire), GraphML `label` keys emitted, `loc`/`geo` badges
 independent, and the row-layer deadline fix, measured here at ~1 s on the
-1.94M-row path query that previously ran 120 s to a 7.29 GB OOM.
+1.94M-row path query that previously ran 120 s to a 7.29 GB OOM. The floor
+moved to `=0.16.18` later the same day — a release whose entire surface is
+kglite's own MCP server binary (CSV port binding, lenient source-root
+resolution, selftest reporting); nothing this viewer consumes moved, and the
+four declarations above were re-greped and confirmed complete.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
