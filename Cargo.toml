@@ -15,7 +15,7 @@ resolver = "2"
 # full enumeration, and why counting beats assuming, is in CLAUDE.md →
 # "Commits & releases".
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 # kglite's own MSRV. This project embeds that engine, so its floor is ours;
 # a lower number here would be a claim no build ever tests.
 rust-version = "1.88"

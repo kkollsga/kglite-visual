@@ -1492,7 +1492,7 @@ dependencies = [
 
 [[package]]
 name = "kglite-visual-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1514,7 +1514,7 @@ dependencies = [
 
 [[package]]
 name = "kglite-visual-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "flate2",
  "kglite",
@@ -1529,7 +1529,7 @@ dependencies = [
 
 [[package]]
 name = "kglite-visual-py"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "kglite-visual-cli",
  "kglite-visual-core",

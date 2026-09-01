@@ -42,14 +42,14 @@ abi3 = ["pyo3/abi3-py310"]
 pyo3 = { version = "0.29" }
 
 # VERSION SITE 3 of 4. See CLAUDE.md → "Commits & releases".
-kglite-visual-core = { version = "0.1.4", path = "../kglite-visual-core" }
+kglite-visual-core = { version = "0.1.5", path = "../kglite-visual-core" }
 
 # VERSION SITE 4 of 4. The wheel links the CLI's library half rather than
 # re-implementing the axum server (plan D9, lib-link): one server, one embedded
 # bundle, one launch contract. The binary stays the only binary — this
 # dependency reaches the `[lib]`, and the console script goes through
 # `run_from`, the same entry `main.rs` calls.
-kglite-visual-cli = { version = "0.1.4", path = "../kglite-visual-cli" }
+kglite-visual-cli = { version = "0.1.5", path = "../kglite-visual-cli" }
 
 # The wheel owns the runtime the server thread runs on: `show()` returns while
 # the server keeps serving, so the runtime is built inside the thread rather
