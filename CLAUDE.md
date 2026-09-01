@@ -710,7 +710,8 @@ above and run the resolving `cargo metadata` by hand.)*
 
 **The `kglite` floor is a second version surface, enumerated separately**
 (`R16`). It has **four declarations, counted by grepping on 2026-08-31 (re-verified
-at the 0.16.18 move the same day), not assumed**:
+at the 0.16.18 move the same day and at the 0.16.19 move on 2026-09-01), not
+assumed**:
 
 1. `crates/kglite-visual-core/Cargo.toml` — the `kglite = "=X.Y.Z"` line,
    exact-pinned because kglite is pre-1.0 and ships documented breaking
@@ -755,7 +756,17 @@ independent, and the row-layer deadline fix, measured here at ~1 s on the
 moved to `=0.16.18` later the same day — a release whose entire surface is
 kglite's own MCP server binary (CSV port binding, lenient source-root
 resolution, selftest reporting); nothing this viewer consumes moved, and the
-four declarations above were re-greped and confirmed complete.
+four declarations above were re-greped and confirmed complete. The floor moved to
+`=0.16.19` on 2026-09-01 — the writer-lifecycle release (lazy writer lease,
+identity-based auto-refresh in kglite's MCP server, atomic generation
+publish for disk directories, `WriteOwnership`, a `label=` line in the
+lock-owner record). Its one semver-flagged change adds a field to
+`LeaseHolder`, which nothing here constructs; `load_file_with` and
+`load_kgl_bytes_with`, the two functions this viewer reads through, are
+outside the release's diff and never took a lease, so the move adopted no
+code and retired no workaround. The one thing it exposes is a gap on our
+side, filed rather than fixed: kglite's own MCP server now follows the
+file it serves, and this viewer still shows the graph as of its open.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the

@@ -20,7 +20,7 @@ JavaScript registry.
 
 You also need a `.kgl` file written by a matching
 [kglite](https://kglite.readthedocs.io) release. This version pins
-`kglite 0.16.18`.
+`kglite 0.16.19`.
 
 ## Open a graph
 
