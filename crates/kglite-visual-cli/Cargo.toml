@@ -16,7 +16,7 @@ path = "src/main.rs"
 # VERSION SITE 2 of 4. `[workspace.package] version` does not reach this
 # requirement string, and `cargo publish` demands it — the exact omission that
 # broke a KGLite release. See CLAUDE.md → "Commits & releases".
-kglite-visual-core = { version = "0.1.5", path = "../kglite-visual-core" }
+kglite-visual-core = { version = "0.1.6", path = "../kglite-visual-core" }
 
 clap = { version = "4.6.6", features = ["derive"] }
 axum = { version = "0.8", features = ["ws"] }
