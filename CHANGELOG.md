@@ -11,6 +11,20 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.16.20**, exactly pinned (was 0.16.19). The
+  release is writer- and MCP-side again: a `released=` line in the
+  `.lock-owner` record beside a graph, a renamed identity footer in kglite's
+  *own* MCP server (`generation N` became `load N`, with a new `file saved`
+  field), a `save_graph` that no longer rewrites a file it has nothing to
+  write to, and `extensions.writable` in that server's manifest. This viewer
+  embeds kglite's library and runs its own MCP server, so it parses none of
+  that and nothing here changed shape. The bump keeps the pin current, so
+  `pip install kglite` alongside this wheel resolves to one engine version.
+  The viewer still shows a `.kgl` as it was when it opened; a change another
+  process saves is seen by restarting it.
+
 ## [0.1.5] - 2026-09-01
 
 ### Changed

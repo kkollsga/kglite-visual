@@ -710,8 +710,8 @@ above and run the resolving `cargo metadata` by hand.)*
 
 **The `kglite` floor is a second version surface, enumerated separately**
 (`R16`). It has **four declarations, counted by grepping on 2026-08-31 (re-verified
-at the 0.16.18 move the same day and at the 0.16.19 move on 2026-09-01), not
-assumed**:
+at the 0.16.18 move the same day, at the 0.16.19 move on 2026-09-01 and at the
+0.16.20 move on 2026-09-02), not assumed**:
 
 1. `crates/kglite-visual-core/Cargo.toml` — the `kglite = "=X.Y.Z"` line,
    exact-pinned because kglite is pre-1.0 and ships documented breaking
@@ -766,7 +766,24 @@ lock-owner record). Its one semver-flagged change adds a field to
 outside the release's diff and never took a lease, so the move adopted no
 code and retired no workaround. The one thing it exposes is a gap on our
 side, filed rather than fixed: kglite's own MCP server now follows the
-file it serves, and this viewer still shows the graph as of its open.
+file it serves, and this viewer still shows the graph as of its open. The
+floor moved to `=0.16.20` on 2026-09-02 — again writer- and MCP-side: a
+`released=` line in the `.lock-owner` record, `generation N` renamed to
+`load N` plus a new `file saved <T>` in that server's identity footer and
+`<active_graph>` header, a clean `save_graph` that no longer rewrites the
+file, and `extensions.writable` in its manifest. **None of it is a surface
+this viewer touches**, and that was established by grepping rather than
+assumed: `save_graph`, `lock-owner`, `GraphWriterLease`, `GraphFileIdentity`
+and `reload_graph` are zero hits across the tracked tree, and every
+`generation` hit is our own frontend's round counter or prose about
+regenerating a baseline. This project embeds kglite's *library* and runs its
+own MCP server; it has never parsed kglite's server output, so the one
+break in the release — the footer rename, which has no compatibility
+spelling — cannot reach it. `GraphFileIdentity::modified()`, the release's
+one additive engine API, is the primitive the parked "viewer follows the
+served file" item needs and is not adopted here: this viewer displays no
+file-freshness claim for it to make more honest, and adding one is that
+item's scope, not this move's.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the

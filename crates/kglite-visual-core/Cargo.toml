@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
 
 [dependencies]
-# The engine, from crates.io. `=0.16.19` is EXACT on purpose (D11): kglite is
+# The engine, from crates.io. `=0.16.20` is EXACT on purpose (D11): kglite is
 # pre-1.0 and ships documented breaking changes in patch releases, so a caret
 # range would let a routine `cargo update` swap the engine under us. Moving
 # this floor means reading kglite's CHANGELOG and re-greping every declaration
@@ -36,14 +36,24 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Re-checked 2026-08-31 (evening): `0.16.18` is published and current — its
 # entire surface is the MCP server binary (CSV port binding, lenient
 # source-root resolution, selftest reporting); nothing in the engine crate,
-# the `.kgl` format, or the Cypher dialect moved. Re-checked 2026-09-01:
-# `0.16.19` is published and current — the writer-lifecycle release (lazy
-# writer lease, identity-based auto-refresh in kglite's MCP server, atomic
-# generation publish for disk directories). Every engine change is on the
-# WRITE side; `load_file_with` / `load_kgl_bytes_with`, the two functions this
-# read-only viewer loads through, are byte-identical to 0.16.18 and take no
-# lease, so a viewer serving a `.kgl` that a 0.16.19 writer is also serving
-# needs nothing from this crate to coexist with it.
+# the `.kgl` format, or the Cypher dialect moved. Re-checked 2026-09-02:
+# `0.16.20` is published and current, and the floor went there from `0.16.19`
+# in one step. Both releases are writer-side and MCP-side: 0.16.19 brought the
+# lazy writer lease and identity-based auto-refresh in kglite's own MCP
+# server, 0.16.20 the `released=` line in the `.lock-owner` record, a
+# `generation N` -> `load N` / `file saved <T>` rename in that server's
+# identity footer, a no-op `save_graph` on a clean server, and
+# `extensions.writable` in its manifest. This viewer embeds the LIBRARY, not
+# that server: it never spawns it, never parses its footer, and reads through
+# `load_file_with` / `load_kgl_bytes_with`, which take no lease and are
+# unchanged across both releases (`command grep` for `save_graph`,
+# `lock-owner`, `GraphWriterLease` and `GraphFileIdentity` over the tracked
+# tree: zero hits outside gitignored notes, 2026-09-02). The one 0.16.20
+# addition that could reach us is `GraphFileIdentity::modified()`; it is the
+# primitive for showing how fresh the served file is, which this viewer does
+# not show at all — the parked "viewer follows the served file" item, not an
+# adoption for this move. The `fastembed` 5 -> 6 move is invisible here:
+# nothing in this workspace enables that optional kglite feature.
 #
 # NO `path` component, and its removal (P6) fixed a shipped defect rather than
 # tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
@@ -61,7 +71,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.16.19"
+kglite = "=0.16.20"
 
 # The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
 # MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest
