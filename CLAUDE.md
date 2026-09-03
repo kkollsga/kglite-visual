@@ -710,8 +710,9 @@ above and run the resolving `cargo metadata` by hand.)*
 
 **The `kglite` floor is a second version surface, enumerated separately**
 (`R16`). It has **four declarations, counted by grepping on 2026-08-31 (re-verified
-at the 0.16.18 move the same day, at the 0.16.19 move on 2026-09-01 and at the
-0.16.20 move on 2026-09-02), not assumed**:
+at the 0.16.18 move the same day, at the 0.16.19 move on 2026-09-01, at the
+0.16.20 move on 2026-09-02 and at the 0.16.22 move on 2026-09-03), not
+assumed**:
 
 1. `crates/kglite-visual-core/Cargo.toml` — the `kglite = "=X.Y.Z"` line,
    exact-pinned because kglite is pre-1.0 and ships documented breaking
@@ -784,6 +785,41 @@ one additive engine API, is the primitive the parked "viewer follows the
 served file" item needs and is not adopted here: this viewer displays no
 file-freshness claim for it to make more honest, and adding one is that
 item's scope, not this move's.
+
+The floor moved to `=0.16.22` on 2026-09-03, from `=0.16.20` in one step:
+0.16.21 published while this repo was pinned below it, so the move carries two
+engine releases. 0.16.21 is binding- and writer-side — a fired deadline now
+raises `CypherTimeoutError` rather than `CypherExecutionError` (a *binding*
+remap; the Rust `KgError::CypherTimeout` variant only gains a `message` field,
+and this crate neither constructs nor destructures it — every `KgError` goes
+whole into `CoreError::Query` and reaches the user through `Display`, so the
+status stays 422 and no code here moves; the *wording* improves, dropping the
+"Cypher execution error:" wrapper and gaining "(elapsed Nms, limit Mms)"), a
+`save_graph(force)` write opt-in and `ServerExtensions::read_only` on kglite's
+own MCP server, and closed key sets on `from_records`. None of those are
+surfaces this viewer calls. **The one thing 0.16.21 changes here is an
+adoption it finally permits**: `kglite::api::introspection::TypeCapabilities`
+and `compute_type_capabilities_for` are public, so
+`meta_graph::capabilities_for` — the one upstream mirror this crate carried,
+re-checked as still `pub(super)` at every floor move since 0.16.14 and
+carrying its own "delete it in the change that sees the type exported"
+trigger — was deleted in this move. 0.16.22 is blueprint- and ontology-side:
+its two Rust breaks (the spec structs gaining fields, so an exhaustive struct
+literal no longer compiles, and `JunctionEdge::target` becoming
+`Vec<String>`) cannot reach a consumer that constructs no blueprint —
+`Blueprint`, `NodeSpec`, `FkEdge`, `JunctionEdge` and `from_records` are zero
+hits across the tracked tree — and the two procedures that gained a column
+are not called here. Its one behavioural change with reach is **ranked
+retrieval on an unindexed property, which now raises instead of answering
+zero rows**; this viewer issues no ranked query of its own (`text_bm25`,
+`text_score`, `vector_score`: zero hits), and a user-typed one arrives at
+`CoreError::Query` like any other engine refusal, where a named error beats
+the silent empty table the viewer used to draw. `[:A|B]` inside `EXISTS { }`
+is fixed upstream and retires no workaround here — the only `EXISTS` hit in
+the tree is the editor's keyword list. The release moves the `.kgl` golden
+digest and nothing here pins one: `make fixture` proves byte-stability by
+regenerating **twice within one run**, and the committed fixtures are loaded
+by tests, never hashed against a constant.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the

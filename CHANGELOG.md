@@ -11,6 +11,31 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.16.22**, exactly pinned (was 0.16.20). Two engine
+  releases in one move: 0.16.21 published while this project was pinned below
+  it. 0.16.21 is binding- and writer-side and 0.16.22 is blueprint- and
+  ontology-side, on loaders this read-only viewer never calls.
+- **A query that runs past the timeout now says how long it took.** kglite
+  0.16.21 gives a fired deadline its own error type, so the 422 the query
+  panel shows drops the *"Cypher execution error:"* prefix it used to wear —
+  it now reads *"Query timed out. Hints: … (elapsed 5432ms, limit 5000ms)"*,
+  leading with the fact and ending with the two numbers that say whether the
+  ceiling is the problem.
+- **A ranked-retrieval query you type into the query panel now fails with a
+  named error instead of drawing an empty table.** `text_bm25(...)` or
+  `vector_score(...)` against a property with no index used to come back as
+  zero rows — indistinguishable from a graph that genuinely matched nothing.
+  kglite 0.16.22 turns that into a refusal naming `build_text_index`, and the
+  viewer shows it like any other query error.
+- **The four capability badges (`ts` / `geo` / `loc` / `vec`) now come
+  straight from kglite.** They were computed here from a copy of the engine's
+  rule, kept in step by hand since the engine did not export it; 0.16.21
+  exports it, so the copy is gone. The badges are unchanged — this removes the
+  way they could have drifted from what `describe()` says, and means a future
+  fifth capability appears on the meta-graph without a release here.
+
 ## [0.1.6] - 2026-09-02
 
 ### Changed

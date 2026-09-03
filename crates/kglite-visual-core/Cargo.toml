@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
 
 [dependencies]
-# The engine, from crates.io. `=0.16.20` is EXACT on purpose (D11): kglite is
+# The engine, from crates.io. `=0.16.22` is EXACT on purpose (D11): kglite is
 # pre-1.0 and ships documented breaking changes in patch releases, so a caret
 # range would let a routine `cargo update` swap the engine under us. Moving
 # this floor means reading kglite's CHANGELOG and re-greping every declaration
@@ -55,6 +55,52 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # adoption for this move. The `fastembed` 5 -> 6 move is invisible here:
 # nothing in this workspace enables that optional kglite feature.
 #
+# Re-checked 2026-09-03: `0.16.22` is published and current (registry API, 101
+# versions, crate not yanked), and the floor goes there from `=0.16.20` in one
+# step — 0.16.21 was published while this repo was pinned below it, so this
+# move carries both releases.
+#
+# 0.16.21 is binding- and writer-side. Its headline — a fired deadline now
+# raising `CypherTimeoutError` instead of `CypherExecutionError` — is a Python
+# remap; on the Rust side `KgError::CypherTimeout` merely gains a `message`
+# field, and the note in the CHANGELOG applies to callers that construct or
+# destructure the variant. This crate does neither: every `KgError` goes whole
+# into `CoreError::Query(Box<_>)` and reaches a user through `Display`, so a
+# timeout still arrives as the same 422 and needs no code here. Its *wording*
+# does move, and for the better: the old `CypherExecution` wrapper printed
+# "Cypher execution error: Query timed out. Hints: …", where the typed variant
+# prints the hint first and appends "(elapsed Nms, limit Mms)" — the numbers
+# that say whether the ceiling is the problem. `docs/viewer/queries.md` and
+# `panels.ts` quote the message by its leading words, which is exactly the
+# half that did not move. The
+# `save_graph` write opt-in and `ServerExtensions::read_only` land on kglite's
+# own MCP server, which this project neither embeds nor spawns; `from_records`
+# key strictness lands on a loader it does not call. The one thing that does
+# reach us is `kglite::api::introspection::TypeCapabilities` +
+# `compute_type_capabilities_for` going public — the export that
+# `meta_graph::capabilities_for` has been waiting for since P8, and this move
+# deletes that mirror.
+#
+# 0.16.22 is blueprint- and ontology-side. Its two Rust breaks —
+# the spec structs gaining fields so an exhaustive struct literal no longer
+# compiles, and `JunctionEdge::target` becoming `Vec<String>` — cannot reach a
+# consumer that constructs no blueprint: `Blueprint`, `NodeSpec`, `FkEdge`,
+# `JunctionEdge` and `from_records` are zero hits across the tracked tree.
+# `ontology_audit()` and `edge_property_violation()` gain a column each; this
+# viewer calls neither, and pins no column set of its own. The behavioural
+# change with the widest blast radius is ranked retrieval: `text_bm25` and
+# `vector_score` on a property with **no index** now raise instead of
+# answering zero rows. That is a change this project wants and does not have
+# to handle specially — it issues no ranked query itself (`text_bm25`,
+# `text_score`, `vector_score`: zero hits), and a user-typed one arrives at
+# `CoreError::Query` like any other engine refusal, where a named error is
+# strictly better than the silent empty table the viewer used to draw. The
+# release also moves the `.kgl` golden digest; nothing here pins one. `make
+# fixture` proves byte-stability by regenerating twice **within one run**, and
+# the committed fixtures are loaded by tests, never hashed against a constant
+# — kglite reads older `.kgl` versions, so a fixture written by 0.16.14 still
+# loads under 0.16.22 and its render baseline is unmoved.
+#
 # NO `path` component, and its removal (P6) fixed a shipped defect rather than
 # tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
 # maturin vendors an out-of-workspace path dependency into the source
@@ -71,7 +117,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.16.20"
+kglite = "=0.16.22"
 
 # The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
 # MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest

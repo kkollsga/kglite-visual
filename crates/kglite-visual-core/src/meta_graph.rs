@@ -19,7 +19,9 @@
 
 use std::collections::HashMap;
 
-use kglite::api::introspection::{graph_scale, GraphScale};
+use kglite::api::introspection::{
+    compute_type_capabilities_for, graph_scale, GraphScale, TypeCapabilities,
+};
 use kglite::api::{DirGraph, GraphRead};
 use serde::Serialize;
 use ts_rs::TS;
@@ -187,65 +189,39 @@ pub struct MetaGraphResponse {
     pub links: Vec<f32>,
 }
 
-/// kglite's four per-type capability flags, recomputed here because
-/// `TypeCapabilities` is still `pub(super)` inside kglite's introspection
-/// module — re-checked against the 0.16.14 sources on 2026-08-29, whose
-/// fourteen new facade exports do not include it, against the 0.16.15
-/// sources on 2026-08-30, and against the 0.16.17 sources on 2026-08-31,
-/// where it is still `pub(super)` and still absent from `api/`. This is the
-/// one upstream mirror in this crate that the facade's growth has not
-/// retired; delete it in the change that sees the type exported, not before.
+/// kglite's per-type capability badge, as the wire's list of flag names.
 ///
-/// Every source below is a `DirGraph` field the engine already maintains —
-/// three config maps and the embedding store's keys — so the whole scan is
-/// O(#types) and needs no node access. Mirrors
-/// `crates/kglite/src/graph/introspection/capabilities.rs::compute_type_capabilities`
-/// and the flag order of `flags_csv` (`ts`, `geo`, `loc`, `vec`).
+/// The flags themselves are the engine's — [`TypeCapabilities::flags_csv`]
+/// renders exactly the badge `describe()` shows, in kglite's own order
+/// (`ts`, `geo`, `loc`, `vec`) — so this function only reshapes one string
+/// into the `Vec<String>` [`MetaTypeNode::capabilities`] carries. Splitting
+/// the rendered badge rather than reading the four accessors is deliberate: a
+/// fifth capability upstream reaches the viewer as an extra badge instead of
+/// being dropped by a mirror that never heard of it, and both renderers
+/// already fall back for a name they do not know (`encoding::badge_color`'s
+/// `_` arm, `BADGE_TITLES[badge] ?? badge` in the frontend).
 ///
-/// **`loc` and `geo` are independent**, and that is the corrected rule, not the
-/// original one: until kglite 0.16.16, `flags_csv` suppressed `loc` whenever
-/// `geo` was set, and this mirror copied the suppression. On sodir, 37 of 38
-/// types declare both, so the badge said "geometry" and hid the fact that plain
-/// lat/lon float columns were sitting next door — a reader trusting it would
-/// parse WKT polygons to recover coordinates it already had. Reported upstream
-/// and fixed there; mirrored here in the same change as the floor move.
+/// This replaces a hand-written copy of `compute_type_capabilities` that this
+/// crate carried from P8 until kglite 0.16.21 made the type public. The copy
+/// was re-checked as still `pub(super)` at every floor move in between and
+/// carried its own deletion trigger; 0.16.21 is the change that saw the type
+/// exported.
 ///
-/// Deliberately **not** mirrored: `bubble_capabilities`, which `describe()`
-/// applies afterwards to merge a supporting type's flags into its parent. A
+/// Deliberately **not** applied: `bubble_capabilities`, which `describe()`
+/// runs afterwards to merge a supporting type's flags into its parent. A
 /// meta-graph node is a type, and the honest flag on it is what that type
 /// carries — not what a child of it carries. So these flags can be narrower
 /// than the same type's flags in `describe()` output, by choice.
-fn capabilities_for(graph: &DirGraph, node_type: &str) -> Vec<String> {
-    let has_timeseries = graph.timeseries_configs.contains_key(node_type);
-
-    let (mut has_location, has_geometry) = match graph.spatial_configs.get(node_type) {
-        Some(sc) => (
-            sc.location.is_some() || !sc.points.is_empty(),
-            sc.geometry.is_some() || !sc.shapes.is_empty(),
-        ),
-        None => (false, false),
+fn flag_names(caps: Option<&TypeCapabilities>) -> Vec<String> {
+    let Some(caps) = caps else {
+        return Vec::new();
     };
-    if !has_location {
-        if let Some(meta) = graph.node_type_metadata.get(node_type) {
-            has_location = meta.values().any(|t| t.eq_ignore_ascii_case("point"));
-        }
+    let csv = caps.flags_csv();
+    if csv.is_empty() {
+        Vec::new()
+    } else {
+        csv.split(',').map(str::to_string).collect()
     }
-    let has_embeddings = graph.embeddings.keys().any(|(nt, _)| nt == node_type);
-
-    let mut flags = Vec::new();
-    if has_timeseries {
-        flags.push("ts".to_string());
-    }
-    if has_geometry {
-        flags.push("geo".to_string());
-    }
-    if has_location {
-        flags.push("loc".to_string());
-    }
-    if has_embeddings {
-        flags.push("vec".to_string());
-    }
-    flags
 }
 
 /// Compute the meta-graph, allocating one slot per type node from `view`.
@@ -292,6 +268,13 @@ pub fn compute(graph: &DirGraph, view: &mut View) -> MetaGraphResponse {
         name.len() + 96
     });
 
+    // The engine's own capability scan, restricted to the types that survived
+    // the bound — one pass over `kept`, not one call per type, and never the
+    // whole-graph variant, whose extra work is the types this response is
+    // deliberately not sending.
+    let kept_names: Vec<&str> = kept.iter().map(|(name, _, _)| name.as_str()).collect();
+    let caps = compute_type_capabilities_for(graph, &kept_names);
+
     let mut slot_of: HashMap<&str, u32> = HashMap::with_capacity(kept.len());
     let mut nodes = Vec::with_capacity(kept.len());
     for (name, count, supporting) in &kept {
@@ -301,7 +284,7 @@ pub fn compute(graph: &DirGraph, view: &mut View) -> MetaGraphResponse {
             slot,
             name: name.clone(),
             count: *count,
-            capabilities: capabilities_for(graph, name),
+            capabilities: flag_names(caps.get(name.as_str())),
             supporting: *supporting,
         });
     }
