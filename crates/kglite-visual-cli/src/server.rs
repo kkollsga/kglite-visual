@@ -217,6 +217,8 @@ fn router(state: AppState) -> Router {
         .route("/api/highlight", post(api::highlight))
         .route("/api/appearance", post(api::appearance))
         .route("/api/layout", post(api::layout))
+        .route("/api/subset", post(api::subset))
+        .route("/api/caption", post(api::caption))
         // The one route that answers with image bytes rather than JSON (D13).
         // POST like the rest of the vocabulary: it carries a body, and a GET
         // whose query string held a Cypher statement would be logged, cached

@@ -59,14 +59,14 @@ test('one HTTP expand reaches every connected websocket client', async () => {
 
     for (const [index, listener] of listeners.entries()) {
       const slice = await listener.waitFor(
-        (done) => done.kind === 'slice' && done.value.meta.kind === 'expand',
+        (done) => done.kind === 'shared-update' && done.value.meta.mutation_kind === 'expand',
       )
-      if (slice.kind !== 'slice') throw new Error('unreachable')
-      expect(slice.value.meta.nodes, `client ${index}`).toHaveLength(KNOWS_REACHABLE)
-      expect(slice.value.meta.slot_count, `client ${index}`).toBe(META_POINTS + KNOWS_REACHABLE)
+      if (slice.kind !== 'shared-update') throw new Error('unreachable')
+      expect(slice.value.meta.snapshot.slice.nodes, `client ${index}`).toHaveLength(KNOWS_REACHABLE)
+      expect(slice.value.meta.snapshot.slice.slot_count, `client ${index}`).toBe(META_POINTS + KNOWS_REACHABLE)
       // Positions and links ride with it, not just the metadata — a client
       // that received the description and not the arrays could not draw.
-      expect(slice.value.points.length, `client ${index}`).toBe(KNOWS_REACHABLE * 2)
+      expect(slice.value.points.length, `client ${index}`).toBe((META_POINTS + KNOWS_REACHABLE) * 2)
       expect(slice.value.links.length, `client ${index}`).toBeGreaterThan(0)
     }
   } finally {
@@ -115,8 +115,7 @@ test('the browser follows an agent: curl moves the view with no UI action', asyn
     // that moved.
     await expect(page.locator('.kglv-label:has-text("Person_")').first()).toBeVisible()
 
-    // And back: a collapse from outside restores the entry screen, remap
-    // included (65 slots is over the compaction minimum).
+    // A collapse from outside restores the entry screen and compact slot space.
     const collapse = await fetch(`${server.info.url}api/collapse`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -124,7 +123,7 @@ test('the browser follows an agent: curl moves the view with no UI action', asyn
     })
     expect(collapse.status).toBe(200)
 
-    await page.waitForFunction(() => window.__kglv.compactions === 1, undefined, {
+    await page.waitForFunction((expected) => window.__kglv.slotCount === expected, META_POINTS, {
       timeout: 15_000,
     })
     const collapsed = await page.evaluate(() => window.__kglv)

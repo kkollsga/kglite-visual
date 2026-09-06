@@ -2,8 +2,9 @@
 import type { BoundInfo } from "./BoundInfo";
 import type { RecordColumn } from "./RecordColumn";
 import type { RecordRow } from "./RecordRow";
+import type { RevisionStamp } from "./RevisionStamp";
 
-export type RecordTable = { generation: string, columns: Array<RecordColumn>, rows: Array<RecordRow>, bound: BoundInfo, next_offset: number | null, 
+export type RecordTable = { stamp: RevisionStamp, subset_revision: string, generation: string, columns: Array<RecordColumn>, rows: Array<RecordRow>, bound: BoundInfo, next_offset: number | null, 
 /**
  * Some storage backends erase source null/absence distinctions at ingestion.
  */

@@ -264,7 +264,7 @@ export class Panels {
     this.filterNote.setAttribute('data-testid', 'filter-note')
     this.filterNote.textContent = FILTER_HINT
     filterBox.append(filterRow, this.filterNote)
-    this.hosts.filters.appendChild(this.section('Filter loaded content', filterBox))
+    // Shared Filters owns the drawer; this compatibility field is not mounted.
 
     // ── appearance ────────────────────────────────────────────────────────
     const appearance = element('div', 'kglv-card')
@@ -1244,6 +1244,17 @@ export class Panels {
     }
     choose(this.colorBy, colorBy)
     choose(this.sizeBy, sizeBy)
+  }
+
+  setCaptionSelection(property: string | null): void {
+    const value = property ?? ''
+    if (![...this.captionBy.options].some(option => option.value === value)) {
+      const option = element('option', undefined, property ?? 'title (as stored)')
+      option.value = value
+      this.captionBy.appendChild(option)
+    }
+    this.captionBy.value = value
+    this.captionRow.hidden = this.captionBy.options.length <= 1
   }
 
   /**

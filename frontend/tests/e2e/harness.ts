@@ -16,6 +16,7 @@ import path from 'node:path'
 import type { Page } from '@playwright/test'
 
 import type { Request } from '../../src/generated/Request'
+import type { SharedRequest } from '../../src/generated/SharedRequest'
 import { ResponseAssembler, decodeFrame, type Completed } from '../../src/protocol'
 
 // Playwright runs with the config's directory as cwd, so the repo root is one
@@ -146,7 +147,7 @@ export class Listener {
    * Connect and wait out the greeting.
    *
    * The opening messages every client gets are session info, the meta-graph,
-   * and the resync slice that says what the view holds *now* (`resync.spec.ts`
+   * and the coherent shared snapshot that says what the view holds *now* (`resync.spec.ts`
    * is where that one is under test). Waiting for the last of them means a
    * later `waitFor` cannot pass on the greeting instead of on the broadcast it
    * is actually asserting.
@@ -156,7 +157,7 @@ export class Listener {
       this.socket.onopen = () => resolve()
       this.socket.onerror = () => reject(new Error(`websocket failed: ${this.socket.url}`))
     })
-    await this.waitFor((done) => done.kind === 'slice' && done.value.meta.kind === 'sync')
+    await this.waitFor((done) => done.kind === 'shared-update' && done.value.meta.mutation_kind === null)
   }
 
   async waitFor(predicate: (done: Completed) => boolean, timeoutMs = 15_000): Promise<Completed> {
@@ -175,7 +176,7 @@ export class Listener {
     }
   }
 
-  send(request: Request): void {
+  send(request: Request & Partial<Pick<SharedRequest, 'expected' | 'request_id'>>): void {
     this.socket.send(JSON.stringify(request))
   }
 

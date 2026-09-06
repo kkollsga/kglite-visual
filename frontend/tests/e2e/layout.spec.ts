@@ -50,10 +50,11 @@ async function arrangement(page: Page): Promise<string> {
   })
 }
 
-test('force mode: switch to a static kernel, expand under it, switch back', async ({
+test('force mode: topology invalidates static geometry for current and late clients', async ({
   page,
 }, testInfo) => {
   let server: Launched | null = null
+  const attached: Page[] = []
   const consoleErrors: string[] = []
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors.push(message.text())
@@ -78,12 +79,19 @@ test('force mode: switch to a static kernel, expand under it, switch back', asyn
       timeout: 30_000,
     })
     const settled = await arrangement(page)
+    const peer = await page.context().newPage()
+    attached.push(peer)
+    await peer.goto(server.info.url)
+    await ready(peer)
+    await keepSchemaContext(peer)
 
     // ── switch to a static kernel ───────────────────────────────────────
     await page.getByTestId('layout-kernel').selectOption('islands')
     await page.waitForFunction(() => window.__kglv.layoutKernel === 'islands', undefined, {
       timeout: 15_000,
     })
+    await peer.waitForFunction(() => window.__kglv.layoutKernel === 'islands')
+    expect(await peer.evaluate(() => window.__kglv.layoutMode)).toBe('static')
     const staticState = await page.evaluate(() => window.__kglv)
     expect(staticState.layoutMode).toBe('static')
     expect(staticState.pointCount).toBe(META_POINTS)
@@ -102,38 +110,54 @@ test('force mode: switch to a static kernel, expand under it, switch back', asyn
     expect(held).toEqual({ simulation: false, drag: false })
     await expect(page.getByTestId('layout-note')).toContainText('dragging is off')
 
-    // ── an expansion under a static kernel re-requests the layout ───────
-    // Not a merge: the new slots arrive on the server's lattice, so merging
-    // would drop a spiral of dots into the middle of a packed island.
+    // Topology changes invalidate the old static geometry for every client.
     await page.locator('.kglv-label:has-text("Person")').click()
     await page.getByTestId('expand-limit').fill('20')
     await page.getByTestId('expand-KNOWS-out').click()
-    await page.waitForFunction(
-      (expected) => window.__kglv.pointCount === expected,
-      META_POINTS + 20,
-      { timeout: 15_000 },
-    )
-    // The layout survived the expansion: still the kernel that was chosen, and
-    // still static. A client that had reheated instead would report `force`.
-    const expanded = await page.evaluate(() => window.__kglv)
-    expect(expanded.layoutMode).toBe('static')
-    expect(expanded.layoutKernel).toBe('islands')
+    for (const client of [page, peer]) {
+      await client.waitForFunction(
+        (expected) => window.__kglv.pointCount === expected && window.__kglv.layoutKernel === 'simulation',
+        META_POINTS + 20,
+        { timeout: 15_000 },
+      )
+      expect(await client.evaluate(() => ({
+        mode: window.__kglv.layoutMode,
+        simulation: window.__kglvBench.graph?.config.enableSimulation,
+        drag: window.__kglvBench.graph?.config.enableDrag,
+      }))).toEqual({ mode: 'force', simulation: true, drag: true })
+    }
+    const late = await page.context().newPage()
+    attached.push(late)
+    await late.goto(server.info.url)
+    await ready(late)
+    await keepSchemaContext(late)
+    await late.waitForFunction((expected) => window.__kglv.pointCount === expected, META_POINTS + 20)
+    expect(await late.evaluate(() => ({
+      kernel: window.__kglv.layoutKernel,
+      mode: window.__kglv.layoutMode,
+      points: window.__kglv.pointCount,
+      simulation: window.__kglvBench.graph?.config.enableSimulation,
+      drag: window.__kglvBench.graph?.config.enableDrag,
+    }))).toEqual({ kernel: 'simulation', mode: 'force', points: META_POINTS + 20, simulation: true, drag: true })
+
+    // Only an explicit request computes static geometry for the new topology.
+    await page.getByTestId('layout-kernel').selectOption('islands')
+    for (const client of [page, peer, late]) {
+      await client.waitForFunction(() => window.__kglv.layoutKernel === 'islands')
+      expect(await client.evaluate(() => ({
+        mode: window.__kglv.layoutMode,
+        simulation: window.__kglvBench.graph?.config.enableSimulation,
+        drag: window.__kglvBench.graph?.config.enableDrag,
+      }))).toEqual({ mode: 'static', simulation: false, drag: false })
+    }
     const withInstances = await arrangement(page)
     expect(withInstances).not.toBe(packed)
-    // Every new slot got a real position from the re-request. A merged lattice
-    // would leave them on the spiral, which is not a NaN and not a kernel's
-    // output — so the check is that nothing is unplaced and the arrangement is
-    // as wide as a packed layout, not a 140-unit lattice.
+    expect(await arrangement(peer)).toBe(withInstances)
+    expect(await arrangement(late)).toBe(withInstances)
     const spread = await page.evaluate(() => {
       const positions = window.__kglvBench.graph?.getPointPositions() ?? []
-      let min = Infinity
-      let max = -Infinity
-      for (const value of positions) {
-        if (!Number.isFinite(value)) continue
-        min = Math.min(min, value)
-        max = Math.max(max, value)
-      }
-      return max - min
+      if (positions.some((value) => !Number.isFinite(value))) return 0
+      return Math.max(...positions) - Math.min(...positions)
     })
     expect(spread).toBeGreaterThan(500)
 
@@ -175,6 +199,7 @@ test('force mode: switch to a static kernel, expand under it, switch back', asyn
 
     expect(consoleErrors, `browser console errors: ${consoleErrors.join(' | ')}`).toEqual([])
   } finally {
+    for (const client of attached) await client.close()
     server?.process.kill()
   }
 })

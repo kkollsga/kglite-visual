@@ -31,6 +31,7 @@ export type ScopeCounts = {
   hiddenSelected: number
   types: number
   hasSelection: boolean
+  canFocus: boolean
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -126,7 +127,7 @@ export class Workspace {
     })
     this.navigate('explore')
     this.updateScopeButtons()
-    this.setCounts({ loaded: 0, visible: 0, selected: 0, hiddenSelected: 0, types: 0, hasSelection: false })
+    this.setCounts({ loaded: 0, visible: 0, selected: 0, hiddenSelected: 0, types: 0, hasSelection: false, canFocus: false })
   }
 
   private buildShell(): void {
@@ -343,7 +344,7 @@ export class Workspace {
     }
     this.counts.title = `Instance counts; ${counts.types} schema types are counted separately` +
       (counts.hiddenSelected > 0 ? `; ${counts.hiddenSelected} selected instances are hidden` : '')
-    this.focusButton.disabled = counts.selected === 0 || counts.selected === counts.hiddenSelected
+    this.focusButton.disabled = !counts.canFocus
     this.clearButton.disabled = !counts.hasSelection
     this.empty.hidden = this.scope !== 'instances' || counts.loaded > 0 || this.schemaContext.checked
   }

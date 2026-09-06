@@ -28,9 +28,10 @@ pub(crate) fn serialized_bytes(value: &impl Serialize, limit: usize) -> Result<u
     impl std::io::Write for Meter {
         fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
             if buffer.len() > self.limit.saturating_sub(self.bytes) {
-                return Err(std::io::Error::other(
-                    "loaded view exceeds the 2 MiB byte limit",
-                ));
+                return Err(std::io::Error::other(format!(
+                    "serialized value exceeds its {} byte limit",
+                    self.limit
+                )));
             }
             self.bytes += buffer.len();
             Ok(buffer.len())
@@ -129,12 +130,15 @@ pub struct RecordColumn {
 pub struct RecordRow {
     pub handle: NodeHandle,
     pub slot: Option<u32>,
+    pub visible: bool,
     pub cells: Vec<RecordCell>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct RecordTable {
+    pub stamp: crate::shared::RevisionStamp,
+    pub subset_revision: String,
     pub generation: String,
     pub columns: Vec<RecordColumn>,
     pub rows: Vec<RecordRow>,
@@ -332,7 +336,34 @@ impl crate::Session {
         self.check_handles(&request.handles)?;
         let offset = (request.offset as usize).min(request.handles.len());
         let limit = (request.limit as usize).min(MAX_RECORD_ROWS);
+        let (stamp, subset_revision, slots) = {
+            let state = self.state_read();
+            let visible: std::collections::HashSet<_> = state
+                .subset
+                .visible_nodes
+                .iter()
+                .map(|handle| handle.node_id)
+                .collect();
+            let slots: Vec<_> = request
+                .handles
+                .iter()
+                .skip(offset)
+                .take(limit)
+                .map(|handle| {
+                    (
+                        state.slot_of_node(handle.node_id),
+                        visible.contains(&handle.node_id),
+                    )
+                })
+                .collect();
+            (
+                state.stamp(self.generation()),
+                state.subset_revision.to_string(),
+                slots,
+            )
+        };
         let mut table = RecordTable {
+            stamp, subset_revision,
             generation: self.generation().into(),
             columns: request.fields.iter().map(|name| RecordColumn { name: name.clone(), types: Vec::new() }).collect(),
             rows: Vec::new(),
@@ -340,22 +371,13 @@ impl crate::Session {
             next_offset: None,
             missing_semantics: "missing means absent in this snapshot; storage may have erased source null/absence distinctions".into(),
         };
-        let slots: Vec<_> = {
-            let view = self.view_read();
-            request
-                .handles
-                .iter()
-                .skip(offset)
-                .take(limit)
-                .map(|handle| view.slot_of_node(handle.node_id))
-                .collect()
-        };
         let _guard = self.graph().begin_read_pass();
         let mut bytes = 16 * 1024;
-        for (handle, slot) in request.handles.iter().skip(offset).zip(slots) {
+        for (handle, (slot, visible)) in request.handles.iter().skip(offset).zip(slots) {
             let row = RecordRow {
                 handle: handle.clone(),
                 slot,
+                visible,
                 cells: request
                     .fields
                     .iter()

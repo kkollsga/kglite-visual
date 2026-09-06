@@ -31,6 +31,8 @@ test('destinations preserve renderer, selection and draft; query results reveal 
     await openDestination(page, 'explore')
     await page.getByTestId('browse-type-picker').selectOption('0')
     await expect(page.getByTestId('browse-type')).toHaveText('Browse Person instances')
+    await expect(page.getByTestId('focus-selection')).toBeEnabled()
+    await expect(page.getByTestId('count-selected')).toHaveText('0')
     await page.getByTestId('expand-limit').fill('12')
     await page.getByTestId('browse-type').click()
     await expect(page.getByTestId('count-loaded')).toHaveText('12')
@@ -129,7 +131,7 @@ test('selecting an unlabelled canvas node promotes its label immediately', async
     await page.getByTestId('browse-type-picker').selectOption('0')
     await page.getByTestId('browse-type').click()
     await expect(page.getByTestId('count-loaded')).toHaveText('60')
-    const candidate = await page.evaluate(() => {
+    const findCandidate = () => page.evaluate(() => {
       const graph = window.__kglvBench.graph!
       const host = document.querySelector('.kglv-graph-host')!.getBoundingClientRect()
       const labels = [...document.querySelectorAll<HTMLElement>('.kglv-label')]
@@ -148,6 +150,8 @@ test('selecting an unlabelled canvas node promotes its label immediately', async
       }
       return null
     })
+    await expect.poll(async () => (await findCandidate()) !== null).toBe(true)
+    const candidate = await findCandidate()
     expect(candidate, 'fixture must offer an unlabelled, unobstructed instance to select').not.toBeNull()
     await page.mouse.click(candidate!.x, candidate!.y)
     await expect(page.getByTestId('count-selected')).toHaveText('1')
@@ -192,3 +196,44 @@ test('narrow keyboard navigation restores focus and the selected-record inspecto
     server.process.kill()
   }
 })
+
+test('summary-tier schema stays inside Explore and cannot cover Query or Data', async ({ page }) => {
+  const server = await launch('crates/kglite-visual-core/tests/fixtures/viewer-summary.kgl')
+  try {
+    await page.goto(appUrl(server.info))
+    await page.waitForFunction(() => window.__kglv?.ready === true)
+    await expect(page.getByTestId('schema-summary')).toBeVisible()
+    await fillQuery(page, 'RETURN 1 AS value')
+    await expect(page.getByTestId('schema-summary')).not.toBeVisible()
+    await page.getByTestId('query-run').click()
+    await expect(page.getByTestId('query-table')).toContainText('1')
+    await expect(page.getByTestId('schema-summary')).not.toBeVisible()
+    await openDestination(page, 'explore')
+    await expect(page.getByTestId('schema-summary')).toBeVisible()
+  } finally { server.process.kill() }
+})
+
+for (const deterministic of [true, false]) {
+  test(`first instance browse frames admitted nodes (${deterministic ? 'static' : 'GPU'} startup)`, async ({ page }) => {
+    const server = await launch('crates/kglite-visual-core/tests/fixtures/viewer-identity.kgl')
+    try {
+      await page.goto(deterministic ? appUrl(server.info) : server.info.url)
+      await page.waitForFunction(() => window.__kglv?.ready === true)
+      const firstInstanceSlot = await page.evaluate(() => window.__kglv.slotCount)
+      await page.getByTestId('browse-type-picker').selectOption({label: 'Person'})
+      await page.getByTestId('browse-type').click()
+      await expect(page.getByTestId('count-loaded')).toHaveText('3')
+      await expect.poll(() => page.evaluate(first => {
+        const graph = window.__kglvBench.graph!
+        const host = document.querySelector('.kglv-graph-host')!.getBoundingClientRect()
+        const points = graph.getPointPositions()
+        let visible = 0
+        for (let slot = first; slot < window.__kglv.slotCount; slot += 1) {
+          const [x, y] = graph.spaceToScreenPosition([points[slot * 2]!, points[slot * 2 + 1]!])
+          if (x >= 0 && y >= 0 && x <= host.width && y <= host.height) visible += 1
+        }
+        return visible
+      }, firstInstanceSlot)).toBe(3)
+    } finally { server.process.kill() }
+  })
+}

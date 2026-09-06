@@ -115,6 +115,12 @@ impl LayoutKernel {
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Request {
+    Reset,
+    Subset(crate::subset::SubsetRequest),
+    Appearance(crate::control::AppearanceRequest),
+    Caption(crate::shared::CaptionRequest),
+    Focus(crate::control::FocusRequest),
+    Highlight(crate::control::HighlightRequest),
     /// Run a read-only Cypher query.
     Cypher(CypherRequest),
     /// Inspect bounded typed fields without changing loaded membership.
@@ -218,6 +224,26 @@ pub struct LayoutRequest {
     /// picks the centre it would have picked on its own.
     #[serde(default)]
     pub seed_slot: Option<u32>,
+}
+
+impl Request {
+    pub fn is_shared(&self) -> bool {
+        match self {
+            Self::Cypher(request) => request.as_graph,
+            Self::Reset
+            | Self::Subset(_)
+            | Self::Appearance(_)
+            | Self::Caption(_)
+            | Self::Focus(_)
+            | Self::Highlight(_)
+            | Self::BrowseType(_)
+            | Self::LoadNodes(_)
+            | Self::Expand(_)
+            | Self::Collapse(_)
+            | Self::Layout(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]

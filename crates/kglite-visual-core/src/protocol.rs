@@ -74,7 +74,9 @@ use std::fmt;
 /// above did not move, and the fifteen v1/v2/v3 codes keep their values.
 /// **v5** adds typed bounded records with generation-scoped node provenance.
 /// Older clients cannot decode Records; reject them before any view is drawn.
-pub const PROTOCOL_VERSION: u32 = 5;
+/// **v6** groups a shared snapshot, acknowledged subset and steering state
+/// into one revisioned update. Clients apply it atomically after its arrays.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Header size in bytes (6 × `u32`).
 pub const HEADER_BYTES: usize = 24;
@@ -166,6 +168,8 @@ pub enum MessageType {
     Layout = 16,
     /// UTF-8 JSON: typed, bounded record inspection (`records::RecordTable`).
     Records = 17,
+    /// UTF-8 JSON: coherent shared snapshot metadata, followed by Points/Links.
+    SharedUpdate = 18,
 }
 
 impl MessageType {
@@ -177,7 +181,7 @@ impl MessageType {
     /// Every variant, in wire order — the one list the TypeScript mirror and
     /// the decoder are both generated from, so a new variant cannot be added
     /// to one and forgotten in the other.
-    pub const ALL: [MessageType; 17] = [
+    pub const ALL: [MessageType; 18] = [
         MessageType::MetaGraphMeta,
         MessageType::Points,
         MessageType::Links,
@@ -195,6 +199,7 @@ impl MessageType {
         MessageType::Appearance,
         MessageType::Layout,
         MessageType::Records,
+        MessageType::SharedUpdate,
     ];
 
     /// The TypeScript constant name for this variant.
@@ -217,6 +222,7 @@ impl MessageType {
             MessageType::Appearance => "APPEARANCE",
             MessageType::Layout => "LAYOUT",
             MessageType::Records => "RECORDS",
+            MessageType::SharedUpdate => "SHARED_UPDATE",
         }
     }
 
@@ -632,7 +638,8 @@ mod tests {
         // v4's static layout. Appended, never renumbered.
         assert_eq!(MessageType::Layout.code(), 16);
         assert_eq!(MessageType::Records.code(), 17);
-        assert_eq!(MessageType::ALL.len(), 17, "a new variant must join ALL");
+        assert_eq!(MessageType::SharedUpdate.code(), 18);
+        assert_eq!(MessageType::ALL.len(), 18, "a new variant must join ALL");
     }
 
     #[test]

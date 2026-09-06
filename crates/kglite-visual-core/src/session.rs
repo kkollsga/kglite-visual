@@ -5,14 +5,7 @@
 //! back response structs and, for the binary path, framed byte vectors. The
 //! CLI, the wheel and a desktop shell each move those bytes their own way.
 //!
-//! **The view is behind a lock; the graph is not.** `Arc<DirGraph>` is
-//! `Send + Sync` and read-only here, so concurrent queries need no
-//! serialisation at all. What P3 added that *does* need it is the slot space:
-//! expansion appends and collapse tombstones, and two requests allocating
-//! concurrently would hand out the same slot twice. The lock is therefore held
-//! across the slot bookkeeping and **never** across a Cypher execution or a
-//! graph walk — a write lock held for the length of a 30-second query would
-//! block the meta-graph a page reload asks for.
+//! Shared state is committed atomically; graph walks run against private candidates.
 
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -36,7 +29,9 @@ use crate::request::{
     CypherRequest, ExpandRequest, LayoutKernel, LayoutRequest, Request, SearchRequest, SlotRequest,
     TypeRequest,
 };
+use crate::shared::{RevisionStamp, SharedRequest, SharedSnapshot, SharedViewState};
 use crate::stats::{self, NodeDetail, PropertyStatsResponse};
+use crate::subset::SubsetSnapshot;
 use crate::validate::{validate_query, ValidateResponse};
 use crate::values::{value_to_display, value_to_json};
 use crate::view::{Compaction, GraphSliceMeta, SliceKind, SliceNode, SlotEntry, View, ViewEdge};
@@ -165,7 +160,8 @@ pub const fn geometry_caveat(kernel: LayoutKernel) -> &'static str {
 /// keeps it in its status bar, and an MCP client has no status bar. Without
 /// this, `view_state` could say how many nodes are on screen but not whether
 /// that number is the whole answer — which is the D5 failure exactly.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct LastSlice {
     pub kind: SliceKind,
     /// What the bound did to the nodes.
@@ -207,6 +203,10 @@ pub struct ViewBounds {
 /// would be this file claiming ownership of a shape the client already owns.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ViewState {
+    pub stamp: RevisionStamp,
+    pub subset: SubsetSnapshot,
+    pub subset_revision: String,
+    pub topology_revision: String,
     pub protocol_version: u32,
     pub graph: String,
     pub tier: DetailTier,
@@ -268,6 +268,7 @@ struct SliceBounds {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Response {
+    Shared(Box<SharedSnapshot>),
     Query(QueryTable),
     Records(RecordTable),
     Preview(ExpansionPreview),
@@ -283,33 +284,9 @@ pub struct Session {
     graph: Arc<DirGraph>,
     source: String,
     generation: String,
-    view: RwLock<View>,
+    state: RwLock<SharedViewState>,
     meta_graph: MetaGraphResponse,
     config: QueryConfig,
-    /// Separate from the view's own lock: it is written on the way out of
-    /// `finish_slice`, which already holds the view mutably, and a reader
-    /// asking "what did the bound last do" must not be blocked by an expansion
-    /// that is still walking the graph.
-    last_slice: RwLock<Option<LastSlice>>,
-    /// Who owns the geometry right now (plan E5). Its own lock for the same
-    /// reason `last_slice` has one: it is written on the way out of a layout
-    /// request and read by every `view_state`, and neither should wait on a
-    /// walk of the graph.
-    ///
-    /// **Session state rather than per-client state, because the view is
-    /// shared** (D14): one slot space, one arrangement, and a second browser
-    /// attaching to a statically laid-out view has to be told which mode it
-    /// joined.
-    layout_kernel: RwLock<LayoutKernel>,
-    /// The last arrangement this server computed, kept so a client that
-    /// connects afterwards can be handed the **same** one.
-    ///
-    /// Recomputing it on connect would not do: `radial` centres on a
-    /// `seed_slot` the session does not store, and re-running the kernel
-    /// without it would place the newcomer's rings around a different node
-    /// than the incumbent's. The answer that was broadcast is the only one that
-    /// is definitionally in agreement with what every other client is holding.
-    last_layout: RwLock<Option<LayoutResult>>,
 }
 
 impl Session {
@@ -329,13 +306,9 @@ impl Session {
             graph,
             source: source.into(),
             generation: new_generation(),
-            view: RwLock::new(view),
+            state: RwLock::new(SharedViewState::new(view)),
             meta_graph,
             config,
-            last_slice: RwLock::new(None),
-            // The viewer's GPU owns the layout until somebody asks otherwise.
-            layout_kernel: RwLock::new(LayoutKernel::Simulation),
-            last_layout: RwLock::new(None),
         }
     }
 
@@ -368,6 +341,16 @@ impl Session {
     }
 
     pub fn browse_type(&self, request: &BrowseTypeRequest) -> Result<GraphSlice, CoreError> {
+        match self.handle(&Request::BrowseType(request.clone()))? {
+            Response::Slice(slice) => Ok(slice),
+            _ => unreachable!(),
+        }
+    }
+
+    fn browse_type_uncommitted(
+        &self,
+        request: &BrowseTypeRequest,
+    ) -> Result<GraphSlice, CoreError> {
         let members = self
             .graph
             .type_indices
@@ -387,6 +370,13 @@ impl Session {
     }
 
     pub fn load_nodes(&self, request: &LoadNodesRequest) -> Result<GraphSlice, CoreError> {
+        match self.handle(&Request::LoadNodes(request.clone()))? {
+            Response::Slice(slice) => Ok(slice),
+            _ => unreachable!(),
+        }
+    }
+
+    fn load_nodes_uncommitted(&self, request: &LoadNodesRequest) -> Result<GraphSlice, CoreError> {
         self.check_handles(&request.handles)?;
         let _guard = self.graph.begin_read_pass();
         let mut nodes = Vec::new();
@@ -484,28 +474,31 @@ impl Session {
         self.read().slot_of_type(name)
     }
 
-    /// Read access to the slot space, for a caller inside this crate that has
-    /// to walk it — the live-view render, and nothing else. `pub(crate)`
-    /// deliberately: handing a lock guard across the crate boundary would let a
-    /// transport hold the view locked for the length of a socket write.
-    pub(crate) fn view_read(&self) -> std::sync::RwLockReadGuard<'_, View> {
-        self.read()
+    pub(crate) fn view_read(&self) -> ViewReadGuard<'_> {
+        ViewReadGuard(self.state_read())
     }
 
-    fn read(&self) -> std::sync::RwLockReadGuard<'_, View> {
-        // A poisoned lock means a previous request panicked mid-mutation, so
-        // the slot space may be inconsistent. Propagating the panic is the
-        // honest outcome: continuing would hand out indices from a half-updated
-        // map, which surfaces as wrong nodes on screen rather than as a crash.
-        self.view
-            .read()
-            .expect("the view lock was poisoned by a panicking request")
+    pub(crate) fn state_read(&self) -> std::sync::RwLockReadGuard<'_, SharedViewState> {
+        self.state.read().expect("shared state lock poisoned")
     }
-
-    fn write(&self) -> std::sync::RwLockWriteGuard<'_, View> {
-        self.view
-            .write()
-            .expect("the view lock was poisoned by a panicking request")
+    pub(crate) fn state_write(&self) -> std::sync::RwLockWriteGuard<'_, SharedViewState> {
+        self.state.write().expect("shared state lock poisoned")
+    }
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, SharedViewState> {
+        self.state_read()
+    }
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, SharedViewState> {
+        self.state_write()
+    }
+    pub(crate) fn fork_state(&self, state: SharedViewState) -> Self {
+        Self {
+            graph: self.graph.clone(),
+            source: self.source.clone(),
+            generation: self.generation.clone(),
+            state: RwLock::new(state),
+            meta_graph: self.meta_graph.clone(),
+            config: self.config,
+        }
     }
 
     pub fn info(&self) -> SessionInfo {
@@ -560,11 +553,25 @@ impl Session {
     /// runs this off its reactor, on a thread with at least
     /// [`crate::query::QUERY_THREAD_STACK_BYTES`] of stack.
     pub fn handle(&self, request: &Request) -> Result<Response, CoreError> {
+        if request.is_shared() {
+            self.apply_shared(&SharedRequest::new(request.clone()))
+                .map(|event| event.response)
+        } else {
+            self.handle_uncommitted(request)
+        }
+    }
+    pub(crate) fn handle_uncommitted(&self, request: &Request) -> Result<Response, CoreError> {
         match request {
+            Request::Reset => Ok(Response::Slice(self.reset_uncommitted())),
+            Request::Subset(_)
+            | Request::Appearance(_)
+            | Request::Caption(_)
+            | Request::Focus(_)
+            | Request::Highlight(_) => self.settings_uncommitted(request),
             Request::Cypher(req) => self.cypher(req),
             Request::Records(req) => self.records(req).map(Response::Records),
-            Request::BrowseType(req) => self.browse_type(req).map(Response::Slice),
-            Request::LoadNodes(req) => self.load_nodes(req).map(Response::Slice),
+            Request::BrowseType(req) => self.browse_type_uncommitted(req).map(Response::Slice),
+            Request::LoadNodes(req) => self.load_nodes_uncommitted(req).map(Response::Slice),
             Request::Preview(req) => self.preview(req.slot).map(Response::Preview),
             Request::Expand(req) => self.expand(req).map(Response::Slice),
             Request::Collapse(req) => self.collapse(req).map(Response::Slice),
@@ -582,19 +589,9 @@ impl Session {
     /// computed, and that is the same order every other state write here takes.
     fn layout(&self, request: &LayoutRequest) -> Result<LayoutResult, CoreError> {
         let result = layout_live_view(self, request)?;
-        *self
-            .layout_kernel
-            .write()
-            .expect("the layout lock was poisoned by a panicking request") =
-            result.meta.kernel_chosen;
-        // `simulation` hands the arrangement back to the viewer's GPU, and from
-        // that moment the server does not know where anything is. Keeping the
-        // last static answer around would let a later resync push a stale
-        // arrangement onto a newcomer whose peers are all simulating.
-        *self
-            .last_layout
-            .write()
-            .expect("the layout lock was poisoned by a panicking request") = result
+        let mut state = self.state_write();
+        state.layout_kernel = result.meta.kernel_chosen;
+        state.last_layout = result
             .meta
             .kernel_chosen
             .is_static()
@@ -604,10 +601,7 @@ impl Session {
 
     /// Who owns the arrangement on screen. See [`ViewState::layout_kernel`].
     pub fn layout_kernel(&self) -> LayoutKernel {
-        *self
-            .layout_kernel
-            .read()
-            .expect("the layout lock was poisoned by a panicking request")
+        self.state_read().layout_kernel
     }
 
     /// The arrangement every attached client is currently holding, if the
@@ -618,10 +612,7 @@ impl Session {
     /// documentation for why it is the remembered answer rather than a fresh
     /// one.
     pub fn last_layout(&self) -> Option<LayoutResult> {
-        self.last_layout
-            .read()
-            .expect("the layout lock was poisoned by a panicking request")
-            .clone()
+        self.state_read().last_layout.clone()
     }
 
     fn cypher(&self, request: &CypherRequest) -> Result<Response, CoreError> {
@@ -760,7 +751,7 @@ impl Session {
         let _guard = self.graph.begin_read_pass();
         let mut live = self.write();
         self.check_admission(&live, nodes, edges)?;
-        let mut view = live.clone();
+        let mut view = live.view.clone();
         let first_slot = view.slot_count();
         let added = self.admit_nodes(&mut view, nodes)?;
 
@@ -798,7 +789,7 @@ impl Session {
         };
 
         self.validate_loaded(&view)?;
-        *live = view;
+        live.view = view;
         Ok(self.finish_slice(
             &mut live,
             kind,
@@ -948,13 +939,14 @@ impl Session {
     /// in which the client's map and the server's disagree.
     fn finish_slice(
         &self,
-        view: &mut View,
+        state: &mut SharedViewState,
         kind: SliceKind,
         first_slot: u32,
         nodes: Vec<SliceNode>,
         tombstones: Vec<u32>,
         bounds: SliceBounds,
     ) -> GraphSlice {
+        let view = &mut state.view;
         let compaction: Option<Compaction> = view
             .should_compact()
             .then(|| view.compact(PROTOCOL_VERSION));
@@ -985,10 +977,7 @@ impl Session {
         // The bound metadata rides out with the slice and is then gone. An MCP
         // client has no status bar to keep it in, so the session keeps it: see
         // `LastSlice`.
-        *self
-            .last_slice
-            .write()
-            .expect("the last-slice lock was poisoned by a panicking request") = Some(LastSlice {
+        state.last_slice = Some(LastSlice {
             kind,
             bound: bounds.nodes,
             link_bound: bounds.links,
@@ -1037,7 +1026,14 @@ impl Session {
     ///
     /// The type nodes stay. "Reset" restores the screen a session opens with,
     /// which is the meta-graph — a blank canvas would be "close".
-    pub fn reset(&self) -> GraphSlice {
+    pub fn reset(&self) -> Result<GraphSlice, CoreError> {
+        match self.handle(&Request::Reset)? {
+            Response::Slice(slice) => Ok(slice),
+            _ => unreachable!(),
+        }
+    }
+
+    fn reset_uncommitted(&self) -> GraphSlice {
         let mut view = self.write();
         let tombstones = view.tombstone_all_instances();
         let count = tombstones.len();
@@ -1186,7 +1182,7 @@ impl Session {
     /// [`geometry_caveat`] rides along saying what that permits.
     pub fn view_state(&self) -> ViewState {
         let view = self.read();
-        let layout_kernel = self.layout_kernel();
+        let layout_kernel = view.layout_kernel;
 
         let mut instances: std::collections::BTreeMap<&str, u32> =
             std::collections::BTreeMap::new();
@@ -1222,6 +1218,10 @@ impl Session {
         instances_by_type.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
         ViewState {
+            stamp: view.stamp(self.generation()),
+            subset: view.subset.clone(),
+            subset_revision: view.subset_revision.to_string(),
+            topology_revision: view.topology_revision.to_string(),
             protocol_version: PROTOCOL_VERSION,
             graph: self.source.clone(),
             tier: self.meta_graph.meta.tier,
@@ -1231,11 +1231,7 @@ impl Session {
             link_count: view.edges().len() as u32,
             types,
             instances_by_type,
-            last_slice: self
-                .last_slice
-                .read()
-                .expect("the last-slice lock was poisoned by a panicking request")
-                .clone(),
+            last_slice: view.last_slice.clone(),
             bounds: ViewBounds {
                 max_expansion_nodes: expand::MAX_EXPANSION_NODES as u32,
                 max_query_rows: query::MAX_QUERY_ROWS as u32,
@@ -1280,6 +1276,11 @@ impl Session {
     /// on a five-slot view has a wrong model of what the user is looking at,
     /// and a silently narrowed camera would leave it holding that model.
     pub fn check_live_slots(&self, slots: &[u32]) -> Result<(), CoreError> {
+        if slots.len() > records::MAX_LOADED_NODES + self.meta_graph.meta.nodes.len() {
+            return Err(CoreError::Request(
+                "too many slots in steering request".into(),
+            ));
+        }
         let view = self.read();
         for slot in slots {
             match view.entry(*slot) {
@@ -1339,8 +1340,21 @@ impl Session {
 /// answering are separable: the JSON twin serializes the very same [`Response`]
 /// and never comes through here (test-plan §2 — one encoder, two serializers).
 pub fn response_frames(response: &Response) -> Vec<Vec<u8>> {
+    if let Response::Shared(snapshot) = response {
+        return crate::shared::shared_frames(
+            &crate::shared::SharedWireMeta {
+                snapshot: snapshot.meta.clone(),
+                request_id: None,
+                focus: None,
+                mutation_kind: None,
+            },
+            &snapshot.points,
+            &snapshot.links,
+        );
+    }
     let mut enc = ResponseEncoder::new();
     match response {
+        Response::Shared(_) => unreachable!(),
         Response::Query(table) => enc.push_json(MessageType::QueryTable, &json_of(table)),
         Response::Records(table) => enc.push_json(MessageType::Records, &json_of(table)),
         Response::Preview(preview) => {
@@ -1424,4 +1438,12 @@ fn new_generation() -> String {
             .as_nanos(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     )
+}
+
+pub(crate) struct ViewReadGuard<'a>(std::sync::RwLockReadGuard<'a, SharedViewState>);
+impl std::ops::Deref for ViewReadGuard<'_> {
+    type Target = View;
+    fn deref(&self) -> &View {
+        &self.0.view
+    }
 }

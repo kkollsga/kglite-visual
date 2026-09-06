@@ -135,3 +135,42 @@ test('typed record identities and missing states survive decoding without number
     new TextEncoder().encode('{"columns":["count"],"rows":[[1]]}'))))
   expect(next?.kind).toBe('query-table')
 })
+
+test('a shared update becomes visible only after its complete typed arrays arrive', () => {
+  const assembler = new ResponseAssembler()
+  const meta = {
+    snapshot: { stamp: { generation: 'fixture-generation', revision: '9' }, topology_revision: '2' },
+    request_id: 'change-9', focus: null, mutation_kind: 'query',
+  }
+  expect(assembler.push(decodeFrame(frame(MessageType.SHARED_UPDATE,
+    new TextEncoder().encode(JSON.stringify(meta)), { terminal: false })))).toBeNull()
+  expect(assembler.push(decodeFrame(frame(MessageType.POINTS, f32Payload([1, 2]),
+    { terminal: false, seq: 1 })))).toBeNull()
+  const completed = assembler.push(decodeFrame(frame(MessageType.LINKS, f32Payload([]), { seq: 2 })))
+  expect(completed?.kind).toBe('shared-update')
+  if (completed?.kind !== 'shared-update') throw new Error('expected atomic shared update')
+  expect(completed.request_id).toBe('change-9')
+  expect(completed.value.meta).toEqual(meta)
+  expect([...completed.value.points]).toEqual([1, 2])
+  expect([...completed.value.links]).toEqual([])
+
+  const privateReply = assembler.push(decodeFrame(frame(MessageType.QUERY_TABLE,
+    new TextEncoder().encode('{"request_id":"query-10","columns":[],"rows":[]}'))))
+  expect(privateReply?.kind).toBe('query-table')
+  expect(privateReply?.request_id).toBe('query-10')
+})
+
+test('revision conflicts retain expected and actual stamps and request correlation', () => {
+  const payload = {
+    code: 'revision-conflict', message: 'shared view changed', request_id: 'stale-change',
+    expected: { generation: 'fixture-generation', revision: '2' },
+    actual: { generation: 'fixture-generation', revision: '3' },
+  }
+  const reply = new ResponseAssembler().push(decodeFrame(frame(MessageType.ERROR,
+    new TextEncoder().encode(JSON.stringify(payload)))))
+  expect(reply?.kind).toBe('error')
+  if (reply?.kind !== 'error') throw new Error('expected conflict error')
+  expect(reply.request_id).toBe('stale-change')
+  expect(reply.conflict?.expected.revision).toBe('2')
+  expect(reply.conflict?.actual.revision).toBe('3')
+})

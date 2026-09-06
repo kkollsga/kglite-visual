@@ -23,14 +23,14 @@ localhost CLI and a Python wheel.
 > drawn at whichever of three scales the frame can resolve — the simulation
 > stops, dragging goes off, and the server then knows where the points
 > are), and the D2 deterministic mode behind an explicit
-> `?deterministic=1` switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v5)
+> `?deterministic=1` switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v6)
 > with an exact framing baseline, an axum server on localhost with the
 > frontend embedded, **a Python wheel whose `show()` runs that same server
 > lib-linked into the extension**, **`kglite-visual render` /
 > `POST /api/render`** — the meta-graph, a Cypher result or a bounded
 > expansion drawn as a deterministic SVG or PNG with the app's own visual
 > encoding and the truncation banner in the picture — **an MCP server at
-> `/mcp` on the running instance** — sixteen tools an agent uses to show,
+> `/mcp` on the running instance** — eighteen tools an agent uses to show,
 > expand, collapse, highlight, focus, re-arrange, re-colour and **export**
 > the live view, with every change broadcast to every attached browser, so the
 > user's screen follows the agent in real time — a source distribution

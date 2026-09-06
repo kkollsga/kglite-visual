@@ -24,9 +24,7 @@ use axum::http::header::CONTENT_TYPE;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use kglite_visual_core::control::{
-    Appearance, AppearanceRequest, Command, Focus, FocusRequest, Highlight, HighlightRequest,
-};
+use kglite_visual_core::control::{AppearanceRequest, FocusRequest, HighlightRequest};
 use kglite_visual_core::error::CoreError;
 use kglite_visual_core::records::{BrowseTypeRequest, LoadNodesRequest, RecordsRequest};
 use kglite_visual_core::render::RenderRequest;
@@ -34,8 +32,42 @@ use kglite_visual_core::request::{
     CypherRequest, ExpandRequest, LayoutRequest, Request, SearchRequest, SlotRequest, TypeRequest,
 };
 
-use crate::broadcast::AppState;
+use crate::broadcast::{AppState, DispatchError, Execution};
 use crate::queries;
+use kglite_visual_core::shared::{CaptionRequest, RevisionStamp, SharedRequest};
+use kglite_visual_core::subset::SubsetRequest;
+
+#[derive(Default, serde::Deserialize)]
+pub struct MutationOptions {
+    #[serde(default)]
+    pub expected: Option<RevisionStamp>,
+    #[serde(default)]
+    pub request_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct RequestBody<T> {
+    #[serde(flatten)]
+    body: T,
+    #[serde(flatten)]
+    options: MutationOptions,
+}
+
+impl<T> RequestBody<T> {
+    fn request(self, make: impl FnOnce(T) -> Request) -> SharedRequest {
+        self.options.request(make(self.body))
+    }
+}
+
+impl MutationOptions {
+    fn request(self, request: Request) -> SharedRequest {
+        SharedRequest {
+            request,
+            expected: self.expected,
+            request_id: self.request_id,
+        }
+    }
+}
 
 /// `GET /api/meta-graph` — the entry screen, positions and links included.
 pub async fn meta_graph(State(state): State<AppState>) -> Response {
@@ -65,50 +97,77 @@ pub async fn describe(State(state): State<AppState>) -> Response {
 
 /// `POST /api/cypher` — `{"query": "...", "params": {...}, "limit": n,
 /// "as_graph": bool}`.
-pub async fn cypher(state: State<AppState>, Json(body): Json<CypherRequest>) -> Response {
-    dispatch(state, Request::Cypher(body)).await
+pub async fn cypher(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<CypherRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Cypher)).await
 }
 
 /// `POST /api/records` — typed fields for generation-scoped source handles.
-pub async fn records(state: State<AppState>, Json(body): Json<RecordsRequest>) -> Response {
-    dispatch(state, Request::Records(body)).await
+pub async fn records(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<RecordsRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Records)).await
 }
 
 /// `POST /api/browse-type` — bounded type loading, including disconnected nodes.
-pub async fn browse_type(state: State<AppState>, Json(body): Json<BrowseTypeRequest>) -> Response {
-    dispatch(state, Request::BrowseType(body)).await
+pub async fn browse_type(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<BrowseTypeRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::BrowseType)).await
 }
 
 /// `POST /api/load-nodes` — load the exact source nodes identified by handles.
-pub async fn load_nodes(state: State<AppState>, Json(body): Json<LoadNodesRequest>) -> Response {
-    dispatch(state, Request::LoadNodes(body)).await
+pub async fn load_nodes(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<LoadNodesRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::LoadNodes)).await
 }
 
 /// `POST /api/search` — `{"query": "...", "node_type": "...",
 /// "property": "...", "mode": "contains"|"starts-with", "limit": n}`.
-pub async fn search(state: State<AppState>, Json(body): Json<SearchRequest>) -> Response {
-    dispatch(state, Request::Search(body)).await
+pub async fn search(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<SearchRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Search)).await
 }
 
 /// `POST /api/preview` — `{"slot": n}`. Per-relationship counts, no fetch.
-pub async fn preview(state: State<AppState>, Json(body): Json<SlotRequest>) -> Response {
-    dispatch(state, Request::Preview(body)).await
+pub async fn preview(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<SlotRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Preview)).await
 }
 
 /// `POST /api/expand` — `{"slot": n, "relationship": "...",
 /// "direction": "out"|"in"|"both", "limit": n}`.
-pub async fn expand(state: State<AppState>, Json(body): Json<ExpandRequest>) -> Response {
-    dispatch(state, Request::Expand(body)).await
+pub async fn expand(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<ExpandRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Expand)).await
 }
 
 /// `POST /api/collapse` — `{"slot": n}`.
-pub async fn collapse(state: State<AppState>, Json(body): Json<SlotRequest>) -> Response {
-    dispatch(state, Request::Collapse(body)).await
+pub async fn collapse(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<SlotRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Collapse)).await
 }
 
 /// `POST /api/node` — `{"slot": n}`. One node's stored properties.
-pub async fn node_detail(state: State<AppState>, Json(body): Json<SlotRequest>) -> Response {
-    dispatch(state, Request::NodeDetail(body)).await
+pub async fn node_detail(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<SlotRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::NodeDetail)).await
 }
 
 /// `POST /api/render` — `{"source": {...}, "format": "svg"|"png", "width": n,
@@ -305,16 +364,14 @@ fn percent_encode(value: &str) -> String {
 ///
 /// One slice, not a collapse per type: forty round trips would put thirty-nine
 /// intermediate views on the user's screen that nobody asked to see.
-pub async fn reset(State(state): State<AppState>) -> Response {
-    let session = Arc::clone(&state.session);
-    match tokio::task::spawn_blocking(move || session.reset()).await {
-        Ok(slice) => {
-            let response = kglite_visual_core::Response::Slice(slice);
-            state.bus.publish_if_view_mutating(&response);
-            Json(response).into_response()
-        }
-        Err(err) => task_failed("reset", &err),
-    }
+pub async fn reset(state: State<AppState>, body: Option<Json<MutationOptions>>) -> Response {
+    dispatch(
+        state,
+        body.map(|Json(options)| options)
+            .unwrap_or_default()
+            .request(Request::Reset),
+    )
+    .await
 }
 
 /// `GET /api/view-state` — what is on the shared screen, as structured truth.
@@ -327,61 +384,38 @@ pub async fn view_state(State(state): State<AppState>) -> Response {
 
 /// `POST /api/focus` — `{"slots": [n, ...]}`. Zoom every attached client's
 /// camera to those slots; an empty list frames the whole view (plan D14).
-pub async fn focus(State(state): State<AppState>, Json(body): Json<FocusRequest>) -> Response {
-    steer(&state, &body.slots, |slots| {
-        Command::Focus(Focus::new(slots))
-    })
+pub async fn focus(
+    State(state): State<AppState>,
+    Json(body): Json<RequestBody<FocusRequest>>,
+) -> Response {
+    steer(state, body.request(Request::Focus)).await
 }
 
-/// `POST /api/highlight` — `{"slots": [n, ...], "concept":
-/// "highlighted"|"selected"}`. Set one of the index-addressed interaction
-/// concepts (D7) on every attached client.
 pub async fn highlight(
     State(state): State<AppState>,
-    Json(body): Json<HighlightRequest>,
+    Json(body): Json<RequestBody<HighlightRequest>>,
 ) -> Response {
-    let concept = body.concept;
-    steer(&state, &body.slots, move |slots| {
-        Command::Highlight(Highlight::new(slots, concept))
-    })
+    steer(state, body.request(Request::Highlight)).await
 }
 
-/// `POST /api/appearance` — `{"color_by": "..."|null, "size_by": "..."|null}`.
-///
-/// **The property name is not validated here, and cannot be.** Which properties
-/// a channel can be driven by is a per-type answer that
-/// `POST /api/property-stats` computes; this endpoint moves a channel on every
-/// client, and the clients are the only parties that know which type's
-/// statistics they last fetched. A name nothing carries colours the view
-/// uniformly, which is visible rather than silent.
 pub async fn appearance(
     State(state): State<AppState>,
-    Json(body): Json<AppearanceRequest>,
+    Json(body): Json<RequestBody<AppearanceRequest>>,
 ) -> Response {
-    let clients = state
-        .bus
-        .publish_command(&Command::Appearance(Appearance::new(
-            body.color_by,
-            body.size_by,
-        )));
-    steered(clients)
+    steer(state, body.request(Request::Appearance)).await
 }
 
-/// Validate the slots, publish the command, and report the audience.
-///
-/// The audience is the answer, not a courtesy: a steering command that reached
-/// nobody looked exactly like one that reached the user, and an agent that
-/// cannot tell those apart will narrate a screen that never moved.
-fn steer(state: &AppState, slots: &[u32], build: impl FnOnce(Vec<u32>) -> Command) -> Response {
-    if let Err(err) = state.session.check_live_slots(slots) {
-        return error_response(&err);
+async fn steer(state: AppState, request: SharedRequest) -> Response {
+    let request_id = request.request_id.clone().filter(|id| id.len() <= 128);
+    match state.execute(request).await {
+        Ok(execution) => Json(serde_json::json!({
+            "clients": state.bus.client_count(),
+            "stamp": execution.stamp,
+            "request_id": execution.request_id,
+        }))
+        .into_response(),
+        Err(error) => dispatch_error(error, request_id),
     }
-    let clients = state.bus.publish_command(&build(slots.to_vec()));
-    steered(clients)
-}
-
-fn steered(clients: usize) -> Response {
-    Json(serde_json::json!({ "clients": clients })).into_response()
 }
 
 /// `POST /api/layout` — `{"kernel": "auto"|"radial"|"islands"|"force"|
@@ -395,16 +429,35 @@ fn steered(clients: usize) -> Response {
 /// caveat that goes with it. `"simulation"` hands the arrangement back to the
 /// viewer's GPU.
 ///
-/// It goes through the ordinary request dispatch — and therefore the ordinary
-/// broadcast — rather than through `steer`, because unlike a steering command
-/// it carries a payload the client has to apply.
-pub async fn layout(state: State<AppState>, Json(body): Json<LayoutRequest>) -> Response {
-    dispatch(state, Request::Layout(body)).await
+/// The HTTP reply retains layout metadata and arrays; every shared change
+/// reaches browsers through the same ordered snapshot event.
+pub async fn layout(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<LayoutRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Layout)).await
+}
+
+pub async fn subset(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<SubsetRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Subset)).await
+}
+
+pub async fn caption(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<CaptionRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Caption)).await
 }
 
 /// `POST /api/property-stats` — `{"node_type": "..."}`.
-pub async fn property_stats(state: State<AppState>, Json(body): Json<TypeRequest>) -> Response {
-    dispatch(state, Request::PropertyStats(body)).await
+pub async fn property_stats(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<TypeRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::PropertyStats)).await
 }
 
 /// What `POST /api/validate` takes. One field, because one is all it needs.
@@ -553,21 +606,48 @@ fn store_error(err: &queries::StoreError) -> Response {
 /// Named handlers above rather than a single `/api/request` endpoint because a
 /// `curl` line that says what it is asking for is the whole value of the twin;
 /// they all funnel here so there is still exactly one dispatch.
-async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
-    let session = Arc::clone(&state.session);
-    match tokio::task::spawn_blocking(move || session.handle(&request)).await {
-        Ok(Ok(response)) => {
-            // The fix for the divergence this API shipped with: a POST that
-            // moved the slot space now reaches every attached browser as the
-            // same slice a WebSocket request would have produced. The caller
-            // still gets its body — an HTTP client is not subscribed, so this
-            // is an addition to the wire, not a change to it.
-            state.bus.publish_if_view_mutating(&response);
-            Json(response).into_response()
-        }
-        Ok(Err(err)) => error_response(&err),
-        Err(err) => task_failed("request", &err),
+async fn dispatch(State(state): State<AppState>, request: SharedRequest) -> Response {
+    let request_id = request.request_id.clone().filter(|id| id.len() <= 128);
+    match state.execute(request).await {
+        Ok(execution) => execution_json(execution),
+        Err(error) => dispatch_error(error, request_id),
     }
+}
+
+fn execution_json(execution: Execution) -> Response {
+    let mut value = serde_json::json!(execution.response);
+    if let Some(stamp) = execution.stamp {
+        value["stamp"] = serde_json::json!(stamp);
+    }
+    if let Some(request_id) = execution.request_id {
+        value["request_id"] = request_id.into();
+    }
+    Json(value).into_response()
+}
+
+fn dispatch_error(error: DispatchError, request_id: Option<String>) -> Response {
+    let (status, mut body) = match error {
+        DispatchError::Core(CoreError::Conflict(conflict)) => {
+            (StatusCode::CONFLICT, serde_json::json!(conflict))
+        }
+        DispatchError::Core(error) => {
+            let status = match &error {
+                CoreError::Request(_) => StatusCode::BAD_REQUEST,
+                CoreError::Query(_) => StatusCode::UNPROCESSABLE_ENTITY,
+                CoreError::Load(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                CoreError::Conflict(_) => unreachable!(),
+            };
+            (status, serde_json::json!({"error": error.to_string()}))
+        }
+        DispatchError::Task(message) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            serde_json::json!({"error": message}),
+        ),
+    };
+    if let Some(request_id) = request_id {
+        body["request_id"] = request_id.into();
+    }
+    (status, Json(body)).into_response()
 }
 
 /// Map a core failure to a status a caller can branch on.
@@ -577,6 +657,9 @@ async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
 /// resolve; replacing that with "query failed" throws away the only part a user
 /// can act on.
 fn error_response(err: &CoreError) -> Response {
+    if let CoreError::Conflict(conflict) = err {
+        return (StatusCode::CONFLICT, Json(serde_json::json!(conflict))).into_response();
+    }
     let status = match err {
         // The caller's request was wrong — a slot that names nothing, a type
         // this graph does not have. A 500 here would send them looking at the
@@ -586,6 +669,7 @@ fn error_response(err: &CoreError) -> Response {
         // error, a timeout, a type mismatch.
         CoreError::Query(_) => StatusCode::UNPROCESSABLE_ENTITY,
         CoreError::Load(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        CoreError::Conflict(_) => StatusCode::CONFLICT,
     };
     (
         status,

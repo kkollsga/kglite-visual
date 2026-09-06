@@ -10,10 +10,9 @@
 //! Bounded record inspection complements the shared-view tools. Bulk querying
 //! remains owned by the graph's MCP server.
 //!
-//! **Two callers, one view, last writer wins** (D14, v1). The human and the
-//! agent are collaborators on one slot space, not two tenants of two. An
-//! expansion either of them asks for is broadcast to both, and neither is
-//! notified that the other did something — they see it.
+//! The human and agent share one revisioned view. Each committed change is
+//! broadcast in commit order. Explicit expected stamps and preparation bases
+//! refuse stale work without changing that view.
 //!
 //! **What an agent can and cannot know.** It can know the content of the view
 //! exactly: [`kglite_visual_core::ViewState`] is the same truth the browser's
@@ -28,7 +27,9 @@
 use std::sync::Arc;
 
 use base64::Engine as _;
-use kglite_visual_core::control::{Appearance, Command, Focus, Highlight, HighlightConcept};
+use kglite_visual_core::control::{
+    AppearanceRequest, FocusRequest, HighlightConcept, HighlightRequest,
+};
 use kglite_visual_core::error::CoreError;
 use kglite_visual_core::records::{
     BrowseTypeRequest, LoadNodesRequest, NodeHandle, RecordsRequest,
@@ -38,6 +39,8 @@ use kglite_visual_core::request::{
     CypherRequest, EdgeDirection, ExpandRequest, LayoutKernel, LayoutRequest, Request,
     SearchRequest, SlotRequest,
 };
+use kglite_visual_core::shared::{CaptionRequest, RevisionStamp, SharedRequest};
+use kglite_visual_core::subset::SubsetRequest;
 use kglite_visual_core::{geometry_caveat, ExportFormat, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -47,7 +50,7 @@ use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler};
 use serde::{Deserialize, Serialize};
 
-use crate::broadcast::AppState;
+use crate::broadcast::{AppState, DispatchError, Execution};
 
 /// The path the MCP endpoint is mounted at, owned here so the router and the
 /// launch contract cannot disagree about it.
@@ -63,8 +66,8 @@ pub const MCP_PATH: &str = "/mcp";
 ///
 /// - *shared view, human watching* — otherwise an agent resets and re-expands
 ///   freely, and the person in front of the screen watches it flicker.
-/// - *last writer wins* — otherwise an agent assumes the view it left is the
-///   view it returns to.
+/// - *revision conflicts* — otherwise an agent overwrites state that changed
+///   while it was preparing its next action.
 /// - *geometry caveat* — otherwise an agent says "as you can see, top left",
 ///   which is a claim about a screen it has never seen. Conditional since G3:
 ///   the claim is false under a static layout the server itself computed, and
@@ -88,9 +91,10 @@ Treat it as a shared workspace, not a scratchpad:
 expected rather than startling.
 - Prefer small, reversible steps. `expand` then `collapse` beats `reset_view`, \
 which discards whatever the human had drilled into.
-- Last writer wins. There is no locking and no conflict report: if the human \
-clicks while you work, the view is whatever happened last. Call `view_state` \
-to re-read it rather than assuming your last call still describes the screen.
+- Shared changes are ordered and acknowledged. Pass `expected` from `view_state` \
+to refuse overwriting a newer revision. A revision conflict changes nothing; \
+re-read the view before deciding what to do next. Legacy calls without an \
+expected stamp remain supported; stale prepared work always refuses.
 
 What you can and cannot know:
 - `view_state` is exact about CONTENT — slots, types, counts, tombstones, and \
@@ -139,6 +143,134 @@ render; if you see one, the honest report is the bound, not the subset.";
 // sensible default would turn "the agent omitted the body" into a
 // deserialization error instead of a usable message.
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum FieldArg {
+    Property {
+        name: String,
+    },
+    Derived {
+        calculation_id: String,
+        column: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "kebab-case")]
+enum ScalarArg {
+    UniqueId(String),
+    Int64(String),
+    Float64(f64),
+    String(String),
+    Boolean(bool),
+    Date(String),
+    Timestamp(String),
+    Point {
+        lat: f64,
+        lon: f64,
+    },
+    Duration {
+        months: i32,
+        days: i32,
+        seconds: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum PredicateArg {
+    Type {
+        node_types: Vec<String>,
+    },
+    Category {
+        field: FieldArg,
+        values: Vec<ScalarArg>,
+        #[serde(default)]
+        include_null: bool,
+        #[serde(default)]
+        include_missing: bool,
+    },
+    NumericRange {
+        field: FieldArg,
+        min: Option<ScalarArg>,
+        max: Option<ScalarArg>,
+        #[serde(default)]
+        include_null: bool,
+        #[serde(default)]
+        include_missing: bool,
+    },
+    Missing {
+        field: FieldArg,
+        #[serde(default)]
+        include_null: bool,
+        #[serde(default)]
+        include_missing: bool,
+    },
+    Relation {
+        names: Vec<String>,
+    },
+    HideIsolated,
+}
+
+fn enabled_default() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+struct FilterArg {
+    id: String,
+    #[serde(default = "enabled_default")]
+    enabled: bool,
+    predicate: PredicateArg,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct SubsetArgs {
+    #[serde(default)]
+    predicates: Vec<FilterArg>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+struct CaptionArgs {
+    #[serde(default)]
+    caption_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct ExpectedArg {
+    generation: String,
+    revision: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct SharedOptions {
+    #[serde(default)]
+    expected: Option<ExpectedArg>,
+    #[serde(default)]
+    request_id: Option<String>,
+}
+
+impl SharedOptions {
+    fn request(self, request: Request) -> SharedRequest {
+        SharedRequest {
+            request,
+            expected: self.expected.map(|stamp| RevisionStamp {
+                generation: stamp.generation,
+                revision: stamp.revision,
+            }),
+            request_id: self.request_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+struct SharedArgs<T> {
+    #[serde(flatten)]
+    args: T,
+    #[serde(flatten)]
+    options: SharedOptions,
+}
 
 #[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
 struct HandleArg {
@@ -508,14 +640,18 @@ impl ViewControl {
     )]
     async fn show_cypher(
         &self,
-        Parameters(args): Parameters<CypherArgs>,
+        Parameters(shared): Parameters<SharedArgs<CypherArgs>>,
     ) -> Result<CallToolResult, McpError> {
-        self.mutate(Request::Cypher(CypherRequest {
-            query: args.query,
-            params: args.params.map(into_params).unwrap_or_default(),
-            limit: None,
-            as_graph: true,
-        }))
+        let SharedArgs { args, options } = shared;
+        self.mutate(
+            Request::Cypher(CypherRequest {
+                query: args.query,
+                params: args.params.map(into_params).unwrap_or_default(),
+                limit: None,
+                as_graph: true,
+            }),
+            options,
+        )
         .await
     }
 
@@ -556,12 +692,16 @@ impl ViewControl {
     )]
     async fn browse_type(
         &self,
-        Parameters(args): Parameters<BrowseTypeArgs>,
+        Parameters(shared): Parameters<SharedArgs<BrowseTypeArgs>>,
     ) -> Result<CallToolResult, McpError> {
-        self.mutate(Request::BrowseType(BrowseTypeRequest {
-            node_type: args.node_type,
-            limit: args.limit,
-        }))
+        let SharedArgs { args, options } = shared;
+        self.mutate(
+            Request::BrowseType(BrowseTypeRequest {
+                node_type: args.node_type,
+                limit: args.limit,
+            }),
+            options,
+        )
         .await
     }
 
@@ -573,11 +713,15 @@ impl ViewControl {
     )]
     async fn load_nodes(
         &self,
-        Parameters(args): Parameters<LoadNodesArgs>,
+        Parameters(shared): Parameters<SharedArgs<LoadNodesArgs>>,
     ) -> Result<CallToolResult, McpError> {
-        self.mutate(Request::LoadNodes(LoadNodesRequest {
-            handles: args.handles.into_iter().map(Into::into).collect(),
-        }))
+        let SharedArgs { args, options } = shared;
+        self.mutate(
+            Request::LoadNodes(LoadNodesRequest {
+                handles: args.handles.into_iter().map(Into::into).collect(),
+            }),
+            options,
+        )
         .await
     }
 
@@ -590,14 +734,18 @@ impl ViewControl {
     )]
     async fn expand(
         &self,
-        Parameters(args): Parameters<ExpandArgs>,
+        Parameters(shared): Parameters<SharedArgs<ExpandArgs>>,
     ) -> Result<CallToolResult, McpError> {
-        self.mutate(Request::Expand(ExpandRequest {
-            slot: args.slot,
-            relationship: args.relationship,
-            direction: args.direction.into(),
-            limit: args.limit,
-        }))
+        let SharedArgs { args, options } = shared;
+        self.mutate(
+            Request::Expand(ExpandRequest {
+                slot: args.slot,
+                relationship: args.relationship,
+                direction: args.direction.into(),
+                limit: args.limit,
+            }),
+            options,
+        )
         .await
     }
 
@@ -610,9 +758,10 @@ impl ViewControl {
     )]
     async fn collapse(
         &self,
-        Parameters(args): Parameters<SlotArgs>,
+        Parameters(shared): Parameters<SharedArgs<SlotArgs>>,
     ) -> Result<CallToolResult, McpError> {
-        self.mutate(Request::Collapse(SlotRequest { slot: args.slot }))
+        let SharedArgs { args, options } = shared;
+        self.mutate(Request::Collapse(SlotRequest { slot: args.slot }), options)
             .await
     }
 
@@ -626,8 +775,16 @@ impl ViewControl {
     )]
     async fn highlight(
         &self,
-        Parameters(args): Parameters<HighlightArgs>,
+        Parameters(shared): Parameters<SharedArgs<HighlightArgs>>,
     ) -> Result<CallToolResult, McpError> {
+        let SharedArgs { args, mut options } = shared;
+        if args.search.is_some() && options.expected.is_none() {
+            let stamp = self.state.session.shared_stamp();
+            options.expected = Some(ExpectedArg {
+                generation: stamp.generation,
+                revision: stamp.revision,
+            });
+        }
         let concept: HighlightConcept = args.concept.into();
         let (slots, note) = match &args.search {
             None => (args.slots.clone(), None),
@@ -662,18 +819,26 @@ impl ViewControl {
             }
         };
 
-        if let Err(err) = self.state.session.check_live_slots(&slots) {
-            return Ok(refused(&err));
-        }
-        let clients = self
-            .state
-            .bus
-            .publish_command(&Command::Highlight(Highlight::new(slots.clone(), concept)));
+        let execution = match self
+            .execute(
+                Request::Highlight(HighlightRequest {
+                    slots: slots.clone(),
+                    concept,
+                }),
+                options,
+            )
+            .await?
+        {
+            Ok(execution) => execution,
+            Err(error) => return Ok(refused(&error)),
+        };
         ok_json(&serde_json::json!({
             "marked": slots.len(),
             "slots": slots,
             "concept": concept,
-            "connected_viewers": clients,
+            "connected_viewers": self.state.bus.client_count(),
+            "stamp": execution.stamp,
+            "request_id": execution.request_id,
             "search": note,
         }))
     }
@@ -686,19 +851,25 @@ impl ViewControl {
     )]
     async fn focus(
         &self,
-        Parameters(args): Parameters<FocusArgs>,
+        Parameters(shared): Parameters<SharedArgs<FocusArgs>>,
     ) -> Result<CallToolResult, McpError> {
-        if let Err(err) = self.state.session.check_live_slots(&args.slots) {
-            return Ok(refused(&err));
-        }
-        let clients = self
-            .state
-            .bus
-            .publish_command(&Command::Focus(Focus::new(args.slots.clone())));
+        let SharedArgs { args, options } = shared;
+        let execution = match self
+            .execute(
+                Request::Focus(FocusRequest {
+                    slots: args.slots.clone(),
+                }),
+                options,
+            )
+            .await?
+        {
+            Ok(execution) => execution,
+            Err(error) => return Ok(refused(&error)),
+        };
         ok_json(&serde_json::json!({
-            "framed": args.slots.len(),
-            "slots": args.slots,
-            "connected_viewers": clients,
+            "framed": args.slots.len(), "slots": args.slots,
+            "connected_viewers": self.state.bus.client_count(), "stamp": execution.stamp,
+            "request_id": execution.request_id,
         }))
     }
 
@@ -711,20 +882,57 @@ impl ViewControl {
     )]
     async fn set_appearance(
         &self,
-        Parameters(args): Parameters<AppearanceArgs>,
+        Parameters(shared): Parameters<SharedArgs<AppearanceArgs>>,
     ) -> Result<CallToolResult, McpError> {
-        let clients = self
-            .state
-            .bus
-            .publish_command(&Command::Appearance(Appearance::new(
-                args.color_by.clone(),
-                args.size_by.clone(),
-            )));
+        let SharedArgs { args, options } = shared;
+        let execution = match self
+            .execute(
+                Request::Appearance(AppearanceRequest {
+                    color_by: args.color_by.clone(),
+                    size_by: args.size_by.clone(),
+                }),
+                options,
+            )
+            .await?
+        {
+            Ok(execution) => execution,
+            Err(error) => return Ok(refused(&error)),
+        };
         ok_json(&serde_json::json!({
-            "color_by": args.color_by,
-            "size_by": args.size_by,
-            "connected_viewers": clients,
+            "color_by": args.color_by, "size_by": args.size_by,
+            "connected_viewers": self.state.bus.client_count(), "stamp": execution.stamp,
+            "request_id": execution.request_id,
         }))
+    }
+
+    #[tool(
+        description = "Replace the enabled predicate list over already loaded instances and relationships. Predicates combine by conjunction; empty predicates clear the filters. Type, category, exact numeric range, missing/null, relation type and explicit hide-isolated predicates are supported. Source search is unchanged. Pass expected generation/revision to refuse overwriting a peer's later state; the returned subset counts are authoritative."
+    )]
+    async fn set_subset(
+        &self,
+        Parameters(shared): Parameters<SharedArgs<SubsetArgs>>,
+    ) -> Result<CallToolResult, McpError> {
+        let SharedArgs { args, options } = shared;
+        let request: SubsetRequest = serde_json::from_value(serde_json::json!(args))
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
+        self.settings(Request::Subset(request), options).await
+    }
+
+    #[tool(
+        description = "Set the shared caption property for loaded instance nodes, or clear it with null to use their source titles. The choice is acknowledged with a revision and restored when another browser connects. Source data is unchanged; expected generation/revision prevents replacing a later peer choice."
+    )]
+    async fn set_caption(
+        &self,
+        Parameters(shared): Parameters<SharedArgs<CaptionArgs>>,
+    ) -> Result<CallToolResult, McpError> {
+        let SharedArgs { args, options } = shared;
+        self.settings(
+            Request::Caption(CaptionRequest {
+                caption_by: args.caption_by,
+            }),
+            options,
+        )
+        .await
     }
 
     #[tool(
@@ -744,17 +952,18 @@ impl ViewControl {
     )]
     async fn set_layout(
         &self,
-        Parameters(args): Parameters<LayoutArgs>,
+        Parameters(shared): Parameters<SharedArgs<LayoutArgs>>,
     ) -> Result<CallToolResult, McpError> {
+        let SharedArgs { args, options } = shared;
         let request = Request::Layout(LayoutRequest {
             kernel: args.kernel.into(),
             seed_slot: args.seed_slot,
         });
-        let response = match self.run(request).await? {
-            Ok(response) => response,
+        let execution = match self.execute(request, options).await? {
+            Ok(execution) => execution,
             Err(err) => return Ok(refused(&err)),
         };
-        self.state.bus.publish_if_view_mutating(&response);
+        let response = execution.response;
         let Response::Layout(result) = &response else {
             return Err(McpError::internal_error(
                 "a layout request answered with something other than a layout",
@@ -765,6 +974,8 @@ impl ViewControl {
         // because this is the call that changed which one is true — and an
         // agent that acts on the old one describes a screen it cannot see.
         ok_json(&serde_json::json!({
+            "stamp": execution.stamp,
+            "request_id": execution.request_id,
             "kernel_requested": result.meta.kernel_requested,
             "kernel_chosen": result.meta.kernel_chosen,
             "seed_slot": result.meta.seed_slot,
@@ -781,14 +992,11 @@ impl ViewControl {
                        so prefer `collapse` on what you added. The type nodes stay; only \
                        instances are removed."
     )]
-    async fn reset_view(&self) -> Result<CallToolResult, McpError> {
-        let session = Arc::clone(&self.state.session);
-        let slice = tokio::task::spawn_blocking(move || session.reset())
-            .await
-            .map_err(|err| McpError::internal_error(format!("reset task failed: {err}"), None))?;
-        let response = Response::Slice(slice);
-        self.state.bus.publish_if_view_mutating(&response);
-        self.slice_report(&response)
+    async fn reset_view(
+        &self,
+        Parameters(options): Parameters<SharedOptions>,
+    ) -> Result<CallToolResult, McpError> {
+        self.mutate(Request::Reset, options).await
     }
 
     #[tool(
@@ -991,8 +1199,9 @@ impl ViewControl {
     )]
     async fn run_saved_query(
         &self,
-        Parameters(args): Parameters<SavedQueryArgs>,
+        Parameters(shared): Parameters<SharedArgs<SavedQueryArgs>>,
     ) -> Result<CallToolResult, McpError> {
+        let SharedArgs { args, options } = shared;
         let store = Arc::clone(&self.state.queries);
         let name = args.name.clone();
         let found = match tokio::task::spawn_blocking(move || store.get(&name))
@@ -1018,23 +1227,62 @@ impl ViewControl {
             eprintln!("kglite-visual: could not record query history: {err}");
         }
 
-        self.mutate(Request::Cypher(CypherRequest {
-            query,
-            params: Default::default(),
-            limit: None,
-            as_graph: true,
-        }))
+        self.mutate(
+            Request::Cypher(CypherRequest {
+                query,
+                params: Default::default(),
+                limit: None,
+                as_graph: true,
+            }),
+            options,
+        )
         .await
     }
 
+    async fn settings(
+        &self,
+        request: Request,
+        options: SharedOptions,
+    ) -> Result<CallToolResult, McpError> {
+        match self.execute(request, options).await? {
+            Ok(execution) => {
+                let Response::Shared(snapshot) = execution.response else {
+                    return Err(McpError::internal_error(
+                        "settings returned an unexpected response",
+                        None,
+                    ));
+                };
+                ok_json(
+                    &serde_json::json!({"state": snapshot.meta, "request_id": execution.request_id}),
+                )
+            }
+            Err(error) => Ok(refused(&error)),
+        }
+    }
+
     /// Run a view-mutating request, broadcast it, and report what it did.
-    async fn mutate(&self, request: Request) -> Result<CallToolResult, McpError> {
-        let response = match self.run(request).await? {
-            Ok(response) => response,
-            Err(err) => return Ok(refused(&err)),
+    async fn mutate(
+        &self,
+        request: Request,
+        options: SharedOptions,
+    ) -> Result<CallToolResult, McpError> {
+        let execution = match self.execute(request, options).await? {
+            Ok(execution) => execution,
+            Err(error) => return Ok(refused(&error)),
         };
-        self.state.bus.publish_if_view_mutating(&response);
-        self.slice_report(&response)
+        self.slice_report(&execution)
+    }
+
+    async fn execute(
+        &self,
+        request: Request,
+        options: SharedOptions,
+    ) -> Result<Result<Execution, CoreError>, McpError> {
+        match self.state.execute(options.request(request)).await {
+            Ok(execution) => Ok(Ok(execution)),
+            Err(DispatchError::Core(error)) => Ok(Err(error)),
+            Err(DispatchError::Task(message)) => Err(McpError::internal_error(message, None)),
+        }
     }
 
     /// Dispatch off the reactor.
@@ -1045,6 +1293,10 @@ impl ViewControl {
     /// protocol error, which MCP clients render as "tool result missing due to
     /// internal error": the one message that helps nobody.
     async fn run(&self, request: Request) -> Result<Result<Response, CoreError>, McpError> {
+        debug_assert!(
+            !request.is_shared(),
+            "shared requests require ordered execution"
+        );
         let session = Arc::clone(&self.state.session);
         tokio::task::spawn_blocking(move || session.handle(&request))
             .await
@@ -1057,8 +1309,8 @@ impl ViewControl {
     /// an agent has no use for ten thousand coordinates and every use for the
     /// slots it just gained. Sending the arrays would be tokens spent on
     /// numbers nobody reads.
-    fn slice_report(&self, response: &Response) -> Result<CallToolResult, McpError> {
-        let Response::Slice(slice) = response else {
+    fn slice_report(&self, execution: &Execution) -> Result<CallToolResult, McpError> {
+        let Response::Slice(slice) = &execution.response else {
             return Err(McpError::internal_error(
                 "a view-mutating request answered with something other than a slice",
                 None,
@@ -1080,6 +1332,8 @@ impl ViewControl {
             })
             .collect();
         ok_json(&serde_json::json!({
+            "stamp": execution.stamp,
+            "request_id": execution.request_id,
             "kind": slice.meta.kind,
             "added": added,
             "collapsed_slots": slice.meta.tombstones,
@@ -1134,6 +1388,11 @@ pub fn service(state: AppState) -> StreamableHttpService<ViewControl, LocalSessi
 /// message away, which for a Cypher syntax error means discarding the position,
 /// the expected token and the schema name kglite spent effort producing.
 fn refused(err: &CoreError) -> CallToolResult {
+    if let CoreError::Conflict(conflict) = err {
+        return CallToolResult::error(vec![ContentBlock::text(
+            serde_json::json!(conflict).to_string(),
+        )]);
+    }
     CallToolResult::error(vec![ContentBlock::text(err.to_string())])
 }
 
@@ -1164,7 +1423,7 @@ mod tests {
     use kglite_visual_core::{GEOMETRY_CAVEAT, GEOMETRY_STATIC_CAVEAT};
 
     /// Names are the API: a count alone cannot detect a rename.
-    const EXPECTED: [&str; 16] = [
+    const EXPECTED: [&str; 18] = [
         "browse_type",
         "collapse",
         "expand",
@@ -1178,7 +1437,9 @@ mod tests {
         "reset_view",
         "run_saved_query",
         "set_appearance",
+        "set_caption",
         "set_layout",
+        "set_subset",
         "show_cypher",
         "view_state",
     ];
@@ -1229,7 +1490,7 @@ mod tests {
         // that "tightens the wording" cannot quietly drop one.
         for phrase in [
             "human being is looking at",
-            "Last writer wins",
+            "stale prepared work always refuses",
             // E8: an agent that reads `export_view` as "dump this graph" calls
             // it on the entry screen and reports the refusal as a broken tool.
             "scope is the VIEW, not the graph",

@@ -225,6 +225,10 @@ impl View {
         self.tombstones as u32
     }
 
+    pub(crate) fn same_topology(&self, other: &Self) -> bool {
+        self.entries == other.entries && self.edges == other.edges
+    }
+
     pub fn edges(&self) -> &[ViewEdge] {
         &self.edges
     }

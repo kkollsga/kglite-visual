@@ -27,6 +27,8 @@ import type { RecordTable } from './generated/RecordTable'
 import type { QueryTable } from './generated/QueryTable'
 import type { SearchResponse } from './generated/SearchResponse'
 import type { SessionInfo } from './generated/SessionInfo'
+import type { SharedWireMeta } from './generated/SharedWireMeta'
+import type { RevisionConflict } from './generated/RevisionConflict'
 
 /** One decoded frame. `payload` is a view *into* the received buffer. */
 export type Frame = {
@@ -145,8 +147,15 @@ export type LayoutMessage = {
   points: Float32Array
 }
 
+export type SharedUpdateMessage = {
+  meta: SharedWireMeta
+  points: Float32Array
+  links: Float32Array
+}
+
 /** Everything a completed response can be. */
-export type Completed =
+export type Completed = (
+  | { kind: 'shared-update'; value: SharedUpdateMessage }
   | { kind: 'meta-graph'; value: MetaGraphMessage }
   | { kind: 'session'; value: SessionInfo }
   | { kind: 'slice'; value: GraphSliceMessage }
@@ -165,7 +174,8 @@ export type Completed =
   // v4's layout (plan E5). Unsolicited like the three above — a layout the
   // human picked in another tab, or an agent's `set_layout`, arrives here.
   | { kind: 'layout'; value: LayoutMessage }
-  | { kind: 'error'; value: string }
+  | { kind: 'error'; value: string; conflict?: RevisionConflict; request_id?: string }
+) & { request_id?: string }
 
 /**
  * Reassembles one response from its frames.
@@ -175,6 +185,10 @@ export type Completed =
  * sequencing it cannot verify.
  */
 export class ResponseAssembler {
+  private requestId: string | null = null
+  private shared: SharedWireMeta | null = null
+  private conflict: RevisionConflict | null = null
+  private failedRequestId: string | null = null
   private meta: MetaGraphMeta | null = null
   private session: SessionInfo | null = null
   private error: string | null = null
@@ -196,52 +210,69 @@ export class ResponseAssembler {
   /** Feed one frame. Returns the completed response, if this frame ended one. */
   push(frame: Frame): Completed | null {
     this.lastSeq = frame.seq
+    let json: unknown
+    let parsed = false
+    const readJson = <T>(): T => {
+      if (!parsed) {
+        json = asJson<unknown>(frame)
+        parsed = true
+        this.requestId = (json as { request_id?: string | null }).request_id ?? null
+      }
+      return json as T
+    }
 
     switch (frame.msgType) {
+      case MessageType.SHARED_UPDATE:
+        this.shared = readJson<SharedWireMeta>()
+        break
       case MessageType.META_GRAPH_META:
-        this.meta = asJson<MetaGraphMeta>(frame)
+        this.meta = readJson<MetaGraphMeta>()
         break
       case MessageType.SESSION_INFO:
-        this.session = asJson<SessionInfo>(frame)
+        this.session = readJson<SessionInfo>()
         break
-      case MessageType.ERROR:
-        this.error = asJson<{ message: string }>(frame).message
+      case MessageType.ERROR: {
+        const error = readJson<{ message: string; code?: string; request_id?: string }>()
+        this.error = error.message
+        if (error.code === 'revision-conflict') this.conflict = readJson<RevisionConflict>()
+        this.failedRequestId = error.request_id ?? null
         break
+      }
       case MessageType.GRAPH_SLICE:
-        this.slice = asJson<GraphSliceMeta>(frame)
+        this.slice = readJson<GraphSliceMeta>()
         break
       case MessageType.COMPACTION:
-        this.compaction = asJson<Compaction>(frame)
+        this.compaction = readJson<Compaction>()
         break
       case MessageType.RECORDS:
-        this.records = asJson<RecordTable>(frame)
+        this.records = readJson<RecordTable>()
         break
       case MessageType.QUERY_TABLE:
-        this.table = asJson<QueryTable>(frame)
+        this.table = readJson<QueryTable>()
         break
       case MessageType.EXPANSION_PREVIEW:
-        this.preview = asJson<ExpansionPreview>(frame)
+        this.preview = readJson<ExpansionPreview>()
         break
       case MessageType.NODE_DETAIL:
-        this.detail = asJson<NodeDetail>(frame)
+        this.detail = readJson<NodeDetail>()
         break
       case MessageType.SEARCH_RESULT:
-        this.search = asJson<SearchResponse>(frame)
+        this.search = readJson<SearchResponse>()
         break
       case MessageType.PROPERTY_STATS:
-        this.stats = asJson<PropertyStatsResponse>(frame)
+        this.stats = readJson<PropertyStatsResponse>()
         break
       case MessageType.FOCUS:
-        this.focus = asJson<Focus>(frame)
+        this.focus = readJson<Focus>()
         break
       case MessageType.HIGHLIGHT:
-        this.highlight = asJson<Highlight>(frame)
+        this.highlight = readJson<Highlight>()
         break
       case MessageType.APPEARANCE:
-        this.appearance = asJson<Appearance>(frame)
+        this.appearance = readJson<Appearance>()
         break
       case MessageType.LAYOUT:
-        this.layout = asJson<LayoutMeta>(frame)
+        this.layout = readJson<LayoutMeta>()
         break
       case MessageType.POINTS:
       case MessageType.LINKS: {
@@ -263,6 +294,11 @@ export class ResponseAssembler {
 
   private complete(): Completed {
     const finished = this.classify()
+    const requestId = this.requestId
+    this.requestId = null
+    this.shared = null
+    this.conflict = null
+    this.failedRequestId = null
     this.meta = null
     this.session = null
     this.error = null
@@ -279,7 +315,7 @@ export class ResponseAssembler {
     this.appearance = null
     this.layout = null
     this.chunks.clear()
-    return finished
+    return requestId === null ? finished : { ...finished, request_id: requestId }
   }
 
   /**
@@ -290,7 +326,15 @@ export class ResponseAssembler {
    * a view built from an answer the server did not stand behind.
    */
   private classify(): Completed {
-    if (this.error !== null) return { kind: 'error', value: this.error }
+    if (this.error !== null) return {
+      kind: 'error', value: this.error,
+      ...(this.conflict === null ? {} : { conflict: this.conflict }),
+      ...(this.failedRequestId === null ? {} : { request_id: this.failedRequestId }),
+    }
+    if (this.shared !== null) return {
+      kind: 'shared-update',
+      value: { meta: this.shared, points: this.joinFloats(MessageType.POINTS), links: this.joinFloats(MessageType.LINKS) },
+    }
     if (this.meta !== null) {
       return {
         kind: 'meta-graph',

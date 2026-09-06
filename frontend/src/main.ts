@@ -15,6 +15,12 @@
 import './styles.css'
 import './workspace.css'
 import { Workspace, type GraphScope } from './workspace'
+import { SharedState } from './shared'
+import { Filters } from './filters'
+import type { SharedWireMeta } from './generated/SharedWireMeta'
+import type { ViewReference } from './generated/ViewReference'
+import type { RecordTable } from './generated/RecordTable'
+import type { RecordCell } from './generated/RecordCell'
 
 import {
   categoricalLegend,
@@ -42,14 +48,7 @@ import type { PropertyStat } from './generated/PropertyStat'
 import type { PropertyStatsResponse } from './generated/PropertyStatsResponse'
 import type { Request } from './generated/Request'
 import { InteractionState } from './interaction'
-import {
-  filterLine,
-  matches,
-  parseFilter,
-  unknownKeys,
-  type FilterTerm,
-  type SlotFacts,
-} from './filter'
+import { filterLine } from './filter'
 import { LabelOverlay } from './labels'
 import { ExportCard } from './export'
 import { tableColumns, typeTableQuery } from './generate'
@@ -76,7 +75,7 @@ import {
 } from './render'
 import { connectedAtom } from './state'
 import { rendersGraph } from './tiers'
-import { WebSocketTransport } from './transport'
+import { WebSocketTransport, type TransportHandlers } from './transport'
 import { apiUrl } from './urls'
 import { SlotView } from './view'
 
@@ -169,6 +168,17 @@ const legend = new Legend(workspace.graphHost)
 const exportCard = new ExportCard(workspace.graphHost)
 const assembler = new ResponseAssembler()
 const transport = new WebSocketTransport('ws')
+const shared = new SharedState()
+let sharedSelected: number[] = []
+let sharedHiddenEdges: ReadonlySet<number> = new Set()
+let incoming = Promise.resolve()
+let receivedShared = false
+let resyncing = false
+let sharedPositionHash: string | null = null
+let requestSerial = 0
+const privateRequests = new Map<string, string>()
+const pendingSharedRequests = new Map<string, string>()
+const filters = new Filters(workspace.panelHosts.filters, predicates => send({type: 'subset', predicates}))
 
 let surface: Surface | null = null
 let lastMeta: MetaGraphMeta | null = null
@@ -270,11 +280,11 @@ const panels = new Panels(workspace.panelHosts.inspector, {
   focusSlot: (slot) => {
     selectSlot(slot)
   },
-  setColorBy: (property) => applyColorBy(property),
-  setSizeBy: (property) => applySizeBy(property),
+  setColorBy: (property) => send({type: 'appearance', color_by: property, size_by: shared.snapshot?.appearance.size_by ?? null}),
+  setSizeBy: (property) => send({type: 'appearance', color_by: shared.snapshot?.appearance.color_by ?? null, size_by: property}),
   setLayoutKernel: (kernel) => requestLayout(kernel),
-  setFilter: (query) => applyFilter(query),
-  setCaptionBy: (nodeType, property) => applyCaptionBy(nodeType, property),
+  setFilter: () => undefined,
+  setCaptionBy: (_nodeType, property) => send({type: 'caption', caption_by: property}),
   saveQuery: (name, query) => void refreshQueries(store.saveQuery(name, query)),
   deleteQuery: (name) => void refreshQueries(store.deleteQuery(name)),
   // Parse-only, over plain HTTP, on the editor's idle timer. It never runs the
@@ -350,7 +360,7 @@ function visibleSlots(): number[] {
 function visibleLinkCount(): number {
   let count = 0
   for (let i = 0; i < view.links.length; i += 2) {
-    if (!hiddenSlots.has(view.links[i] as number) && !hiddenSlots.has(view.links[i + 1] as number)) count += 1
+    if (!sharedHiddenEdges.has(i / 2) && !hiddenSlots.has(view.links[i] as number) && !hiddenSlots.has(view.links[i + 1] as number)) count += 1
   }
   return count
 }
@@ -642,22 +652,9 @@ function applyAppearance(command: AppearanceCommand): void {
 /** The property statistics behind the dropdowns, by property name. */
 const lastStats = new Map<string, PropertyStat>()
 
-/** One outstanding per-node value fetch. */
-type ValueRequest = { channel: 'color' | 'size' | 'caption'; property: string; ids: number[] }
-/**
- * The value fetch currently on the wire, and the ones waiting behind it.
- *
- * A queue rather than a single slot, because the caption channel made
- * concurrency real: selecting a type fetches its statistics, which can start a
- * caption fetch while a colour-by fetch from the previous selection is still
- * out — and the results are told apart only by which request was in flight.
- * Two at once would absorb one answer into the wrong channel, which is a
- * mis-coloured graph with nothing on screen saying so.
- */
-let inFlightValues: ValueRequest | null = null
-const pendingValues: ValueRequest[] = []
+const valueTokens = new Map<string, number>()
 
-transport.connect({
+const transportHandlers: TransportHandlers = {
   onStatus: (connected) => {
     connectedAtom.set(connected)
     workspace.setConnected(connected)
@@ -674,17 +671,27 @@ transport.connect({
     }
     debugState.lastMessageSeq = assembler.lastSeq
     if (completed === null) return
-    void handle(completed)
+    incoming = incoming.then(() => handle(completed)).catch(error => fail(String(error)))
   },
-})
+}
+transport.connect(transportHandlers)
 
+const sharedMutations = new Set(['expand', 'collapse', 'browse-type', 'load-nodes', 'reset', 'layout', 'appearance', 'caption', 'subset', 'focus', 'highlight'])
 function send(request: Request): void {
-  transport.send(JSON.stringify(request))
+  const request_id = `browser-${++requestSerial}`
+  const mutation = sharedMutations.has(request.type) || (request.type === 'cypher' && request.as_graph)
+  if (!mutation) privateRequests.set(request.type, request_id)
+  else pendingSharedRequests.set(request_id, request.type)
+  transport.send(JSON.stringify({...request, request_id, expected: mutation ? shared.stamp : null}))
 }
 
 async function handle(completed: Completed): Promise<void> {
+  const lane = ({'query-table': 'cypher', 'node-detail': 'node-detail', 'property-stats': 'property-stats', preview: 'preview', search: 'search'} as Record<string, string>)[completed.kind]
+  if (lane !== undefined && completed.request_id !== undefined && privateRequests.get(lane) !== completed.request_id) return
   switch (completed.kind) {
     case 'session':
+      shared.begin(completed.value.generation)
+      resyncing = false
       debugState.protocolVersion = completed.value.protocol_version
       debugState.tier = completed.value.tier
       // The path builder says what a run of the size it is previewing will
@@ -696,6 +703,9 @@ async function handle(completed: Completed): Promise<void> {
       break
     case 'meta-graph':
       await showMetaGraph(completed.value)
+      break
+    case 'shared-update':
+      applySharedUpdate(completed.value)
       break
     case 'slice': {
       const { meta, compaction, points, links } = completed.value
@@ -736,7 +746,7 @@ async function handle(completed: Completed): Promise<void> {
         graphScope = 'instances'
         workspace.showInstances()
       }
-      redraw()
+      redraw(undefined, true)
       if (surface !== null && !surface.axes.simulation) surface.framePayload(view)
       // The node set changed, so the layout has new work to do — and *which*
       // work depends on who owns the layout.
@@ -785,13 +795,6 @@ async function handle(completed: Completed): Promise<void> {
       break
     case 'query-table': {
       const table = completed.value
-      if (inFlightValues !== null) {
-        const request = inFlightValues
-        inFlightValues = null
-        absorbValues(table.columns, table.data, request)
-        drainValueRequests()
-        break
-      }
       debugState.queryRows = panels.showQueryTable(table)
       noteTruncation(table.bound.truncated, table.bound.returned, table.bound.total, 'rows')
       renderStatus()
@@ -811,6 +814,7 @@ async function handle(completed: Completed): Promise<void> {
         completed.value,
         captionByType.get(completed.value.node_type) ?? null,
       )
+      if (shared.snapshot !== null) panels.setAppearanceSelection(shared.snapshot.appearance.color_by, shared.snapshot.appearance.size_by)
       debugState.appearanceCandidates = candidates
       debugState.approximateStats = approximate
       break
@@ -831,19 +835,14 @@ async function handle(completed: Completed): Promise<void> {
     case 'layout':
       applyLayout(completed.value)
       break
-    case 'error':
-      // A query failure is the panel's business, not the whole app's: the graph
-      // on screen is still valid and blanking it would lose the user's place.
-      // A failed value fetch must not wedge the queue: the next channel's
-      // answer would otherwise be absorbed as this one's.
-      if (inFlightValues !== null) {
-        inFlightValues = null
-        drainValueRequests()
+    case 'error': {
+      const requestKind = completed.request_id === undefined ? undefined : pendingSharedRequests.get(completed.request_id)
+      if (completed.request_id !== undefined) {
+        pendingSharedRequests.delete(completed.request_id)
+        if (requestKind === undefined && ![...privateRequests.values()].includes(completed.request_id)) break
       }
-      // …and a *layout* refusal belongs under the layout picker, not in the
-      // Cypher card. The wire carries no request id, so the in-flight kernel is
-      // the correlation — the same trick the value queue uses above, and it
-      // is enough because a refusal ends the one request that was outstanding.
+      if (requestKind === 'subset') { filters.error(completed.conflict !== undefined ? `Shared view changed: ${completed.value}. Review and apply again.` : completed.value); break }
+      if (completed.conflict !== undefined) { filters.error(`Shared view changed: ${completed.value}. Review the current filters and apply again.`); break }
       if (pendingLayoutKernel !== null) {
         pendingLayoutKernel = null
         // Put the picker back on the kernel that is actually in force first —
@@ -855,7 +854,131 @@ async function handle(completed: Completed): Promise<void> {
       }
       panels.showQueryError(completed.value)
       break
+    }
   }
+}
+
+function referenceForSlot(slot: number): ViewReference | null {
+  const label = view.label(slot)
+  if (label?.isType === true) return {kind: 'type', name: label.text}
+  return label?.handle ? {kind: 'node', handle: label.handle} : null
+}
+function resolveReference(reference: ViewReference): number | undefined {
+  if (reference.kind === 'node') return view.slotForHandle(reference.handle)
+  return view.liveSlots().find(slot => view.label(slot)?.isType === true && view.label(slot)?.text === reference.name)
+}
+function resolveReferences(references: ViewReference[]): number[] {
+  return references.flatMap(reference => { const slot = resolveReference(reference); return slot === undefined ? [] : [slot] })
+}
+
+/** One complete shared revision replaces membership, subset and encoding before a frame. */
+function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array; links: Float32Array}): void {
+  const previous = shared.snapshot
+  const snapshot = message.meta.snapshot
+  if (lastMeta === null) return
+  if (!shared.accept(snapshot)) {
+    if (shared.needsResync && !resyncing) {
+      resyncing = true
+      transport.close()
+      transport.connect(transportHandlers)
+    }
+    return
+  }
+  const initialShared = !receivedShared
+  receivedShared = true
+  if (message.meta.request_id !== null) pendingSharedRequests.delete(message.meta.request_id)
+  // Clearing or replacing a channel also invalidates reads processed at a newer revision.
+  for (const [key, token] of valueTokens) valueTokens.set(key, token + 1)
+  root.dataset['sharedRevision'] = snapshot.stamp.revision
+  root.dataset['sharedGeneration'] = snapshot.stamp.generation
+  root.dataset['subsetRevision'] = snapshot.subset_revision
+  const firstAdmission = instancesOnScreen() === 0 && snapshot.slice.nodes.length > 0
+  const topology = previous === null || previous.topology_revision !== snapshot.topology_revision
+  const positionHash = fnv1a(message.points)
+  const layoutChanged = previous !== null && (JSON.stringify(previous.layout) !== JSON.stringify(snapshot.layout) || (!topology && sharedPositionHash !== positionHash))
+  sharedPositionHash = positionHash
+  const localSelection = interaction.allSelectedSlots().flatMap(slot => { const reference = referenceForSlot(slot); return reference === null ? [] : [reference] })
+  if (topology) {
+    view.replaceSnapshot(lastMeta, snapshot.slice, message.points, message.links)
+    interaction.setSelected(resolveReferences(localSelection))
+    if (surface !== null) interaction.hover(surface.graph, null)
+    lastPreview = null
+    lastDetail = null
+    panels.clearSelection()
+    const selected = interaction.allSelectedSlots()
+    if (selected.length === 1) send({type: 'preview', slot: selected[0] as number})
+    trackedPointsKey = ''
+  } else if (layoutChanged) view.applyLayout(message.points)
+  const visible = new Set(snapshot.subset.visible_nodes.map(handle => `${handle.generation}:${handle.node_id}`))
+  filterHiddenSlots = new Set(view.liveSlots().filter(slot => {
+    const handle = view.label(slot)?.handle
+    return handle != null && !visible.has(`${handle.generation}:${handle.node_id}`)
+  }))
+  const visibleEdges = new Set(snapshot.subset.visible_edge_ids)
+  sharedHiddenEdges = new Set(view.edges.flatMap((edge, index) => !edge.meta && (edge.edge_id === null || !visibleEdges.has(edge.edge_id)) ? [index] : []))
+  sharedSelected = resolveReferences(snapshot.selected)
+  interaction.setHighlighted(resolveReferences(snapshot.highlighted))
+  const encodingChanged = topology || JSON.stringify(previous?.appearance) !== JSON.stringify(snapshot.appearance)
+  if (encodingChanged) {
+    colorByStat = snapshot.appearance.color_by === null ? null : lastStats.get(snapshot.appearance.color_by) ?? null
+    sizeByName = snapshot.appearance.size_by
+    appearanceValues.clear(); sizeValues.clear()
+    debugState.colorBy = snapshot.appearance.color_by; debugState.sizeBy = sizeByName
+    panels.setAppearanceSelection(snapshot.appearance.color_by, sizeByName)
+  }
+  panels.setCaptionSelection(snapshot.caption_by)
+  const captionChanged = topology || previous?.caption_by !== snapshot.caption_by
+  if (captionChanged) {
+    captionValues.clear()
+    if (snapshot.caption_by !== null || previous?.caption_by !== snapshot.caption_by) {
+      for (const type of instanceTypesOnScreen()) captionByType.set(type, snapshot.caption_by)
+    }
+  }
+  const previousKernel = layoutKernel
+  layoutKernel = snapshot.layout_kernel
+  debugState.layoutKernel = layoutKernel
+  pendingLayoutKernel = null
+  if (surface !== null && previousKernel !== layoutKernel && startupMode !== 'deterministic') {
+    debugState.layoutMode = layoutKernel === 'simulation' ? 'force' : 'static'
+    fitOnSettle = false
+    surface.setAxes(axesFor(debugState.layoutMode))
+  }
+  panels.showLayoutKernel(layoutKernel, layoutKernel, view.liveCount)
+  if (initialShared && instancesOnScreen() > 0) { graphScope = 'instances'; workspace.showInstances() }
+  if (message.meta.mutation_kind !== null) {
+    debugState.lastSliceKind = message.meta.mutation_kind
+    if (message.meta.mutation_kind !== 'collapse' && instancesOnScreen() > 0) { graphScope = 'instances'; workspace.showInstances() }
+    if (message.meta.mutation_kind === 'query') panels.showGraphResult(snapshot.last_slice?.bound.returned ?? snapshot.slice.bound.returned, snapshot.slice.nodes.length)
+  }
+  const bound = snapshot.last_slice?.bound ?? snapshot.slice.bound
+  noteTruncation(bound.truncated, bound.returned, bound.total, 'nodes', snapshot.last_slice?.link_bound ?? snapshot.slice.link_bound)
+  filters.update(snapshot.subset)
+  redraw(layoutChanged || (topology && layoutKernel !== 'simulation') ? 'server' : undefined, topology)
+  if (firstAdmission || (initialShared && instancesOnScreen() > 0) || (layoutChanged && snapshot.layout !== null)) fitVisible()
+  if (message.meta.focus !== null) applyFocus(message.meta.focus)
+  if (topology && layoutKernel === 'simulation') { fitOnSettle = firstAdmission; surface?.reheat() }
+  if (encodingChanged || previous?.stamp.revision !== snapshot.stamp.revision) {
+    if (snapshot.appearance.color_by !== null) {
+      requestValues(snapshot.appearance.color_by, 'color')
+      if (colorByStat === null) refreshSharedColorStat(snapshot.appearance.color_by)
+    }
+    if (sizeByName !== null) requestValues(sizeByName, 'size')
+    for (const [type, property] of captionByType) if (property !== null) requestValues(property, 'caption', type)
+  }
+}
+
+function refreshSharedColorStat(property: string): void {
+  const stamp = shared.stamp
+  const nodeType = instanceTypesOnScreen()[0]
+  if (nodeType === undefined) return
+  void fetch(apiUrl('api/property-stats'), {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({node_type: nodeType})})
+    .then(async response => {
+      if (!response.ok) return
+      const stats = await response.json() as PropertyStatsResponse
+      if (stamp === null || !shared.matches(stamp) || shared.snapshot?.appearance.color_by !== property) return
+      colorByStat = stats.properties.find(stat => stat.name === property) ?? null
+      redraw()
+    }).catch(error => fail(String(error)))
 }
 
 async function showMetaGraph(message: {
@@ -864,18 +987,20 @@ async function showMetaGraph(message: {
   links: Float32Array
 }): Promise<void> {
   lastMeta = message.meta
-  view.setMetaGraph(message.meta, message.points, message.links)
+  if (!receivedShared) view.setMetaGraph(message.meta, message.points, message.links)
   debugState.tier = message.meta.tier
   debugState.protocolVersion = message.meta.protocol_version
   debugState.positionsHash = fnv1a(message.points)
   panels.setNodeTypes(message.meta.nodes.map((node) => node.name))
   workspace.setTypes(message.meta.nodes)
   schema.setMetaGraph(message.meta)
+  filters.setSchema(message.meta.nodes.map(node => node.name), [...new Set(message.meta.edges.map(edge => edge.name))])
   // After `schema.setMetaGraph`, which is where the builder's hop lists come
   // from: filling the start picker first would offer types with no hops behind
   // them.
   pathBuilder.setNodeTypes(message.meta.nodes.map((node) => node.name))
   renderStatus()
+  if (receivedShared) return
 
   if (!rendersGraph(message.meta.tier)) {
     // Tier 4: thousands of type nodes is not a picture of anything. The stats
@@ -892,7 +1017,7 @@ async function showMetaGraph(message: {
       attachHandlers(surface)
     }
     debugState.simRunning = surface.graph.isSimulationRunning
-    redraw()
+    redraw(undefined, true)
     fitVisible()
     markRendererMounted(surface.graph)
     debugState.ready = true
@@ -910,17 +1035,20 @@ async function showMetaGraph(message: {
  * place that talks to the GPU — and so the debug counts can never describe a
  * frame that was not drawn.
  */
-function redraw(authority?: SeedAuthority): void {
+function redraw(authority?: SeedAuthority, topology = false): void {
   if (surface === null) return
   // Before the arrays are compiled, and on every redraw rather than only on a
   // keystroke: the view moves underneath a filter, and slots an expansion just
   // added have never been matched against the terms.
-  recomputeFilter()
   recomputeProjection()
   updateTrackedPoints()
-  surface.upload(view, appearance(), authority)
+  if (topology || authority !== undefined) surface.upload(view, appearance(), authority)
+  else surface.updateAppearance(appearance())
   interaction.apply(surface.graph)
+  const outlined = [...new Set([...interaction.selectedSlots(), ...sharedSelected.filter(slot => !hiddenSlots.has(slot))])]
+  surface.graph.setConfigPartial({outlinedPointIndices: outlined.length > 0 ? outlined : undefined})
   refreshLabelSpecs()
+  surface.graph.render(undefined, 0)
   positionLabels(surface)
   legend.update(legendSections())
   debugState.legendEntries = legend.entryCount
@@ -1028,7 +1156,7 @@ function linkWidths(): Float32Array {
     // A link to a node that is not drawn is a line into empty space. cosmos.gl
     // fades a link whose endpoint is NaN, but a filtered node's position is
     // perfectly valid — it is only invisible — so the width has to say so.
-    if (hiddenSlots.has(source) || hiddenSlots.has(target)) {
+    if (sharedHiddenEdges.has(link) || hiddenSlots.has(source) || hiddenSlots.has(target)) {
       counts[link] = -1
       continue
     }
@@ -1087,33 +1215,16 @@ function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rg
  * heuristic while the user watched.
  */
 function adoptCaption(stats: PropertyStatsResponse): void {
+  if (shared.snapshot?.caption_by != null) {
+    captionByType.set(stats.node_type, shared.snapshot.caption_by)
+    requestValues(shared.snapshot.caption_by, 'caption', stats.node_type)
+    return
+  }
   if (captionByType.has(stats.node_type)) return
   captionByType.set(stats.node_type, stats.caption_candidate)
   if (stats.caption_candidate !== null) {
     requestValues(stats.caption_candidate, 'caption', stats.node_type)
   }
-}
-
-/**
- * Caption this type's nodes by a different property, or by the title again.
- *
- * **No slice is re-sent.** The nodes are already on screen with the identity
- * the server gave them; what changes is the string this client draws over each
- * one, so the fetch is one column of values through the ordinary Cypher path —
- * the same route the colour and size channels take.
- */
-function applyCaptionBy(nodeType: string, property: string | null): void {
-  captionByType.set(nodeType, property)
-  // Drop this type's stored captions before the new ones land, or the labels
-  // would keep the previous property's values until the round trip returns.
-  for (const slot of view.liveSlots()) {
-    if (view.label(slot)?.nodeType === nodeType) captionValues.delete(slot)
-  }
-  if (property === null) {
-    redraw()
-    return
-  }
-  requestValues(property, 'caption', nodeType)
 }
 
 /**
@@ -1127,82 +1238,8 @@ function slotCaption(slot: number): string {
   return captionValues.get(slot) ?? view.label(slot)?.text ?? ''
 }
 
-/**
- * The filter box's terms, and the slots they are hiding (plan E7).
- *
- * Hidden, not removed: the nodes are still loaded, still in the slot space,
- * still what the server believes is on screen. What changes is what this client
- * DRAWS — sizes and colours to nothing, link widths to zero, no label, and the
- * interaction sets projected without them. Tombstoning instead would be a
- * protocol-level operation that destroys edges, triggers compaction, and makes
- * "clear the filter" a re-fetch.
- */
-let filterTerms: FilterTerm[] = []
 let filterHiddenSlots: ReadonlySet<number> = new Set()
 let hiddenSlots: ReadonlySet<number> = new Set()
-
-/**
- * Property values this client has actually fetched, by lower-cased name.
- *
- * The whole of what a filter can match on beyond titles and types — and the
- * reason a term naming anything else is refused rather than served: answering
- * it would mean a query, and a filter that fetches is a search wearing the
- * wrong label (plan E7).
- */
-function loadedPropertyKeys(): Set<string> {
-  const keys = new Set<string>()
-  if (colorByStat !== null) keys.add(colorByStat.name.toLowerCase())
-  if (sizeByName !== null) keys.add(sizeByName.toLowerCase())
-  return keys
-}
-
-/** What one slot offers the matcher, from what this client already holds. */
-function slotFacts(slot: number): SlotFacts {
-  const label = view.label(slot)
-  const values = new Map<string, unknown>()
-  if (colorByStat !== null && appearanceValues.has(slot)) {
-    values.set(colorByStat.name.toLowerCase(), appearanceValues.get(slot))
-  }
-  if (sizeByName !== null && sizeValues.has(slot)) {
-    values.set(sizeByName.toLowerCase(), sizeValues.get(slot))
-  }
-  // The caption, not the stored title: the box hides what does not match, and
-  // what a user matches against is the name they can read on the screen.
-  return { text: slotCaption(slot), nodeType: label?.nodeType ?? null, values }
-}
-
-/**
- * Recompute what the filter hides, and say so.
- *
- * Runs on every keystroke and again on every redraw, because the *view* moves
- * underneath a filter: an expansion brings slots the terms have never been
- * applied to, and leaving them visible would make the box quietly stop meaning
- * what it says.
- */
-function applyFilter(query: string): void {
-  filterTerms = parseFilter(query)
-  recomputeFilter()
-  redraw()
-}
-
-function recomputeFilter(): void {
-  const refused = unknownKeys(filterTerms, loadedPropertyKeys())
-  if (filterTerms.length === 0 || refused.length > 0) {
-    // A refused term hides NOTHING. Applying the terms it could answer would
-    // be filtering on less than the user typed while looking like it worked —
-    // the failure the refusal exists to prevent, arriving one term later.
-    filterHiddenSlots = new Set()
-    panels.showFilterState(null, refused)
-    return
-  }
-  const hidden = new Set<number>()
-  for (const slot of view.liveSlots()) {
-    if (!matches(filterTerms, slotFacts(slot))) hidden.add(slot)
-  }
-  filterHiddenSlots = hidden
-  const projected = presentationSlots()
-  panels.showFilterState(filterLine(projected.filter((slot) => !hidden.has(slot)).length, projected.length), [])
-}
 
 /** Presentation is local and never changes loaded membership or the active filter. */
 function recomputeProjection(): void {
@@ -1395,6 +1432,8 @@ function attachHandlers(current: Surface): void {
 function applyInteraction(): void {
   if (surface === null) return
   interaction.apply(surface.graph)
+  const outlined = [...new Set([...interaction.selectedSlots(), ...sharedSelected.filter(slot => !hiddenSlots.has(slot))])]
+  surface.graph.setConfigPartial({outlinedPointIndices: outlined.length > 0 ? outlined : undefined})
   labels.setPinned(interaction.selectedSlots())
   updateTrackedPoints()
   surface.graph.render(undefined, 0)
@@ -1526,6 +1565,7 @@ function syncCounts(): void {
     hiddenSelected: selected.filter((slot) => hiddenSlots.has(slot)).length,
     types: view.liveCount - instances.length,
     hasSelection: interaction.allSelectedSlots().length > 0,
+    canFocus: surface !== null && interaction.selectedSlots().length > 0,
   })
   debugState.truncation =
     truncation === null
@@ -1574,6 +1614,8 @@ function noteTruncation(
 function showSummaryPanel(meta: MetaGraphMeta): void {
   const panel = document.createElement('div')
   panel.className = 'kglv-panel'
+  panel.dataset['testid'] = 'schema-summary'
+  panel.style.pointerEvents = 'none'
   const inner = document.createElement('div')
   inner.className = 'kglv-panel-inner'
   const heading = document.createElement('h1')
@@ -1595,77 +1637,52 @@ function showSummaryPanel(meta: MetaGraphMeta): void {
   }
   inner.appendChild(list)
   panel.appendChild(inner)
-  root.appendChild(panel)
+  workspace.graphHost.appendChild(panel)
 }
 
-/**
- * Fetch the per-node values a display channel needs.
- *
- * Through the ordinary Cypher path, over the ids currently on screen — the
- * statistics say what a property *looks like* across the type, and colouring,
- * sizing or captioning needs each node's own value. Bounded because the id list
- * is bounded: nothing on screen got there except through a bounded response.
- *
- * `ofType` narrows it to one type's nodes, which is what the caption channel
- * wants: a caption is a per-type decision, and asking every node on screen for
- * `n.wlbWellboreName` would spend the round trip on the nodes that have no such
- * property.
- */
-function requestValues(
-  property: string,
-  channel: 'color' | 'size' | 'caption',
-  ofType: string | null = null,
-): void {
-  const ids: number[] = []
-  for (const slot of view.liveSlots()) {
+/** Handle-based field reads preserve exact source keys and never use Cypher identity guesses. */
+function requestValues(property: string, channel: 'color' | 'size' | 'caption', ofType: string | null = null): void {
+  const key = `${channel}:${ofType ?? '*'}`
+  const token = (valueTokens.get(key) ?? 0) + 1
+  valueTokens.set(key, token)
+  const handles = view.liveSlots().flatMap(slot => {
     const label = view.label(slot)
-    if (label?.nodeId == null) continue
-    if (ofType !== null && label.nodeType !== ofType) continue
-    ids.push(label.nodeId)
-  }
-  if (ids.length === 0) {
-    redraw()
-    return
-  }
-  pendingValues.push({ channel, property, ids })
-  drainValueRequests()
-}
-
-/** Send the next fetch, if nothing is already out. */
-function drainValueRequests(): void {
-  if (inFlightValues !== null) return
-  const next = pendingValues.shift()
-  if (next === undefined) return
-  inFlightValues = next
-  send({
-    type: 'cypher',
-    query: `MATCH (n) WHERE id(n) IN $ids RETURN id(n) AS id, n.${next.property} AS value`,
-    params: { ids: next.ids },
-    limit: null,
-    as_graph: false,
+    return label?.handle !== null && label?.handle !== undefined && (ofType === null || label.nodeType === ofType) ? [label.handle] : []
   })
+  const stamp = shared.stamp
+  void (async () => {
+    let offset: number | null = 0
+    while (offset !== null && handles.length > 0) {
+      const response = await fetch(apiUrl('api/records'), {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({handles, fields: [property], offset, limit: 500})})
+      if (!response.ok) throw new Error(`Field read refused (${response.status})`)
+      const table = await response.json() as RecordTable
+      if (valueTokens.get(key) !== token || (stamp !== null && !shared.matches(table.stamp))) return
+      for (const row of table.rows) {
+        const slot = view.slotForHandle(row.handle)
+        if (slot === undefined) continue
+        const value = cellScalar(row.cells[0])
+        if (channel === 'color') appearanceValues.set(slot, value)
+        else if (channel === 'size' && value !== null && (typeof value === 'number' || typeof value === 'string')) {
+          const number = Number(value)
+          if (Number.isFinite(number)) sizeValues.set(slot, number)
+        }
+        else if (channel === 'caption' && typeof value === 'string' && value !== '') captionValues.set(slot, value)
+      }
+      offset = table.next_offset
+    }
+    if (valueTokens.get(key) === token) redraw()
+  })().catch(error => { if (valueTokens.get(key) === token) fail(String(error)) })
 }
 
-function absorbValues(columns: string[], data: unknown[][], request: ValueRequest): void {
-  const idColumn = data[columns.indexOf('id')] ?? []
-  const valueColumn = data[columns.indexOf('value')] ?? []
-  for (const [row, rawId] of idColumn.entries()) {
-    const slot = view.slotForNode(Number(rawId))
-    if (slot === undefined) continue
-    const value = valueColumn[row]
-    if (request.channel === 'color') {
-      appearanceValues.set(slot, value)
-    } else if (request.channel === 'size') {
-      const numeric = Number(value)
-      if (Number.isFinite(numeric)) sizeValues.set(slot, numeric)
-    } else if (typeof value === 'string' && value !== '') {
-      // An empty or absent caption is left out rather than stored: the label
-      // then falls back to the title, which is a real name, where a blank chip
-      // would be a node the user cannot address at all.
-      captionValues.set(slot, value)
-    }
+function cellScalar(cell: RecordCell | undefined): unknown {
+  if (cell?.state !== 'value') return null
+  const value = cell.value
+  if (value.type === 'null') return null
+  if (value.type === 'int64' || value.type === 'unique-id') {
+    const number = Number(value.value)
+    return Number.isSafeInteger(number) ? number : value.value
   }
-  redraw()
+  return value.value
 }
 
 function fail(message: string): void {

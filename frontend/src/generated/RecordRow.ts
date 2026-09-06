@@ -2,4 +2,4 @@
 import type { NodeHandle } from "./NodeHandle";
 import type { RecordCell } from "./RecordCell";
 
-export type RecordRow = { handle: NodeHandle, slot: number | null, cells: Array<RecordCell>, };
+export type RecordRow = { handle: NodeHandle, slot: number | null, visible: boolean, cells: Array<RecordCell>, };

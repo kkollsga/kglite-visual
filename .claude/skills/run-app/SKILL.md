@@ -119,16 +119,14 @@ relationship type, carrying kglite's "did you mean?"). `line`/`col` are
 1-indexed and `null` when the finding is about the whole query. It moves
 nothing and broadcasts nothing.
 
-**`/api/layout` is the one endpoint that changes what the picture LOOKS like
-without changing what is in it.** `{"kernel": "auto"|"radial"|"islands"|
+**`/api/layout` changes the arrangement without changing membership.** `{"kernel": "auto"|"radial"|"islands"|
 "force"|"simulation", "seed_slot": n}`. It allocates no slot, tombstones
 nothing and touches no link; it computes an arrangement server-side and
 broadcasts it to every attached browser, which then holds it still — the
 simulation stops and dragging is disabled. `"simulation"` hands the layout
 back to the viewer's GPU. The answer names `kernel_chosen`, which can differ
 from what was asked: `islands` over a graph with no community structure
-falls back to `force` and says so. `"geo"` is in the vocabulary and refused,
-by name, until the geo kernel lands.
+falls back to `force` and says so. `"geo"` places coordinate-bearing nodes geographically and reports nodes without coordinates.
 
 Saved queries live in a file store keyed by the graph's absolute path
 (`$KGLITE_VISUAL_CONFIG_DIR` overrides the config dir). Every face reads the
@@ -216,10 +214,11 @@ neither.
 ## 3c. Drive the live view over MCP
 
 The running server speaks MCP at the `mcp` URL its stdout line printed —
-streamable HTTP, no second process, no discovery file. Thirteen tools:
-`view_state`, `show_cypher`, `expand`, `collapse`, `highlight`, `focus`,
-`set_appearance`, `set_layout`, `reset_view`, `render`,
-`list_saved_queries`, `run_saved_query`, `export_view`.
+streamable HTTP, no second process, no discovery file. Eighteen tools:
+`view_state`, `show_cypher`, `browse_type`, `load_nodes`, `records`, `expand`,
+`collapse`, `highlight`, `focus`, `set_appearance`, `set_subset`, `set_caption`,
+`set_layout`, `reset_view`, `render`, `list_saved_queries`, `run_saved_query`,
+`export_view`.
 
 `export_view` is the one that hands something back rather than moving the
 screen: it writes the nodes currently in the view as GraphML / GEXF / CSV /
@@ -240,10 +239,12 @@ Responses default to `text/event-stream`; the JSON-RPC payload is the last
 `data:` line. Errors an agent can act on come back as `isError: true` with
 kglite's own message — quote it, don't summarise it.
 
-**The view is shared, and it is last-writer-wins.** Anything that changes it
-is pushed to every attached browser, whoever asked. `view_state` is the
-server-side `window.__kglv`; re-read it rather than assuming your last call
-still describes the screen.
+**Shared changes are ordered and acknowledged.** Pass the generation/revision
+`expected` stamp from `view_state` to refuse stale actions. Legacy callers may
+omit it, but concurrently prepared stale work still refuses at commit. A
+conflict leaves the view untouched. Each accepted mutation is pushed to every
+attached browser; reconnects receive a coherent snapshot. Ordinary selection,
+hover and camera movement remain local.
 
 **Whether the user's geometry is knowable depends on
 `view_state.layout_kernel`** (protocol v4). While it reads `simulation` —
@@ -317,7 +318,7 @@ already in memory.
   hoveredSlot, emphasizedCount, highlightedCount, selectedCount,
   previewRows, queryRows, searchHits, legendEntries, exportNodes,
   filteredOut, namedSlots, appearanceCandidates, approximateStats, error}`. `pointCount` is *live*
-  points **and excludes whatever the client-side filter is hiding** —
+  points **and excludes instances hidden by the acknowledged subset or local schema projection** —
   `filteredOut` is that count, and the two together are the honest pair.
   `slotCount` includes tombstones. **`namedSlots` is the second honest
   pair**, with `slotCount`: a client holds a position for every slot it was

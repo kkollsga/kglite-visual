@@ -144,3 +144,12 @@
   .kglv-drawer { width: min(340px, 100%); }
   .kglv-graph-host .kglv-legend, .kglv-graph-host .kglv-export { bottom: 63px; }
 }
+
+.kglv-filter-form { display: grid; gap: 10px; }
+.kglv-filter-form [hidden] { display: none; }
+.kglv-filter-form select[multiple] { min-height: 96px; }
+.kglv-filter-form label { display: flex; gap: 8px; align-items: center; }
+.kglv-filter-form input[type=checkbox] { width: auto; }
+[data-testid=subset-active] .kglv-row { margin: 10px 0; align-items: center; }
+[data-testid=subset-active] span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+[data-testid=subset-distributions] { font-size: 12px; overflow-wrap: anywhere; }

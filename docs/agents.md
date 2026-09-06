@@ -164,7 +164,7 @@ mcp set_layout '{"kernel":"geo"}'
 Errors an agent can act on come back as `isError: true` with kglite's own
 message. Quote it; do not summarise it.
 
-## The sixteen tools
+## The eighteen tools
 
 The shared-view tools load, inspect, arrange and export a bounded exploration.
 `records` reads typed fields without changing that view. Saved-query tools use
@@ -182,6 +182,8 @@ the visualizer's own query store.
 | `highlight` | Make things stand out. Name `slots`, or give a `search` string and let the server find them — hits already loaded are marked, hits that are not are counted back. `concept` is `highlighted` (a result set) or `selected` (the one thing you are talking about) |
 | `focus` | Zoom the human's camera to frame these slots — the honest way to say "look at this". An empty list frames the whole view. Changes nothing about what is loaded |
 | `set_appearance` | Drive `color_by` / `size_by` from node properties. Omitting a field clears that channel back to the structural encoding |
+| `set_subset` | Set enabled type, category, numeric-range, missing-value, relation and isolate predicates over loaded instances; all clients receive the same visible subset |
+| `set_caption` | Set the shared caption property, or clear it back to the display title |
 | `set_layout` | Re-arrange the view with a layout computed **here**, and hold it still. See [what an agent may claim](#what-an-agent-may-claim) |
 | `reset_view` | Collapse everything back to the entry screen. Destructive to the human's place in the graph — prefer `collapse` on what *you* added |
 | `render` | Draw an image. `target: live-view` (default), `meta` or `cypher`. Geometry differs from their screen — always |
@@ -191,10 +193,17 @@ the visualizer's own query store.
 
 ### The shared-view model
 
-**One view, two callers, last writer wins.** The human and the agent are
-collaborators on one slot space, not two tenants of two. Anything either of
-them changes is broadcast to both, and neither is *notified* that the other did
-something — they see it.
+**One shared view with ordered, acknowledged changes.** Membership, filters,
+appearance, captions and explicit agent steering use one revision stream. Pass
+`expected: {generation, revision}` from `view_state` to reject a change prepared
+against an older view. A conflict leaves the current state untouched; read the
+new view before deciding how to proceed. Legacy callers may omit `expected`,
+but stale work prepared concurrently still refuses at commit.
+
+Ordinary inspection selection, hover, panel navigation and camera movement
+remain local to each browser. Explicit agent highlight and focus commands are
+shared. Reconnecting restores one coherent snapshot of membership, filters,
+appearance and static layout; it does not replay an old camera command.
 
 The consequences for an agent are concrete:
 
@@ -300,7 +309,7 @@ Claude in Chrome, a console). Readiness is `window.__kglv.ready === true` —
 static.
 
 ```json
-{"protocolVersion":4,"tier":"compact","layoutMode":"force","layoutKernel":"simulation",
+{"protocolVersion":6,"tier":"compact","layoutMode":"force","layoutKernel":"simulation",
  "pointCount":98,"linkCount":124,"slotCount":98,"tombstoneCount":0,"namedSlots":98,
  "ready":true,"simRunning":true,"lastMessageSeq":2,"positionsHash":"80499c25",
  "deviceFeatures":{"webgl2":true,"float32Renderable":true,"textureBlendFloat":true},

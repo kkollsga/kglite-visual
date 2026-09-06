@@ -11,6 +11,28 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Added
+
+- Explore, Data and Query destinations keep the graph mounted and preserve local
+  selection and camera context. Types can be browsed directly, including types
+  with no relationships; schema navigation preserves the loaded exploration.
+- Bounded direct record access uses generation-scoped handles and lossless typed
+  values. Integer IDs, null keys, duplicate keys and parallel relationships retain
+  their identities through selection and view compaction.
+- Shared visual filters narrow the loaded instances by type, category, numeric
+  range, missing values, relationship type and isolation, with separate loaded
+  and visible counts. Appearance and captions survive reconnects.
+
+### Changed
+
+- Shared HTTP, WebSocket and MCP mutations commit and publish in one order.
+  Optional expected revisions reject stale actions without changing the view;
+  reconnects receive an atomic snapshot. Protocol 6 carries these snapshots
+  alongside typed-array topology and positions.
+- Cumulative explorations refuse additions above 5,000 instance nodes, 20,000
+  relationships or 2 MiB of membership/topology, without partially applying them.
+
+
 ## [0.1.7] - 2026-09-03
 
 ### Changed

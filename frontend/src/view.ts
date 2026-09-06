@@ -16,6 +16,8 @@
  *   that guessed slots had moved would re-label whatever the user has selected.
  */
 
+import type { NodeHandle } from './generated/NodeHandle'
+import type { ViewEdge } from './generated/ViewEdge'
 import type { Compaction } from './generated/Compaction'
 import type { GraphSliceMeta } from './generated/GraphSliceMeta'
 import type { MetaGraphMeta } from './generated/MetaGraphMeta'
@@ -40,6 +42,7 @@ export type SlotLabel = {
    */
   supporting: boolean
   /** kglite node id, for an instance node. */
+  handle: NodeHandle | null
   nodeId: number | null
   /**
    * The node's `id` **field** — what Cypher's `id(n)` evaluates to.
@@ -65,6 +68,7 @@ export class SlotView {
   positions = new Float32Array(0)
   /** `[src0, tgt0, …]` slot indices, always the whole set (D4). */
   links = new Float32Array(0)
+  edges: ViewEdge[] = []
 
   private readonly labels = new Map<number, SlotLabel>()
   private readonly slotOfNode = new Map<number, number>()
@@ -148,6 +152,7 @@ export class SlotView {
         weight: node.count,
         isType: true,
         supporting: node.supporting,
+        handle: null,
         nodeId: null,
         nodeKey: null,
         nodeType: node.name,
@@ -185,6 +190,7 @@ export class SlotView {
         weight: 1,
         isType: false,
         supporting: false,
+        handle: node.handle,
         nodeId: node.node_id,
         nodeKey: node.key ?? null,
         nodeType: node.node_type,
@@ -216,6 +222,18 @@ export class SlotView {
       this.applyRemap(compaction.old_to_new)
     }
     this.links = new Float32Array(links)
+    this.edges = meta.edges
+  }
+
+  slotForHandle(handle: NodeHandle): number | undefined {
+    const slot = this.slotOfNode.get(handle.node_id)
+    return slot !== undefined && this.labels.get(slot)?.handle?.generation === handle.generation ? slot : undefined
+  }
+
+  /** Replace a full shared snapshot; its slots are already compacted. */
+  replaceSnapshot(meta: MetaGraphMeta, slice: GraphSliceMeta, points: Float32Array, links: Float32Array): void {
+    this.setMetaGraph(meta, points, links)
+    this.applySlice(slice, null, points, links)
   }
 
   /**

@@ -1,41 +1,22 @@
-//! The WebSocket endpoint — the binary protocol's first transport.
-//!
-//! Everything about the *messages* lives in core; this file only moves bytes.
-//! That is the transport-agnostic rule in practice: if this file ever decides
-//! what a frame contains, the Python wheel and a desktop shell will each have
-//! to decide it again, differently.
-//!
-//! **A socket is two directions now.** It answers what this client asked for,
-//! and it carries what *anything* did to the shared view — an agent's MCP call,
-//! a `curl`, another tab. See [`crate::broadcast`] for who receives what and
-//! why the initiating socket deliberately does not get a private copy of its
-//! own slice.
-//!
-//! **A socket also opens onto a session in progress.** The greeting is
-//! therefore three things, not two: who this server is, the entry screen, and
-//! the view as it stands right now ([`resync_frames`]). A client that was told
-//! only the first two would be assuming the session had not moved since it
-//! opened, which is exactly what a second browser cannot assume.
+//! Binary requests and ordered shared events over WebSocket.
+//! Attachment captures the greeting and receiver together under the dispatch gate.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
-use kglite_visual_core::session::{error_frames, response_frames};
-// Aliased: `axum::response::Response` is already in scope here, and the two
-// mean very different things — an HTTP response, and one answer from core.
-use kglite_visual_core::Request;
-use kglite_visual_core::Response as CoreResponse;
+use kglite_visual_core::session::error_frames;
+use kglite_visual_core::shared::SharedRequest;
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::broadcast::{AppState, Update};
+use crate::broadcast::{AppState, DispatchError, Update};
 
 /// Outbound buffer ceiling, in bytes.
 ///
 /// axum's default is unbounded: a client that stops reading (a background tab,
 /// a paused debugger) makes the server buffer every frame it produces until
-/// the process dies of memory exhaustion. Four chunks' worth is enough that a
+/// the process dies of memory exhaustion. Two bounded events' worth is enough that a
 /// healthy client never notices back-pressure and a stalled one is disconnected
 /// instead of accumulated.
 ///
@@ -45,7 +26,7 @@ use crate::broadcast::{AppState, Update};
 /// may hold. Broadcast made both load-bearing: before it, a client only ever
 /// received what it had asked for, so it could not fall behind without being
 /// idle.
-const MAX_WRITE_BUFFER_BYTES: usize = 4 * kglite_visual_core::protocol::CHUNK_TARGET_BYTES;
+const MAX_WRITE_BUFFER_BYTES: usize = 2 * kglite_visual_core::shared::MAX_SHARED_EVENT_BYTES;
 
 pub async fn upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws
@@ -79,31 +60,15 @@ async fn send_all(sink: &mut Sink, frames: &[Vec<u8>]) -> bool {
 async fn serve(socket: WebSocket, state: AppState) {
     let (mut sink, mut stream) = socket.split();
 
-    // Subscribe BEFORE the opening messages go out. A slice published between
-    // "the meta-graph was serialized" and "the subscription exists" would be
-    // lost, and the client would draw a view one expansion out of date with no
-    // way to know it — the exact silent divergence this whole module fixes.
-    let mut updates = state.bus.subscribe();
-
-    // Session info first, then the meta-graph: a client that cannot decode
-    // this server's protocol version learns it from the smallest possible
-    // message rather than after buffering an entire meta-graph.
-    //
-    // …and then the view as it stands. The meta-graph is where a session
-    // *starts*, and a client attaching to one that has been drilled into would
-    // otherwise assume that start is the present — see `Session::sync_slice`
-    // for what that assumption cost. Sent unconditionally rather than only when
-    // the view has moved: a sync over an untouched session is the meta-graph's
-    // own slot space restated, which costs one small frame and removes the
-    // branch that would have to decide correctly what "has moved" means.
-    for frames in [
-        state.session.session_info_frames(),
-        state.session.meta_graph_frames(),
-        resync_frames(&state).await,
-    ] {
-        if !send_all(&mut sink, &frames).await {
+    let (mut updates, frames) = match state.attach().await {
+        Ok(attached) => attached,
+        Err(error) => {
+            send_all(&mut sink, &dispatch_error_frames(error, None)).await;
             return;
         }
+    };
+    if !send_all(&mut sink, &frames).await {
+        return;
     }
 
     loop {
@@ -122,40 +87,6 @@ async fn serve(socket: WebSocket, state: AppState) {
                     return;
                 }
             }
-        }
-    }
-}
-
-/// The session's current state, for the socket that has just opened.
-///
-/// Two frames' worth, and the pair is the point: `sync_slice` says what is in
-/// the view, and the remembered layout says where — a client that got the first
-/// without the second would draw the right nodes under its own simulation while
-/// every other client holds a static arrangement this server computed.
-///
-/// **Addressed to this socket, not published.** Every other client already has
-/// all of it.
-async fn resync_frames(state: &AppState) -> Vec<Vec<u8>> {
-    let session = std::sync::Arc::clone(&state.session);
-    // A walk of the slot space, not of the graph — but it allocates a position
-    // array and the whole link list, and this runs on the reactor that is
-    // feeding every other socket.
-    match tokio::task::spawn_blocking(move || {
-        let mut frames = response_frames(&CoreResponse::Slice(session.sync_slice()));
-        if let Some(layout) = session.last_layout() {
-            frames.extend(response_frames(&CoreResponse::Layout(layout)));
-        }
-        frames
-    })
-    .await
-    {
-        Ok(frames) => frames,
-        Err(err) => {
-            eprintln!("kglite-visual: resync task failed: {err}");
-            error_frames(
-                "the server could not describe the current view to this client; \
-                 reload the page to try again",
-            )
         }
     }
 }
@@ -181,13 +112,8 @@ async fn handle_incoming(state: &AppState, sink: &mut Sink, message: Message) ->
 async fn handle_update(sink: &mut Sink, update: Result<Update, RecvError>) -> bool {
     match update {
         Ok(frames) => send_all(sink, &frames).await,
-        // The slow-client policy, stated in `broadcast.rs`: a client that
-        // missed `missed` view updates cannot be caught up by the ones still
-        // in the channel — it lost a `first_slot`, or a compaction remap, and
-        // every index it holds afterwards may name a different node. It is
-        // told, in the same in-band error channel every other failure uses,
-        // and then closed. Reconnecting yields a correct view; continuing does
-        // not.
+        // Durable state can be resnapshotted, but a missed focus command
+        // cannot be replayed. Make the gap explicit before disconnecting.
         Err(RecvError::Lagged(missed)) => {
             let frames = error_frames(format!(
                 "this view moved {missed} update(s) ahead of this client and the \
@@ -211,26 +137,94 @@ async fn handle_update(sink: &mut Sink, update: Result<Update, RecvError>) -> bo
 /// Returns the frames for **this** socket only. A view-mutating answer returns
 /// none, because it has already gone to every subscriber — this one included.
 async fn answer(state: &AppState, text: &str) -> Vec<Vec<u8>> {
-    let request: Request = match serde_json::from_str(text) {
+    let request: SharedRequest = match serde_json::from_str(text) {
         Ok(request) => request,
-        // The parse error names the offending field and offset, and it is the
-        // only thing that can tell a client its message shape is wrong.
         Err(err) => return error_frames(format!("could not read that request: {err}")),
     };
+    let request_id = request.request_id.clone().filter(|id| id.len() <= 128);
+    match state.execute(request).await {
+        Ok(execution) if execution.published => Vec::new(),
+        Ok(execution) => private_frames(&execution.response, execution.request_id.as_deref()),
+        Err(error) => dispatch_error_frames(error, request_id),
+    }
+}
 
-    let session = std::sync::Arc::clone(&state.session);
-    match tokio::task::spawn_blocking(move || session.handle(&request)).await {
-        Ok(Ok(response)) => {
-            if state.bus.publish_if_view_mutating(&response) {
-                Vec::new()
-            } else {
-                response_frames(&response)
-            }
+fn private_frames(
+    response: &kglite_visual_core::Response,
+    request_id: Option<&str>,
+) -> Vec<Vec<u8>> {
+    use kglite_visual_core::{MessageType, Response, ResponseEncoder};
+    let message_type = match response {
+        Response::Query(_) => MessageType::QueryTable,
+        Response::Records(_) => MessageType::Records,
+        Response::Preview(_) => MessageType::ExpansionPreview,
+        Response::NodeDetail(_) => MessageType::NodeDetail,
+        Response::Search(_) => MessageType::SearchResult,
+        Response::PropertyStats(_) => MessageType::PropertyStats,
+        Response::Slice(_) | Response::Layout(_) | Response::Shared(_) => {
+            return error_frames("a shared response escaped the ordered publication path");
         }
-        Ok(Err(err)) => error_frames(err.to_string()),
-        Err(err) => {
-            eprintln!("kglite-visual: request task failed: {err}");
-            error_frames("the server failed while answering that request")
+    };
+    #[derive(serde::Serialize)]
+    struct Correlated<'a> {
+        #[serde(flatten)]
+        response: &'a Response,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<&'a str>,
+    }
+    let payload = serde_json::to_string(&Correlated {
+        response,
+        request_id,
+    })
+    .expect("private replies contain serializable records");
+    let mut encoder = ResponseEncoder::new();
+    encoder.push_json(message_type, &payload);
+    encoder.finish()
+}
+
+fn dispatch_error_frames(error: DispatchError, request_id: Option<String>) -> Vec<Vec<u8>> {
+    use kglite_visual_core::protocol::{MessageType, ResponseEncoder};
+    let mut payload = match error {
+        DispatchError::Core(kglite_visual_core::CoreError::Conflict(conflict)) => {
+            serde_json::json!(conflict)
         }
+        DispatchError::Core(error) => serde_json::json!({"message": error.to_string()}),
+        DispatchError::Task(message) => serde_json::json!({"message": message}),
+    };
+    if let Some(request_id) = request_id {
+        payload["request_id"] = request_id.into();
+    }
+    let mut encoder = ResponseEncoder::new();
+    encoder.push_json(MessageType::Error, &payload.to_string());
+    encoder.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_records_echo_correlation_without_changing_record_identity() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../kglite-visual-core/tests/fixtures/meta.kgl");
+        let graph = kglite_visual_core::load_graph(kglite_visual_core::GraphSource::Path(&fixture))
+            .unwrap();
+        let session = kglite_visual_core::Session::open(graph, "correlation-test");
+        let request = serde_json::from_value(
+            serde_json::json!({"type":"records","handles":[],"fields":["id"]}),
+        )
+        .unwrap();
+        let response = session.handle(&request).unwrap();
+        let frames = private_frames(&response, Some("records-7"));
+        assert_eq!(frames.len(), 1);
+        let decoded = kglite_visual_core::decode_frame(&frames[0]).unwrap();
+        assert_eq!(decoded.msg_type, kglite_visual_core::MessageType::Records);
+        assert!(decoded.terminal);
+        let mut body: serde_json::Value = serde_json::from_slice(&decoded.payload).unwrap();
+        assert_eq!(
+            body.as_object_mut().unwrap().remove("request_id").unwrap(),
+            "records-7"
+        );
+        assert_eq!(body, serde_json::json!(response));
     }
 }

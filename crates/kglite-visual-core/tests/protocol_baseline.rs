@@ -34,6 +34,9 @@
 //! source handles, typed keys and relationship identity accompany the upgrade.
 //! Canonical record frames use a fixed generation, never a random session value.
 //!
+//! **v5 -> v6:** SharedUpdate adds an atomic snapshot/subset/steering envelope
+//! and generation-scoped revision acknowledgement. Canonical stamps are fixed.
+//!
 //! **Both are exact baselines, so both fail the moment "make it pass" is
 //! cheaper than "explain the diff"** (CLAUDE.md → "Gate honesty"). A red
 //! baseline after a deliberate protocol change is a conscious decision:
@@ -204,6 +207,13 @@ fn generate_framing_golden() {
                 MessageType::Records,
                 r#"{"generation":"fixture-generation","rows":[]}"#,
             );
+            enc.finish()
+        }),
+        ("shared-update", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(MessageType::SharedUpdate, r#"{"snapshot":{"stamp":{"generation":"fixture-generation","revision":"1"}},"request_id":"fixture-request","focus":null,"mutation_kind":"query"}"#);
+            enc.push_f32(MessageType::Points, &[1.0, 2.0]);
+            enc.push_f32(MessageType::Links, &[]);
             enc.finish()
         }),
     ];

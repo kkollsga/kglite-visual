@@ -33,7 +33,7 @@ fn query(text: &str) -> Request {
 
 #[test]
 fn direct_records_keep_large_keys_zero_false_empty_missing_and_null() {
-    let session = build_session("CREATE (:P {id: 9007199254740993, title: 'A', score: 0, flag: false, empty: ''}) CREATE (:Q {id:9007199254740993}) CREATE (:P {id:9007199254740993, title:'duplicate'}) CREATE (:P {title:'keyless'})");
+    let session = build_session("CREATE (:P {id: 9007199254740993, title: 'A', score: 0, flag: false, empty: ''}) CREATE (:Q {id:9007199254740993}) CREATE (:P {id:9007199254740993, title:'duplicate'}) CREATE (:P {id:null,title:'null-key'})");
     let slice = session
         .browse_type(&BrowseTypeRequest {
             node_type: "P".into(),
@@ -82,6 +82,32 @@ fn direct_records_keep_large_keys_zero_false_empty_missing_and_null() {
     );
     assert_eq!(records::cell(&Value::Null), RecordCell::Null);
     assert_eq!(slice.meta.nodes.len(), 3);
+    let null_key = slice
+        .meta
+        .nodes
+        .iter()
+        .find(|node| node.title == "null-key")
+        .unwrap();
+    assert_eq!(null_key.typed_key, RecordCell::Null);
+    assert!(null_key.key.is_none());
+    let null_record = session
+        .records(&RecordsRequest {
+            handles: vec![null_key.handle.clone()],
+            fields: vec!["id".into()],
+            offset: 0,
+            limit: 1,
+        })
+        .unwrap();
+    assert_eq!(null_record.rows[0].cells, vec![RecordCell::Null]);
+    session.reset().unwrap();
+    let reloaded = session
+        .load_nodes(&LoadNodesRequest {
+            handles: vec![null_key.handle.clone()],
+        })
+        .unwrap();
+    assert_eq!(reloaded.meta.nodes.len(), 1);
+    assert_eq!(reloaded.meta.nodes[0].title, "null-key");
+
     assert!(
         slice
             .meta

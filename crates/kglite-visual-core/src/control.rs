@@ -1,23 +1,8 @@
 //! Messages that steer a view without changing what is in it (plan D14).
 //!
-//! Everything else on the wire answers a question about the graph. These three
-//! answer a different one — *where should the user be looking* — and they exist
-//! because P10 gave the view a second driver. A human already has a mouse for
-//! all three; an agent asking "show them this" had no vocabulary at all.
-//!
-//! **They are commands, and they are broadcast.** Unlike a slice, they carry no
-//! slot-space change: nothing is appended, nothing is tombstoned, and a client
-//! that missed one is *stale*, not wrong. That is why they are separate message
-//! types rather than fields on [`crate::view::GraphSliceMeta`] — an agent
-//! highlighting a search result must not have to send an empty slice to do it,
-//! and a slice must not silently move the camera.
-//!
-//! **Why three and not two.** The design named `focus` as the one message the
-//! tool surface still needed. `set_appearance` turned out to need one too: the
-//! colour-by / size-by choice lives entirely in the client (compiled getters
-//! over values it fetched itself), so the server has no representation of it to
-//! push and no way to reach it without a message of its own. Bundling it into
-//! `Highlight` would have made one message mean two unrelated things.
+//! These payloads retain the legacy command vocabulary. Shared session actions
+//! now persist appearance and explicit highlight identities in one revisioned
+//! snapshot; focus is an ordered event and is not replayed on attachment.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -139,14 +124,16 @@ pub fn control_frames(command: &Command) -> Vec<Vec<u8>> {
 /// [`crate::request`] gives: these are things a caller *writes*, and
 /// `protocol_version` is the server's to stamp. A caller who could set it could
 /// tell every attached client it was speaking a version it is not.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct FocusRequest {
     /// Slots to frame. Empty frames the whole view.
     #[serde(default)]
     pub slots: Vec<u32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct HighlightRequest {
     /// Slots to mark. Empty clears the concept.
     #[serde(default)]
@@ -155,7 +142,8 @@ pub struct HighlightRequest {
     pub concept: HighlightConcept,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct AppearanceRequest {
     /// Property driving the colour channel, or `null` to clear it.
     #[serde(default)]

@@ -51,20 +51,20 @@ test('a socket that connects after an expansion is handed the whole view', async
     // The greeting's third message is the whole view: from slot zero, every
     // live instance named, positions for the entire space.
     const sync = await late.waitFor(
-      (done) => done.kind === 'slice' && done.value.meta.kind === 'sync',
+      (done) => done.kind === 'shared-update' && done.value.meta.mutation_kind === null,
     )
-    if (sync.kind !== 'slice') throw new Error('unreachable')
-    expect(sync.value.meta.kind).toBe('sync')
-    expect(sync.value.meta.first_slot).toBe(0)
-    expect(sync.value.meta.slot_count).toBe(META_POINTS + KNOWS_REACHABLE)
-    expect(sync.value.meta.nodes).toHaveLength(KNOWS_REACHABLE)
+    if (sync.kind !== 'shared-update') throw new Error('unreachable')
+    expect(sync.value.meta.snapshot.slice.kind).toBe('sync')
+    expect(sync.value.meta.snapshot.slice.first_slot).toBe(0)
+    expect(sync.value.meta.snapshot.slice.slot_count).toBe(META_POINTS + KNOWS_REACHABLE)
+    expect(sync.value.meta.snapshot.slice.nodes).toHaveLength(KNOWS_REACHABLE)
     // Positions for the *whole* space, meta-graph slots included — a range
     // starting at `first_slot` is what the newcomer cannot splice into an
     // array it does not have.
     expect(sync.value.points.length).toBe((META_POINTS + KNOWS_REACHABLE) * 2)
     expect(sync.value.links.length).toBeGreaterThan(0)
     // Every instance the session holds is named, so nothing draws anonymously.
-    for (const node of sync.value.meta.nodes) {
+    for (const node of sync.value.meta.snapshot.slice.nodes) {
       expect(node.title, `slot ${node.slot} arrived unnamed`).not.toBe('')
     }
 

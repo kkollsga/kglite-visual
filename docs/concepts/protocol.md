@@ -13,11 +13,17 @@ headless renderer are three consumers of it.
 
 ## The version number
 
-Every response carries `protocol_version`. It currently reads **4**.
+Every response carries `protocol_version`. It currently reads **6**.
 
 ```json
-{"protocol_version":5,"core_version":"0.1.1","tier":"compact","slot_count":98,…}
+{"protocol_version":6,"core_version":"0.1.1","tier":"compact","slot_count":98,…}
 ```
+
+Version 6 adds one atomic shared snapshot envelope with generation/global,
+topology and subset revisions. Metadata is followed by typed point and link
+buffers, and a client applies the completed aggregate once. Duplicate or stale
+updates are ignored; gaps trigger reconnection. Version 5 added bounded typed
+records and generation-scoped node handles.
 
 Version 4 added the `layout` message and request: the server computes a static
 arrangement for the live view and broadcasts it, and every attached client

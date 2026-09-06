@@ -57,3 +57,6 @@ pub use view::View;
 /// This crate's version, so consumers report one number rather than each
 /// baking in its own literal.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub mod shared;
+pub mod subset;

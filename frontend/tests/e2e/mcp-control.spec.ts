@@ -54,7 +54,10 @@ test('MCP protocol: initialize, list_tools, call_tool over streamable HTTP', asy
     // what stops an agent treating a shared screen as a scratchpad. Three of
     // its four load-bearing claims, asserted where they actually ship.
     expect(info.instructions).toContain('human being is looking at')
-    expect(info.instructions).toContain('Last writer wins')
+    expect(info.instructions).toContain('Shared changes are ordered and acknowledged')
+    expect(info.instructions).toContain('Pass `expected` from `view_state`')
+    expect(info.instructions).toContain('A revision conflict changes nothing')
+    expect(info.instructions).toContain('stale prepared work always refuses')
     // The geometry rule is CONDITIONAL since G3 (plan E5): an agent that read
     // only "you cannot know geometry" would never reach for `set_layout`, and
     // the caveat it must not lose is the one naming the condition.
@@ -75,7 +78,9 @@ test('MCP protocol: initialize, list_tools, call_tool over streamable HTTP', asy
       'reset_view',
       'run_saved_query',
       'set_appearance',
+      'set_caption',
       'set_layout',
+      'set_subset',
       'show_cypher',
       'view_state',
     ])

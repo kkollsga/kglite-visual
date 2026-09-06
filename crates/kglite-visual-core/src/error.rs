@@ -10,6 +10,8 @@
 /// nothing constructs is a claim the code contradicts.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    #[error("{0}")]
+    Conflict(Box<crate::shared::RevisionConflict>),
     /// `.kgl` load failed. kglite's loaders report the `std::io::Error`
     /// family — including a corrupt or wrong-format file, which arrives as
     /// `InvalidData` rather than as a distinct type.

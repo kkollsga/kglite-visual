@@ -307,18 +307,16 @@ export class Surface {
     // `true` = do not rescale: the second argument is `dontRescale`, and
     // letting cosmos.gl rescale would rewrite the server's coordinates.
     this.graph.setPointPositions(this.positionsFor(view, authority), true)
+    this.graph.setLinks(view.links)
+    this.updateAppearance(appearance)
+  }
+
+  /** Change presentation without replacing topology or the simulation positions. */
+  updateAppearance(appearance: Appearance): void {
     this.graph.setPointSizes(appearance.sizes)
     this.graph.setPointColors(appearance.colors)
-    this.graph.setLinks(view.links)
     this.graph.setLinkWidths(appearance.linkWidths)
-    // Camera movement belongs to an explicit fit, a changed node set or a new layout.
-    // Appearance and local presentation uploads preserve the current framing.
-    // `render(undefined, 0)` — keep the current simulation alpha, no
-    // transition. With on-demand rendering a static scene draws exactly one
-    // frame, and that frame has to be asked for. Zero duration is what makes a
-    // collapse *snap* rather than animating slots into a space they no longer
-    // occupy — and in force mode it is what keeps the simulation unpaused.
-    this.graph.render(undefined, 0)
+
   }
 
   /**

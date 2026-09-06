@@ -27,9 +27,9 @@ test('HTTP, WebSocket and MCP share bounded records and exact source handles', a
     expect(slice.meta.nodes).toHaveLength(3)
     const handles = slice.meta.nodes.map((node) => node.handle)
     for (const listener of listeners) {
-      const update = await listener.waitFor((m) => m.kind === 'slice' && m.value.meta.nodes.length === 3)
-      if (update.kind !== 'slice') throw new Error('expected slice')
-      expect(update.value.meta.nodes.map((node) => node.handle)).toEqual(handles)
+      const update = await listener.waitFor((m) => m.kind === 'shared-update' && m.value.meta.snapshot.slice.nodes.length === 3)
+      if (update.kind !== 'shared-update') throw new Error('expected slice')
+      expect(update.value.meta.snapshot.slice.nodes.map((node) => node.handle)).toEqual(handles)
       listener.received.length = 0
     }
     const args = { handles, fields: ['id', 'type', 'title', 'does-not-exist'], limit: 2, offset: 0 }
@@ -56,7 +56,7 @@ test('HTTP, WebSocket and MCP share bounded records and exact source handles', a
     // must not have reached the peer before the next update arrives.
     const load = await mcp.call('load_nodes', { handles: [handles[0]!] })
     expect(load.isError).toBe(false)
-    await peer.waitFor((m) => m.kind === 'slice')
+    await peer.waitFor((m) => m.kind === 'shared-update')
     expect(peer.received.some((m) => m.kind === 'records')).toBe(false)
 
     const stale = { ...handles[0]!, generation: 'a-different-session' }
