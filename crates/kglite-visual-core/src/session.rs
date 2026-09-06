@@ -14,7 +14,11 @@
 //! graph walk — a write lock held for the length of a 30-second query would
 //! block the meta-graph a page reload asks for.
 
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, RwLock,
+};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use kglite::api::introspection::{compute_schema, schema_overview_to_json};
 use kglite::api::{DirGraph, NodeIndex};
@@ -26,6 +30,7 @@ use crate::expand::{self, ExpansionPreview, PreviewScope};
 use crate::meta_graph::{self, DetailTier, MetaGraphResponse, MetaGraphStats};
 use crate::protocol::{MessageType, ResponseEncoder, PROTOCOL_VERSION};
 use crate::query::{self, QueryConfig, QueryTable, SearchResponse};
+use crate::records::{self, BrowseTypeRequest, LoadNodesRequest, NodeHandle, RecordTable};
 use crate::render::live_layout::{layout_live_view, LayoutResult};
 use crate::request::{
     CypherRequest, ExpandRequest, LayoutKernel, LayoutRequest, Request, SearchRequest, SlotRequest,
@@ -41,6 +46,7 @@ use crate::{bound::BoundInfo, layout};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct SessionInfo {
+    pub generation: String,
     /// The wire format this server speaks. A client that decodes a different
     /// number refuses rather than guessing (`protocol.rs`).
     pub protocol_version: u32,
@@ -263,6 +269,7 @@ struct SliceBounds {
 #[serde(untagged)]
 pub enum Response {
     Query(QueryTable),
+    Records(RecordTable),
     Preview(ExpansionPreview),
     Slice(GraphSlice),
     NodeDetail(NodeDetail),
@@ -275,6 +282,7 @@ pub enum Response {
 pub struct Session {
     graph: Arc<DirGraph>,
     source: String,
+    generation: String,
     view: RwLock<View>,
     meta_graph: MetaGraphResponse,
     config: QueryConfig,
@@ -320,6 +328,7 @@ impl Session {
         Self {
             graph,
             source: source.into(),
+            generation: new_generation(),
             view: RwLock::new(view),
             meta_graph,
             config,
@@ -328,6 +337,134 @@ impl Session {
             layout_kernel: RwLock::new(LayoutKernel::Simulation),
             last_layout: RwLock::new(None),
         }
+    }
+
+    pub fn generation(&self) -> &str {
+        &self.generation
+    }
+
+    pub fn node_handle(&self, node_id: u32) -> NodeHandle {
+        NodeHandle {
+            generation: self.generation.clone(),
+            node_id,
+        }
+    }
+
+    pub(crate) fn check_handles(&self, handles: &[NodeHandle]) -> Result<(), CoreError> {
+        if handles.len() > records::MAX_RECORD_HANDLES {
+            return Err(CoreError::Request(
+                "at most 5000 node handles are allowed".into(),
+            ));
+        }
+        if handles
+            .iter()
+            .any(|handle| handle.generation != self.generation)
+        {
+            return Err(CoreError::Request(
+                "node handle belongs to a different session generation".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn browse_type(&self, request: &BrowseTypeRequest) -> Result<GraphSlice, CoreError> {
+        let members = self
+            .graph
+            .type_indices
+            .get(&request.node_type)
+            .ok_or_else(|| {
+                CoreError::Request(format!("unknown node type {:?}", request.node_type))
+            })?;
+        let bound = expand::effective_bound(request.limit);
+        let nodes: Vec<_> = members.iter().take(bound.max_items).collect();
+        self.absorb(
+            SliceKind::Query,
+            &nodes,
+            &[],
+            BoundInfo::new(nodes.len(), members.len()),
+            0,
+        )
+    }
+
+    pub fn load_nodes(&self, request: &LoadNodesRequest) -> Result<GraphSlice, CoreError> {
+        self.check_handles(&request.handles)?;
+        let _guard = self.graph.begin_read_pass();
+        let mut nodes = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for handle in &request.handles {
+            let index = NodeIndex::new(handle.node_id as usize);
+            if self.graph.node_view(index).is_none() {
+                return Err(CoreError::Request(format!(
+                    "node {} is absent from this source snapshot",
+                    handle.node_id
+                )));
+            }
+            if seen.insert(index) {
+                nodes.push(index);
+            }
+        }
+        self.absorb(
+            SliceKind::Search,
+            &nodes,
+            &[],
+            BoundInfo::new(nodes.len(), nodes.len()),
+            0,
+        )
+    }
+
+    fn typed_node_key(&self, node_id: u32) -> records::RecordCell {
+        self.graph
+            .node_view(NodeIndex::new(node_id as usize))
+            .map(|node| records::cell(&node.id()))
+            .unwrap_or(records::RecordCell::Missing)
+    }
+
+    fn loaded_nodes(&self, view: &View) -> Vec<SliceNode> {
+        view.live_entries()
+            .filter_map(|(slot, entry)| {
+                let SlotEntry::Node {
+                    node_id,
+                    node_type,
+                    title,
+                } = entry
+                else {
+                    return None;
+                };
+                let node = self.graph.node_view(NodeIndex::new(*node_id as usize))?;
+                Some(SliceNode {
+                    handle: self.node_handle(*node_id),
+                    typed_key: records::cell(&node.id()),
+                    slot,
+                    node_id: *node_id,
+                    node_type: node_type.clone(),
+                    title: title.clone(),
+                    key: node_key(&node.id()),
+                })
+            })
+            .collect()
+    }
+
+    fn validate_loaded(&self, view: &View) -> Result<(), CoreError> {
+        let count = view
+            .live_entries()
+            .filter(|(_, entry)| matches!(entry, SlotEntry::Node { .. }))
+            .count();
+        let edges = view.edges().iter().filter(|edge| !edge.meta).count();
+        if count > records::MAX_LOADED_NODES || edges > records::MAX_LOADED_EDGES {
+            return Err(CoreError::Request(format!("loaded view would contain {count} nodes and {edges} relations; limits are 5000 nodes and 20000 relations. Collapse content before adding more")));
+        }
+        // Charge actual JSON escaping and keys, plus the binary topology/positions.
+        let binary_bytes = view.slot_count() as usize * 8 + view.edges().len() * 8;
+        // Reserve fixed slice fields and framing as well as the two variable lists.
+        let bytes = records::serialized_bytes(
+            &(self.loaded_nodes(view), view.edges()),
+            records::MAX_LOADED_BYTES.saturating_sub(binary_bytes + 1024),
+        )? + binary_bytes
+            + 1024;
+        if bytes > records::MAX_LOADED_BYTES {
+            return Err(CoreError::Request(format!("loaded view would use {bytes} bytes; limit is {} bytes. Collapse content before adding more", records::MAX_LOADED_BYTES)));
+        }
+        Ok(())
     }
 
     pub fn graph(&self) -> &Arc<DirGraph> {
@@ -374,6 +511,7 @@ impl Session {
     pub fn info(&self) -> SessionInfo {
         let view = self.read();
         SessionInfo {
+            generation: self.generation.clone(),
             protocol_version: PROTOCOL_VERSION,
             core_version: crate::VERSION.to_string(),
             graph: self.source.clone(),
@@ -424,6 +562,9 @@ impl Session {
     pub fn handle(&self, request: &Request) -> Result<Response, CoreError> {
         match request {
             Request::Cypher(req) => self.cypher(req),
+            Request::Records(req) => self.records(req).map(Response::Records),
+            Request::BrowseType(req) => self.browse_type(req).map(Response::Slice),
+            Request::LoadNodes(req) => self.load_nodes(req).map(Response::Slice),
             Request::Preview(req) => self.preview(req.slot).map(Response::Preview),
             Request::Expand(req) => self.expand(req).map(Response::Slice),
             Request::Collapse(req) => self.collapse(req).map(Response::Slice),
@@ -498,6 +639,7 @@ impl Session {
                 .iter()
                 .map(|r| {
                     (
+                        r.edge_id,
                         NodeIndex::new(r.source_id as usize),
                         NodeIndex::new(r.target_id as usize),
                         r.name.clone(),
@@ -509,7 +651,7 @@ impl Session {
             // decided what this result contains. Links whose endpoints did not
             // make it into the slot space are counted inside `absorb`.
             0,
-        );
+        )?;
         Ok(Response::Slice(slice))
     }
 
@@ -552,17 +694,28 @@ impl Session {
     }
 
     fn expand(&self, request: &ExpandRequest) -> Result<GraphSlice, CoreError> {
-        let seeds = match self.entry(request.slot)? {
-            // The flagship drill-in: a meta-graph type node expands into the
-            // instance nodes of that type. Every node of the type is a seed,
-            // and the bound is what makes that safe on a 100M-node graph.
-            SlotEntry::Type { name } => self
-                .graph
-                .type_indices
-                .get(&name)
-                .map(|nodes| nodes.iter().collect::<Vec<NodeIndex>>())
-                .unwrap_or_default(),
-            SlotEntry::Node { node_id, .. } => vec![NodeIndex::new(node_id as usize)],
+        let run = |seeds: Box<dyn Iterator<Item = NodeIndex> + '_>| {
+            expand::expand_iter(
+                &self.graph,
+                seeds,
+                request.relationship.as_deref(),
+                request.direction,
+                expand::effective_bound(request.limit),
+                self.config.deadline(),
+            )
+        };
+        let found = match self.entry(request.slot)? {
+            SlotEntry::Type { name } => {
+                let nodes = self
+                    .graph
+                    .type_indices
+                    .get(&name)
+                    .ok_or_else(|| CoreError::Request(format!("unknown node type {name:?}")))?;
+                run(Box::new(nodes.iter()))
+            }
+            SlotEntry::Node { node_id, .. } => {
+                run(Box::new(std::iter::once(NodeIndex::new(node_id as usize))))
+            }
             SlotEntry::Tombstone => {
                 return Err(CoreError::Request(format!(
                     "slot {} was collapsed; there is nothing there to expand",
@@ -570,36 +723,27 @@ impl Session {
                 )))
             }
         };
-
-        let found = expand::expand(
-            &self.graph,
-            &seeds,
-            request.relationship.as_deref(),
-            request.direction,
-            expand::effective_bound(request.limit),
-            self.config.deadline(),
-        );
-        let edges: Vec<(NodeIndex, NodeIndex, String)> = found
+        let edges: Vec<(u32, NodeIndex, NodeIndex, String)> = found
             .edges
             .iter()
-            .map(|e| (e.source, e.target, e.name.clone()))
+            .map(|e| (e.edge_id, e.source, e.target, e.name.clone()))
             .collect();
         let links_refused = (found.link_bound.total - found.link_bound.returned) as usize;
-        Ok(self.absorb(
+        self.absorb(
             SliceKind::Expand,
             &found.nodes,
             &edges,
             found.bound,
             links_refused,
-        ))
+        )
     }
 
     /// Map a set of kglite nodes and edges into the slot space and describe the
     /// result.
     ///
-    /// The one place slots are allocated after open, so the write lock is taken
-    /// exactly here — after every graph read the request needed, never around
-    /// one.
+    /// Commit admission atomically after walking the source. The candidate is
+    /// checked against cumulative count and serialized byte ceilings before
+    /// replacing the live view.
     /// `links_refused` is what the producer found and did not hand over — the
     /// expansion's byte budget firing. Links dropped *here*, for an endpoint
     /// the node bound did not admit, are counted below and land in the same
@@ -609,39 +753,21 @@ impl Session {
         &self,
         kind: SliceKind,
         nodes: &[NodeIndex],
-        edges: &[(NodeIndex, NodeIndex, String)],
+        edges: &[(u32, NodeIndex, NodeIndex, String)],
         bound: BoundInfo,
         links_refused: usize,
-    ) -> GraphSlice {
-        let mut view = self.write();
+    ) -> Result<GraphSlice, CoreError> {
+        let _guard = self.graph.begin_read_pass();
+        let mut live = self.write();
+        self.check_admission(&live, nodes, edges)?;
+        let mut view = live.clone();
         let first_slot = view.slot_count();
-        let mut added: Vec<SliceNode> = Vec::new();
-
-        for index in nodes {
-            let (node_type, title, key) = match self.graph.node_view(*index) {
-                Some(node) => (
-                    node.node_type_str(&self.graph.interner).to_string(),
-                    value_to_display(&node.title()),
-                    node_key(&node.id()),
-                ),
-                None => continue,
-            };
-            let node_id = index.index() as u32;
-            let (slot, is_new) = view.intern_node(node_id, &node_type, &title);
-            if is_new {
-                added.push(SliceNode {
-                    slot,
-                    node_id,
-                    node_type,
-                    title,
-                    key,
-                });
-            }
-        }
+        let added = self.admit_nodes(&mut view, nodes)?;
 
         let mut links_added = 0usize;
+        let mut edge_bytes = 0usize;
         let mut links_dropped = links_refused;
-        for (source, target, name) in edges {
+        for (edge_id, source, target, name) in edges {
             let (Some(source_slot), Some(target_slot)) = (
                 view.slot_of_node(source.index() as u32),
                 view.slot_of_node(target.index() as u32),
@@ -651,12 +777,18 @@ impl Session {
                 links_dropped += 1;
                 continue;
             };
-            view.add_edge(ViewEdge {
+            let edge = ViewEdge {
+                edge_id: Some(*edge_id),
                 source_slot,
                 target_slot,
                 name: name.clone(),
                 meta: false,
-            });
+            };
+            edge_bytes += records::serialized_bytes(
+                &edge,
+                records::MAX_LOADED_BYTES.saturating_sub(edge_bytes),
+            )?;
+            view.add_edge(edge);
             links_added += 1;
         }
         let link_bound = BoundInfo {
@@ -665,8 +797,10 @@ impl Session {
             truncated: links_dropped > 0,
         };
 
-        self.finish_slice(
-            &mut view,
+        self.validate_loaded(&view)?;
+        *live = view;
+        Ok(self.finish_slice(
+            &mut live,
             kind,
             first_slot,
             added,
@@ -675,7 +809,102 @@ impl Session {
                 nodes: bound,
                 links: link_bound,
             },
-        )
+        ))
+    }
+
+    fn admit_nodes(
+        &self,
+        view: &mut View,
+        nodes: &[NodeIndex],
+    ) -> Result<Vec<SliceNode>, CoreError> {
+        let mut added: Vec<SliceNode> = Vec::new();
+        let mut bytes = 0usize;
+
+        for index in nodes {
+            let node_id = index.index() as u32;
+            if view.slot_of_node(node_id).is_some() {
+                continue;
+            }
+            let (node_type, title, key) = match self.graph.node_view(*index) {
+                Some(node) => {
+                    let title = node.title();
+                    if matches!(&*title, kglite::api::Value::String(text) if text.len() > records::MAX_LOADED_BYTES)
+                    {
+                        return Err(CoreError::Request(
+                            "node title exceeds the loaded-view byte ceiling".into(),
+                        ));
+                    }
+                    if !matches!(&*title, kglite::api::Value::String(_))
+                        && matches!(records::cell(&title), records::RecordCell::Truncated { .. })
+                    {
+                        return Err(CoreError::Request(
+                            "node title exceeds the bounded value limit".into(),
+                        ));
+                    }
+                    (
+                        node.node_type_str(&self.graph.interner).to_string(),
+                        value_to_display(&title),
+                        node_key(&node.id()),
+                    )
+                }
+                None => continue,
+            };
+            let node = SliceNode {
+                handle: self.node_handle(node_id),
+                typed_key: self.typed_node_key(node_id),
+                slot: view.slot_count(),
+                node_id,
+                node_type,
+                title,
+                key,
+            };
+            bytes +=
+                records::serialized_bytes(&node, records::MAX_LOADED_BYTES.saturating_sub(bytes))?;
+            view.intern_node(node_id, &node.node_type, &node.title);
+            added.push(node);
+        }
+
+        Ok(added)
+    }
+
+    fn check_admission(
+        &self,
+        view: &View,
+        nodes: &[NodeIndex],
+        edges: &[(u32, NodeIndex, NodeIndex, String)],
+    ) -> Result<(), CoreError> {
+        let mut admitted: std::collections::HashSet<u32> = view
+            .live_entries()
+            .filter_map(|(_, entry)| match entry {
+                SlotEntry::Node { node_id, .. } => Some(*node_id),
+                _ => None,
+            })
+            .collect();
+        for node in nodes {
+            admitted.insert(node.index() as u32);
+            if admitted.len() > records::MAX_LOADED_NODES {
+                return Err(CoreError::Request(
+                    "loaded view exceeds the 5000 node limit; collapse content before adding more"
+                        .into(),
+                ));
+            }
+        }
+        let mut relations: std::collections::HashSet<u32> = view
+            .edges()
+            .iter()
+            .filter_map(|edge| edge.edge_id)
+            .collect();
+        for (edge_id, source, target, _) in edges {
+            if admitted.contains(&(source.index() as u32))
+                && admitted.contains(&(target.index() as u32))
+            {
+                relations.insert(*edge_id);
+                if relations.len() > records::MAX_LOADED_EDGES {
+                    return Err(CoreError::Request("loaded view exceeds the 20000 relation limit; collapse content before adding more".into()));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn collapse(&self, request: &SlotRequest) -> Result<GraphSlice, CoreError> {
@@ -881,6 +1110,7 @@ impl Session {
     /// to everyone on every connect would re-upload the whole space to clients
     /// that already hold it.
     pub fn sync_slice(&self) -> GraphSlice {
+        let _guard = self.graph.begin_read_pass();
         let view = self.read();
         let mut nodes: Vec<SliceNode> = Vec::new();
         let mut tombstones: Vec<u32> = Vec::new();
@@ -891,6 +1121,8 @@ impl Session {
                     node_type,
                     title,
                 } => nodes.push(SliceNode {
+                    handle: self.node_handle(*node_id),
+                    typed_key: self.typed_node_key(*node_id),
                     slot,
                     node_id: *node_id,
                     node_type: node_type.clone(),
@@ -1110,6 +1342,7 @@ pub fn response_frames(response: &Response) -> Vec<Vec<u8>> {
     let mut enc = ResponseEncoder::new();
     match response {
         Response::Query(table) => enc.push_json(MessageType::QueryTable, &json_of(table)),
+        Response::Records(table) => enc.push_json(MessageType::Records, &json_of(table)),
         Response::Preview(preview) => {
             enc.push_json(MessageType::ExpansionPreview, &json_of(preview))
         }
@@ -1140,16 +1373,23 @@ pub fn response_frames(response: &Response) -> Vec<Vec<u8>> {
     enc.finish()
 }
 
-/// The `id` field of one node, as a Cypher-comparable JSON value.
-///
-/// `Value::Null` becomes `None` rather than JSON `null`, and the distinction is
-/// the whole point: a node with no `id` cannot be named by `WHERE id(n) IN
-/// $ids` at all, and sending `null` would put a value in that list which
-/// matches nothing while looking like an identifier.
+/// Legacy query key, only when JSON can carry it safely. Lossless keys and
+/// previews live in `SliceNode::typed_key`; direct records use the node handle.
 fn node_key(id: &kglite::api::Value) -> Option<serde_json::Value> {
     match id {
         kglite::api::Value::Null => None,
-        value => Some(value_to_json(value)),
+        kglite::api::Value::Int64(value) if value.unsigned_abs() > 9_007_199_254_740_991 => None,
+        kglite::api::Value::String(value) if value.len() > records::MAX_CELL_BYTES => None,
+        kglite::api::Value::List(_)
+        | kglite::api::Value::Map(_)
+        | kglite::api::Value::Node(_)
+        | kglite::api::Value::Relationship(_)
+        | kglite::api::Value::Path(_)
+        | kglite::api::Value::NodeRef(_) => None,
+        value => {
+            let json = value_to_json(value);
+            (serde_json::to_vec(&json).ok()?.len() <= records::MAX_CELL_BYTES).then_some(json)
+        }
     }
 }
 
@@ -1171,4 +1411,17 @@ pub fn error_frames(message: impl Into<String>) -> Vec<Vec<u8>> {
         &serde_json::to_string(&payload).expect("ErrorMessage is plain data"),
     );
     enc.finish()
+}
+
+fn new_generation() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    format!(
+        "{:x}-{:x}-{:x}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
 }

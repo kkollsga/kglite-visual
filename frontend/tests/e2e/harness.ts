@@ -15,6 +15,7 @@ import path from 'node:path'
 
 import type { Page } from '@playwright/test'
 
+import type { Request } from '../../src/generated/Request'
 import { ResponseAssembler, decodeFrame, type Completed } from '../../src/protocol'
 
 // Playwright runs with the config's directory as cwd, so the repo root is one
@@ -172,6 +173,10 @@ export class Listener {
       }
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
+  }
+
+  send(request: Request): void {
+    this.socket.send(JSON.stringify(request))
   }
 
   close(): void {

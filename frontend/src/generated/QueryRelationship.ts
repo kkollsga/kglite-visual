@@ -3,4 +3,4 @@
 /**
  * A relationship a query result mentioned.
  */
-export type QueryRelationship = { source_id: number, target_id: number, name: string, };
+export type QueryRelationship = { edge_id: number, source_id: number, target_id: number, name: string, };

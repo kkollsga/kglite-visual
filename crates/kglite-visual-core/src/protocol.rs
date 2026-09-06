@@ -1,4 +1,4 @@
-//! Protocol v1 framing (plan D4) — discrete framed binary messages.
+//! Protocol framing (plan D4) — discrete framed binary messages.
 //!
 //! **Transport-agnostic.** Nothing here knows about WebSockets. A frame is a
 //! `Vec<u8>` a caller hands to whatever moves bytes: `Message::Binary` today,
@@ -72,7 +72,9 @@ use std::fmt;
 /// They ride here because the message type forced a bump anyway and one skew
 /// point is cheaper to reason about than three (plan E6). The layout rules
 /// above did not move, and the fifteen v1/v2/v3 codes keep their values.
-pub const PROTOCOL_VERSION: u32 = 4;
+/// **v5** adds typed bounded records with generation-scoped node provenance.
+/// Older clients cannot decode Records; reject them before any view is drawn.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Header size in bytes (6 × `u32`).
 pub const HEADER_BYTES: usize = 24;
@@ -162,6 +164,8 @@ pub enum MessageType {
     /// **whole** slot space, tombstones included as NaN — unlike a slice's
     /// points, which start at `first_slot`.
     Layout = 16,
+    /// UTF-8 JSON: typed, bounded record inspection (`records::RecordTable`).
+    Records = 17,
 }
 
 impl MessageType {
@@ -173,7 +177,7 @@ impl MessageType {
     /// Every variant, in wire order — the one list the TypeScript mirror and
     /// the decoder are both generated from, so a new variant cannot be added
     /// to one and forgotten in the other.
-    pub const ALL: [MessageType; 16] = [
+    pub const ALL: [MessageType; 17] = [
         MessageType::MetaGraphMeta,
         MessageType::Points,
         MessageType::Links,
@@ -190,6 +194,7 @@ impl MessageType {
         MessageType::Highlight,
         MessageType::Appearance,
         MessageType::Layout,
+        MessageType::Records,
     ];
 
     /// The TypeScript constant name for this variant.
@@ -211,6 +216,7 @@ impl MessageType {
             MessageType::Highlight => "HIGHLIGHT",
             MessageType::Appearance => "APPEARANCE",
             MessageType::Layout => "LAYOUT",
+            MessageType::Records => "RECORDS",
         }
     }
 
@@ -625,7 +631,8 @@ mod tests {
         assert_eq!(MessageType::Appearance.code(), 15);
         // v4's static layout. Appended, never renumbered.
         assert_eq!(MessageType::Layout.code(), 16);
-        assert_eq!(MessageType::ALL.len(), 16, "a new variant must join ALL");
+        assert_eq!(MessageType::Records.code(), 17);
+        assert_eq!(MessageType::ALL.len(), 17, "a new variant must join ALL");
     }
 
     #[test]

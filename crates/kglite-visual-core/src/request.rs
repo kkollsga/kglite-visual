@@ -1,19 +1,15 @@
 //! The request vocabulary — what a client may ask a session for.
 //!
-//! **Every request that names something in the view names it by slot.** That is
-//! the D4 identity contract paying for itself: a meta-graph type node and an
-//! expanded instance node are the same kind of handle, so "preview what
-//! expanding this would add", "expand it" and "collapse it" are each one
-//! message rather than one per kind of thing. A request that carried a type
-//! *name* for one case and a node id for the other would need the client to
-//! know which it was holding — which is exactly what the shared slot space
-//! exists to stop.
+//! View operations address current slots. Record inspection and loading use
+//! generation-scoped source handles, so compaction cannot redirect a row.
 //!
 //! One vocabulary, two transports. The WebSocket sends these as JSON text
 //! frames; the JSON twin's `POST /api/*` bodies are the same structs. Neither
 //! is a translation of the other (test-plan §2).
 
 use std::collections::BTreeMap;
+
+use crate::records::{BrowseTypeRequest, LoadNodesRequest, RecordsRequest};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -121,6 +117,12 @@ impl LayoutKernel {
 pub enum Request {
     /// Run a read-only Cypher query.
     Cypher(CypherRequest),
+    /// Inspect bounded typed fields without changing loaded membership.
+    Records(RecordsRequest),
+    /// Load a type independently of its relationships, bounded in core.
+    BrowseType(BrowseTypeRequest),
+    /// Load exact source handles without interpreting source keys as indices.
+    LoadNodes(LoadNodesRequest),
     /// Per-relationship counts for what expanding `slot` would add — computed
     /// without fetching a single node (plan D12).
     Preview(SlotRequest),
@@ -284,6 +286,34 @@ mod tests {
             err.to_string().contains("spiral"),
             "the message must name the kernel it refused: {err}"
         );
+    }
+
+    #[test]
+    fn source_handle_requests_preserve_identity_and_page_defaults() {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "type": "records",
+            "handles": [{"generation": "session-abc", "node_id": 42}],
+            "fields": ["id", "type"]
+        }))
+        .unwrap();
+        let Request::Records(records) = request else {
+            panic!("wrong request variant")
+        };
+        assert_eq!(records.handles[0].generation, "session-abc");
+        assert_eq!(records.handles[0].node_id, 42);
+        assert_eq!(records.limit, 100);
+        assert_eq!(records.offset, 0);
+        let browse: Request =
+            serde_json::from_str(r#"{"type":"browse-type","node_type":"Disconnected"}"#).unwrap();
+        assert!(matches!(
+            browse,
+            Request::BrowseType(BrowseTypeRequest { limit: None, .. })
+        ));
+        let load: Request = serde_json::from_str(
+            r#"{"type":"load-nodes","handles":[{"generation":"session-abc","node_id":42}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(load, Request::LoadNodes(_)));
     }
 
     #[test]

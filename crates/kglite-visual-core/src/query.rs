@@ -194,6 +194,7 @@ impl QueryConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct QueryRelationship {
+    pub edge_id: u32,
     pub source_id: u32,
     pub target_id: u32,
     pub name: String,
@@ -535,8 +536,14 @@ fn collect_graph_refs(
             }
         }
         Value::Relationship(rel) => {
+            for endpoint in [rel.start_id, rel.end_id] {
+                if seen_nodes.insert(endpoint) {
+                    node_ids.push(endpoint);
+                }
+            }
             if seen_rels.insert(rel.id) {
                 relationships.push(QueryRelationship {
+                    edge_id: rel.id,
                     source_id: rel.start_id,
                     target_id: rel.end_id,
                     name: rel.rel_type.clone(),
@@ -552,6 +559,7 @@ fn collect_graph_refs(
             for rel in &path.rels {
                 if seen_rels.insert(rel.id) {
                     relationships.push(QueryRelationship {
+                        edge_id: rel.id,
                         source_id: rel.start_id,
                         target_id: rel.end_id,
                         name: rel.rel_type.clone(),

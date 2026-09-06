@@ -137,6 +137,7 @@ impl Bus {
             // exactly as they found it, and pushing them to every client would
             // put one user's search results in another user's panel.
             Response::Query(_)
+            | Response::Records(_)
             | Response::Preview(_)
             | Response::NodeDetail(_)
             | Response::Search(_)
@@ -184,6 +185,27 @@ mod tests {
 
     fn frame(byte: u8) -> Vec<Vec<u8>> {
         vec![vec![byte; 4]]
+    }
+
+    #[test]
+    fn record_inspection_is_private_and_preserves_the_next_broadcast() {
+        let bus = Bus::new();
+        let mut peer = bus.subscribe();
+        let table = kglite_visual_core::records::RecordTable {
+            generation: "test-generation".into(),
+            columns: vec![],
+            rows: vec![],
+            bound: kglite_visual_core::BoundInfo::new(0, 0),
+            next_offset: None,
+            missing_semantics: "test".into(),
+        };
+        assert!(!bus.publish_if_view_mutating(&Response::Records(table)));
+        assert!(matches!(
+            peer.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        bus.publish(frame(9));
+        assert_eq!(peer.try_recv().unwrap().as_slice(), &[vec![9u8; 4]]);
     }
 
     #[tokio::test]

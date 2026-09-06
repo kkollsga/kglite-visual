@@ -329,6 +329,7 @@ pub fn compute(graph: &DirGraph, view: &mut View) -> MetaGraphResponse {
     // the meta-graph's own edges.
     for edge in &edges {
         view.add_edge(ViewEdge {
+            edge_id: None,
             source_slot: edge.source_slot,
             target_slot: edge.target_slot,
             name: edge.name.clone(),

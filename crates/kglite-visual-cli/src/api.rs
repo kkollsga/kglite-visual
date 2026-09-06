@@ -28,6 +28,7 @@ use kglite_visual_core::control::{
     Appearance, AppearanceRequest, Command, Focus, FocusRequest, Highlight, HighlightRequest,
 };
 use kglite_visual_core::error::CoreError;
+use kglite_visual_core::records::{BrowseTypeRequest, LoadNodesRequest, RecordsRequest};
 use kglite_visual_core::render::RenderRequest;
 use kglite_visual_core::request::{
     CypherRequest, ExpandRequest, LayoutRequest, Request, SearchRequest, SlotRequest, TypeRequest,
@@ -66,6 +67,21 @@ pub async fn describe(State(state): State<AppState>) -> Response {
 /// "as_graph": bool}`.
 pub async fn cypher(state: State<AppState>, Json(body): Json<CypherRequest>) -> Response {
     dispatch(state, Request::Cypher(body)).await
+}
+
+/// `POST /api/records` — typed fields for generation-scoped source handles.
+pub async fn records(state: State<AppState>, Json(body): Json<RecordsRequest>) -> Response {
+    dispatch(state, Request::Records(body)).await
+}
+
+/// `POST /api/browse-type` — bounded type loading, including disconnected nodes.
+pub async fn browse_type(state: State<AppState>, Json(body): Json<BrowseTypeRequest>) -> Response {
+    dispatch(state, Request::BrowseType(body)).await
+}
+
+/// `POST /api/load-nodes` — load the exact source nodes identified by handles.
+pub async fn load_nodes(state: State<AppState>, Json(body): Json<LoadNodesRequest>) -> Response {
+    dispatch(state, Request::LoadNodes(body)).await
 }
 
 /// `POST /api/search` — `{"query": "...", "node_type": "...",

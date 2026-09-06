@@ -30,6 +30,10 @@
 //! skew point rather than three (E6). The fifteen v1/v2/v3 message codes are
 //! unchanged, which the per-case dumps below still prove.
 //!
+//! **v4 -> v5:** typed bounded Records adds code 17. Session generations,
+//! source handles, typed keys and relationship identity accompany the upgrade.
+//! Canonical record frames use a fixed generation, never a random session value.
+//!
 //! **Both are exact baselines, so both fail the moment "make it pass" is
 //! cheaper than "explain the diff"** (CLAUDE.md → "Gate honesty"). A red
 //! baseline after a deliberate protocol change is a conscious decision:
@@ -192,6 +196,14 @@ fn generate_framing_golden() {
             let mut enc = ResponseEncoder::new();
             enc.push_json(MessageType::Layout, r#"{"kernel_chosen":"islands"}"#);
             enc.push_f32(MessageType::Points, &[1.0, -2.0, 3.0, 4.0]);
+            enc.finish()
+        }),
+        ("records", {
+            let mut enc = ResponseEncoder::new();
+            enc.push_json(
+                MessageType::Records,
+                r#"{"generation":"fixture-generation","rows":[]}"#,
+            );
             enc.finish()
         }),
     ];

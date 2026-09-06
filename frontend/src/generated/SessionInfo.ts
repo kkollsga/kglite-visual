@@ -5,7 +5,7 @@ import type { MetaGraphStats } from "./MetaGraphStats";
 /**
  * What the client needs to know about the session it is attached to.
  */
-export type SessionInfo = { 
+export type SessionInfo = { generation: string, 
 /**
  * The wire format this server speaks. A client that decodes a different
  * number refuses rather than guessing (`protocol.rs`).

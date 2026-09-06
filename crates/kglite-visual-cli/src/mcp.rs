@@ -7,14 +7,8 @@
 //! `Error = Infallible`, so it mounts as one more route on the axum router that
 //! is already serving the frontend, the JSON twin and the WebSocket.
 //!
-//! **The tool surface is small on purpose.** Data-heavy querying belongs to
-//! `kglite-mcp-server`, which owns the schema, the Cypher reference and the
-//! result formatting. These thirteen tools do the one thing that server cannot:
-//! act on a *shared* view. Ten of them are verbs about the screen; the two
-//! saved-query tools are the exception that proves the rule — they read a
-//! store that belongs to *this* window and to the human who filled it, which
-//! is not a fact any other server has — and `export_view` is the thirteenth,
-//! which takes what is on the screen out of the screen.
+//! Bounded record inspection complements the shared-view tools. Bulk querying
+//! remains owned by the graph's MCP server.
 //!
 //! **Two callers, one view, last writer wins** (D14, v1). The human and the
 //! agent are collaborators on one slot space, not two tenants of two. An
@@ -36,6 +30,9 @@ use std::sync::Arc;
 use base64::Engine as _;
 use kglite_visual_core::control::{Appearance, Command, Focus, Highlight, HighlightConcept};
 use kglite_visual_core::error::CoreError;
+use kglite_visual_core::records::{
+    BrowseTypeRequest, LoadNodesRequest, NodeHandle, RecordsRequest,
+};
 use kglite_visual_core::render::{RenderFormat, RenderRequest, RenderSource, Theme};
 use kglite_visual_core::request::{
     CypherRequest, EdgeDirection, ExpandRequest, LayoutKernel, LayoutRequest, Request,
@@ -84,7 +81,7 @@ pub const MCP_PATH: &str = "/mcp";
 const INSTRUCTIONS: &str = "\
 You are attached to a RUNNING kglite-visual window: an interactive graph view \
 that a human being is looking at right now, in their browser. These tools move \
-that view. Everything you do here is immediately visible to them.
+that view and inspect its records. Shared view changes are immediately visible to them.
 
 Treat it as a shared workspace, not a scratchpad:
 - Narrate what you are doing before you do it, so the change on screen is \
@@ -115,7 +112,9 @@ under a static kernel: content-identical, geometry-similar at best.
 Scope: this server steers a picture. It is not the place to mine the graph. \
 Bulk querying, schema exploration and result tables belong to the graph's own \
 MCP server (kglite-mcp-server); `show_cypher` here exists to put a result \
-ON SCREEN, not to read it back.
+ON SCREEN, not to read it back. `records` inspects bounded fields for exact \
+source handles returned by `browse_type`, `load_nodes`, or `show_cypher`. These \
+handles expire with the session generation; they are not source id-field values.
 
 The one thing here that is not about the screen: `list_saved_queries` and \
 `run_saved_query` read the queries THIS USER saved for THIS graph. Start there \
@@ -140,6 +139,47 @@ render; if you see one, the honest report is the bound, not the subset.";
 // sensible default would turn "the agent omitted the body" into a
 // deserialization error instead of a usable message.
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+struct HandleArg {
+    generation: String,
+    node_id: u32,
+}
+
+impl From<HandleArg> for NodeHandle {
+    fn from(value: HandleArg) -> Self {
+        Self {
+            generation: value.generation,
+            node_id: value.node_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+struct RecordsArgs {
+    #[serde(default)]
+    handles: Vec<HandleArg>,
+    #[serde(default)]
+    fields: Vec<String>,
+    #[serde(default)]
+    offset: u32,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+struct BrowseTypeArgs {
+    #[serde(default)]
+    node_type: String,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+struct LoadNodesArgs {
+    #[serde(default)]
+    handles: Vec<HandleArg>,
+}
 
 /// Which way an expansion walks. A local mirror of core's
 /// [`EdgeDirection`] so the JSON schema an agent reads is a plain enum rather
@@ -475,6 +515,68 @@ impl ViewControl {
             params: args.params.map(into_params).unwrap_or_default(),
             limit: None,
             as_graph: true,
+        }))
+        .await
+    }
+
+    #[tool(
+        description = "Inspect typed fields for generation-scoped source node handles without \
+                       changing the shared view. At most 500 rows, 32 fields, 5000 handles \
+                       and 2 MiB per answer; default page size is 100. Missing, null, unavailable \
+                       and truncated cells are explicit. Use returned next_offset to page. \
+                       Handles are source identities, never renderer slots or Cypher id values."
+    )]
+    async fn records(
+        &self,
+        Parameters(args): Parameters<RecordsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        match self
+            .run(Request::Records(RecordsRequest {
+                handles: args.handles.into_iter().map(Into::into).collect(),
+                fields: args.fields,
+                offset: args.offset,
+                limit: args.limit.unwrap_or(100),
+            }))
+            .await?
+        {
+            Ok(Response::Records(table)) => ok_json(&serde_json::json!(table)),
+            Ok(_) => Err(McpError::internal_error(
+                "records returned an unexpected response",
+                None,
+            )),
+            Err(err) => Ok(refused(&err)),
+        }
+    }
+
+    #[tool(
+        description = "Load a bounded set of source nodes of one type into the shared view, \
+                       including disconnected nodes. Does not require choosing a relationship. \
+                       Returns exact session handles for record inspection and loading; reports \
+                       the core bound and broadcasts the same slice to all attached browsers."
+    )]
+    async fn browse_type(
+        &self,
+        Parameters(args): Parameters<BrowseTypeArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.mutate(Request::BrowseType(BrowseTypeRequest {
+            node_type: args.node_type,
+            limit: args.limit,
+        }))
+        .await
+    }
+
+    #[tool(
+        description = "Load exact generation-scoped source node handles into the shared view. \
+                       A handle never uses a Cypher id-field value or a renderer slot, so duplicate \
+                       keys and slot compaction cannot redirect a selected row. Stale generation \
+                       handles are refused. Core bounds apply and all browsers receive the change."
+    )]
+    async fn load_nodes(
+        &self,
+        Parameters(args): Parameters<LoadNodesArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.mutate(Request::LoadNodes(LoadNodesRequest {
+            handles: args.handles.into_iter().map(Into::into).collect(),
         }))
         .await
     }
@@ -970,6 +1072,8 @@ impl ViewControl {
                 serde_json::json!({
                     "slot": node.slot,
                     "node_id": node.node_id,
+                    "handle": node.handle,
+                    "typed_key": node.typed_key,
                     "type": node.node_type,
                     "title": node.title,
                 })
@@ -1059,19 +1163,17 @@ mod tests {
     use super::*;
     use kglite_visual_core::{GEOMETRY_CAVEAT, GEOMETRY_STATIC_CAVEAT};
 
-    /// The tool surface, by name: D14's nine, E4's two saved-query tools,
-    /// E5's `set_layout` and E8's `export_view`.
-    ///
-    /// A list, not a count: "thirteen tools" would still pass if `focus` were
-    /// renamed to `zoom`, and the name is the API — an agent's prompt refers to
-    /// it and a rename breaks every conversation that mentions one.
-    const EXPECTED: [&str; 13] = [
+    /// Names are the API: a count alone cannot detect a rename.
+    const EXPECTED: [&str; 16] = [
+        "browse_type",
         "collapse",
         "expand",
         "export_view",
         "focus",
         "highlight",
         "list_saved_queries",
+        "load_nodes",
+        "records",
         "render",
         "reset_view",
         "run_saved_query",

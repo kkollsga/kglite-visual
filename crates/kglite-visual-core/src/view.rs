@@ -76,6 +76,8 @@ pub enum SlotEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct ViewEdge {
+    /// Source relation identity; schema links have no source edge.
+    pub edge_id: Option<u32>,
     pub source_slot: u32,
     pub target_slot: u32,
     /// Relationship type, or the meta-graph's relationship-type name.
@@ -108,39 +110,21 @@ pub enum SliceKind {
 }
 
 /// One instance node a slice added.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct SliceNode {
+    pub handle: crate::records::NodeHandle,
+    pub typed_key: crate::records::RecordCell,
     pub slot: u32,
-    /// kglite's own node index — the id every later request *of this app's*
-    /// names this node by: `expand`, `collapse`, `node`, `export`, the slot
-    /// space, all of it.
-    ///
-    /// **It is not what Cypher's `id(n)` returns**, and conflating the two was
-    /// a shipped defect. See [`SliceNode::key`].
+    /// Immutable engine identity within `handle.generation`, never a Cypher id field.
     pub node_id: u32,
     pub node_type: String,
     /// The node's title field, for the label overlay. Empty when the type has
     /// no title: an empty label is honest, a fabricated one is not.
     pub title: String,
-    /// The node's `id` **field** — what kglite's Cypher `id(n)` evaluates to,
-    /// and the only handle a generated query can name this node by.
-    ///
-    /// **A separate value from [`SliceNode::node_id`], because they are
-    /// separate things.** kglite is a property graph over records: `id` is one
-    /// of its four builtin *fields* (`id`, `title`, `name`, `type`), carrying
-    /// whatever the source data called its key, and `id(n)` reads that field.
-    /// `node_id` above is the engine's internal `NodeIndex`. On a graph where
-    /// nothing carries an `id`, or where the two coincide by luck, they look
-    /// interchangeable — which is exactly how `MATCH (n:T) WHERE id(n) IN
-    /// $ids` shipped with `NodeIndex` values in `$ids`, answering **0 rows for
-    /// sodir's `FieldReserves`** (ids 1..2 329 against indices ~41 000) and,
-    /// worse, answering with the **wrong rows** for `Wellbore`, whose `id`
-    /// range happens to overlap the index range. Measured 2026-08-30.
-    ///
-    /// `None` where the node has no `id` field. Such a node cannot be named in
-    /// a generated query at all, and the caller says so rather than quietly
-    /// leaving it out of a table that claims to be of what is on screen.
+    /// Legacy Cypher id-field value, omitted when missing, oversized or not
+    /// exactly representable in JSON. Use `typed_key` for lossless display and
+    /// `handle` for record selection; source keys need not be unique.
     #[ts(type = "unknown")]
     pub key: Option<serde_json::Value>,
 }
@@ -215,6 +199,19 @@ pub struct View {
     tombstones: usize,
 }
 
+impl Clone for View {
+    fn clone(&self) -> Self {
+        Self {
+            slots: SlotAllocator::starting_at(self.slots.len()),
+            entries: self.entries.clone(),
+            node_slot: self.node_slot.clone(),
+            type_slot: self.type_slot.clone(),
+            edges: self.edges.clone(),
+            tombstones: self.tombstones,
+        }
+    }
+}
+
 impl View {
     pub fn new() -> Self {
         Self::default()
@@ -285,7 +282,10 @@ impl View {
     /// the same edge, and cosmos.gl draws a duplicated link twice — which reads
     /// as a heavier relationship rather than as a bug.
     pub fn add_edge(&mut self, edge: ViewEdge) {
-        if self.edges.contains(&edge) {
+        if self.edges.iter().any(|present| match edge.edge_id {
+            Some(id) => present.edge_id == Some(id),
+            None => present == &edge,
+        }) {
             return;
         }
         self.edges.push(edge);
@@ -447,6 +447,7 @@ mod tests {
 
     fn edge(source_slot: u32, target_slot: u32) -> ViewEdge {
         ViewEdge {
+            edge_id: Some(source_slot * 1000 + target_slot),
             source_slot,
             target_slot,
             name: "KNOWS".to_string(),

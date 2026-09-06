@@ -17,6 +17,7 @@ pub mod loader;
 pub mod meta_graph;
 pub mod protocol;
 pub mod query;
+pub mod records;
 pub mod render;
 pub mod request;
 pub mod session;

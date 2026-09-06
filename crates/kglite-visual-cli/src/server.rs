@@ -189,6 +189,9 @@ fn router(state: AppState) -> Router {
         // an expansion is not idempotent, and a GET that appends slots would
         // be re-run by any cache or prefetcher in the path.
         .route("/api/cypher", post(api::cypher))
+        .route("/api/records", post(api::records))
+        .route("/api/browse-type", post(api::browse_type))
+        .route("/api/load-nodes", post(api::load_nodes))
         .route("/api/search", post(api::search))
         .route("/api/preview", post(api::preview))
         .route("/api/expand", post(api::expand))

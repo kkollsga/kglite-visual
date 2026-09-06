@@ -109,3 +109,29 @@ test('fnv1a distinguishes layouts and repeats exactly', () => {
   expect(fnv1a(a)).not.toBe(fnv1a(b))
   expect(fnv1a(a)).toMatch(/^[0-9a-f]{8}$/)
 })
+
+
+test('typed record identities and missing states survive decoding without number coercion', () => {
+  const assembler = new ResponseAssembler()
+  const table = {
+    generation: 'test-generation',
+    rows: [{
+      handle: { generation: 'test-generation', node_id: 7 },
+      slot: null,
+      cells: [
+        { state: 'value', value: { type: 'int64', value: '9007199254740993' } },
+        { state: 'value', value: { type: 'boolean', value: false } },
+        { state: 'value', value: { type: 'string', value: '' } },
+        { state: 'null' }, { state: 'missing' },
+        { state: 'unavailable', reason: 'source field unavailable' },
+        { state: 'truncated', preview: '1000 items', reason: 'collection limit' },
+      ],
+    }],
+  }
+  const decoded = assembler.push(decodeFrame(frame(MessageType.RECORDS,
+    new TextEncoder().encode(JSON.stringify(table)))))
+  expect(decoded).toEqual({ kind: 'records', value: table })
+  const next = assembler.push(decodeFrame(frame(MessageType.QUERY_TABLE,
+    new TextEncoder().encode('{"columns":["count"],"rows":[[1]]}'))))
+  expect(next?.kind).toBe('query-table')
+})

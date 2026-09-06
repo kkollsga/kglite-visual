@@ -70,6 +70,10 @@ several of them mutate the slot space, and a `GET` that appended slots would be
 re-run by any cache in the path.
 
 ```bash
+curl -s -XPOST $B/api/browse-type    -H "$C" -d '{"node_type":"Person","limit":40}'
+# Copy handles from the returned nodes; do not substitute renderer slots or source id fields.
+curl -s -XPOST $B/api/records        -H "$C" -d '{"handles":[],"fields":["id","title"],"limit":100}'
+curl -s -XPOST $B/api/load-nodes     -H "$C" -d '{"handles":[]}'
 curl -s -XPOST $B/api/preview        -H "$C" -d '{"slot":0}'
 curl -s -XPOST $B/api/expand         -H "$C" -d '{"slot":0,"relationship":"KNOWS","direction":"out","limit":40}'
 curl -s -XPOST $B/api/collapse       -H "$C" -d '{"slot":0}'
@@ -160,18 +164,19 @@ mcp set_layout '{"kernel":"geo"}'
 Errors an agent can act on come back as `isError: true` with kglite's own
 message. Quote it; do not summarise it.
 
-## The thirteen tools
+## The sixteen tools
 
-Ten are verbs about the screen. The two saved-query tools are the exception
-that proves the rule — they read a store belonging to *this* window and to the
-human who filled it, which is not a fact any other server has — and
-`export_view` is the thirteenth, which takes what is on the screen out of the
-screen.
+The shared-view tools load, inspect, arrange and export a bounded exploration.
+`records` reads typed fields without changing that view. Saved-query tools use
+the visualizer's own query store.
 
 | Tool | What it does |
 |---|---|
 | `view_state` | What is on the shared screen right now: the slot space, type nodes and their drill-in state, instance counts by type, tombstones, what the response bound did to the last change, and `connected_viewers`. Read it before acting, and after anything surprising |
 | `show_cypher` | Run read-only Cypher and put the resulting nodes and relationships **into** the shared view. Bounded in core. A display verb — to read a table, ask the graph's own MCP server |
+| `browse_type` | Load bounded instances of a type, including disconnected nodes, without writing Cypher |
+| `load_nodes` | Load exact generation-scoped node handles; a handle from another session is refused |
+| `records` | Read bounded typed fields by handles without changing membership; integer values are decimal strings and missing, null and truncated cells are explicit |
 | `expand` | Load a slot's neighbours. A type slot loads instances; an instance slot loads what it is connected to. `limit` is a request, not a guarantee |
 | `collapse` | Remove a slot's expansion. Slot numbers are not reissued unless the answer carries a compaction, which renumbers everything and says so |
 | `highlight` | Make things stand out. Name `slots`, or give a `search` string and let the server find them — hits already loaded are marked, hits that are not are counted back. `concept` is `highlighted` (a result set) or `selected` (the one thing you are talking about) |

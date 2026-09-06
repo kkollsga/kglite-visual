@@ -384,6 +384,8 @@ pub struct NodeDetail {
     /// same type is unreadable.
     #[ts(type = "[string, unknown][]")]
     pub properties: Vec<(String, serde_json::Value)>,
+    pub property_bound: crate::BoundInfo,
+    pub title_truncated: bool,
 }
 
 /// Read one node's properties.
@@ -395,20 +397,38 @@ pub fn node_detail(graph: &DirGraph, slot: u32, node_id: u32) -> Result<NodeDeta
         .node_view(NodeIndex::new(node_id as usize))
         .ok_or_else(|| CoreError::Request(format!("node {node_id} is not in this graph")))?;
 
-    let mut properties: Vec<(String, serde_json::Value)> = view
-        .property_pairs_named(&graph.interner)
+    let mut keys = view.property_keys(&graph.interner);
+    keys.sort_unstable();
+    let total = keys.len();
+    let properties: Vec<_> = keys
         .into_iter()
-        .map(|(key, value)| (key, value_to_json(&value)))
+        .filter(|key| key.len() <= 256)
+        .take(crate::records::MAX_RECORD_FIELDS)
+        .map(|key| {
+            let value = view
+                .get_property(key)
+                .map(|value| crate::records::legacy_cell_json(&value))
+                .unwrap_or(serde_json::Value::Null);
+            (key.to_string(), value)
+        })
         .collect();
-    properties.sort_by(|a, b| a.0.cmp(&b.0));
+    let property_bound = crate::BoundInfo::new(properties.len(), total);
+    let full_title = value_to_display(&view.title());
+    let title: String = full_title
+        .chars()
+        .take(crate::records::MAX_CELL_BYTES)
+        .collect();
+    let title_truncated = title.len() < full_title.len();
 
     Ok(NodeDetail {
         protocol_version: PROTOCOL_VERSION,
         slot,
         node_id,
         node_type: view.node_type_str(&graph.interner).to_string(),
-        title: value_to_display(&view.title()),
+        title,
         properties,
+        property_bound,
+        title_truncated,
     })
 }
 

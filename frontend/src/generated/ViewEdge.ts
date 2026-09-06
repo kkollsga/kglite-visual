@@ -3,7 +3,11 @@
 /**
  * One link in the view, in slot space.
  */
-export type ViewEdge = { source_slot: number, target_slot: number, 
+export type ViewEdge = { 
+/**
+ * Source relation identity; schema links have no source edge.
+ */
+edge_id: number | null, source_slot: number, target_slot: number, 
 /**
  * Relationship type, or the meta-graph's relationship-type name.
  */

@@ -90,24 +90,17 @@ pub const MAX_EXPANSION_BYTES: usize = 2 * 1024 * 1024;
 /// 1.6–5.7 ms, and the response is 156–299 KB. A click lands.
 pub const DEFAULT_EXPANSION_NODES: usize = 1_000;
 
-/// Serialized-size estimate for one node in a slice.
-///
-/// Title plus type name plus the JSON scaffolding around slot, node id and the
-/// two keys. Deliberately an over-estimate: a byte bound that under-counts is a
-/// byte bound that does not hold.
+/// Walk budget for labels and fixed node metadata. Session admission separately
+/// meters the complete serialized view, including handles and source keys.
 pub(crate) fn slice_node_bytes(title: &str, node_type: &str) -> usize {
-    title.len() + node_type.len() + 96
+    serde_json::to_string(title).map_or(usize::MAX / 4, |s| s.len())
+        + serde_json::to_string(node_type).map_or(usize::MAX / 4, |s| s.len())
+        + 256
 }
 
-/// Serialized-size estimate for one link in a slice.
-///
-/// A `ViewEdge` is two slot numbers, the relationship name and the `meta` flag,
-/// plus the two f32 slots the same link occupies in the `Links` array. Measured
-/// against a real 5 000-node slice at ~67 bytes per link; over-estimated here
-/// for the same reason as the node estimate — a byte bound that under-counts is
-/// a byte bound that does not hold.
+/// JSON-escaped relationship name, identity, slots and binary topology.
 pub(crate) fn slice_link_bytes(name: &str) -> usize {
-    name.len() + 64
+    serde_json::to_string(name).map_or(usize::MAX / 4, |s| s.len()) + 96
 }
 
 /// The bound one expansion actually runs under.
@@ -289,6 +282,7 @@ fn sort_previews(previews: &mut [RelationshipPreview]) {
 /// what happened to be on screen already.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FoundEdge {
+    pub edge_id: u32,
     pub source: NodeIndex,
     pub target: NodeIndex,
     pub name: String,
@@ -323,6 +317,24 @@ pub struct Expansion {
 pub fn expand(
     graph: &DirGraph,
     seeds: &[NodeIndex],
+    relationship: Option<&str>,
+    direction: EdgeDirection,
+    bound: Bound,
+    deadline: Option<Instant>,
+) -> Expansion {
+    expand_iter(
+        graph,
+        seeds.iter().copied(),
+        relationship,
+        direction,
+        bound,
+        deadline,
+    )
+}
+
+pub(crate) fn expand_iter(
+    graph: &DirGraph,
+    seeds: impl IntoIterator<Item = NodeIndex>,
     relationship: Option<&str>,
     direction: EdgeDirection,
     bound: Bound,
@@ -399,40 +411,45 @@ pub fn expand(
             // each edge, and reading it is the whole reason the slower walk
             // exists: a link the client cannot name is a link the user cannot
             // interpret.
-            let found: Vec<(NodeIndex, String)> = match relationship {
-                Some(name) => graph
-                    .graph
-                    .iter_peers_filtered(*seed, *dir, conn)
-                    .map(|(peer, _)| (peer, name.to_string()))
-                    .collect(),
-                None => graph
-                    .graph
-                    .edges_directed_filtered(*seed, *dir, None)
-                    .map(|er| {
-                        let peer = match dir {
-                            Direction::Outgoing => er.target(),
-                            Direction::Incoming => er.source(),
-                        };
-                        // `connection_type()`, not `weight().connection_type`:
-                        // the disk backend reads the former from its CSR
-                        // endpoint table and materialises `EdgeData` only for
-                        // the latter, which this walk never needs.
-                        (
-                            peer,
-                            graph.interner.resolve(er.connection_type()).to_string(),
-                        )
-                    })
-                    .collect(),
-            };
+            let found: Box<dyn Iterator<Item = (NodeIndex, u32, String)> + '_> =
+                match relationship {
+                    Some(name) => Box::new(
+                        graph
+                            .graph
+                            .iter_peers_filtered(seed, *dir, conn)
+                            .map(|(peer, id)| (peer, id.index() as u32, name.to_string())),
+                    ),
+                    None => Box::new(graph.graph.edges_directed_filtered(seed, *dir, None).map(
+                        |er| {
+                            let peer = match dir {
+                                Direction::Outgoing => er.target(),
+                                Direction::Incoming => er.source(),
+                            };
+                            // `connection_type()`, not `weight().connection_type`:
+                            // the disk backend reads the former from its CSR
+                            // endpoint table and materialises `EdgeData` only for
+                            // the latter, which this walk never needs.
+                            (
+                                peer,
+                                er.id().index() as u32,
+                                graph.interner.resolve(er.connection_type()).to_string(),
+                            )
+                        },
+                    )),
+                };
 
-            for (peer, name) in found {
-                total_reachable.insert(*seed);
+            for (peer, edge_id, name) in found {
+                if deadline.is_some_and(|dl| Instant::now() > dl) {
+                    truncated = true;
+                    break 'walk;
+                }
+                total_reachable.insert(seed);
                 total_reachable.insert(peer);
                 // The seed is admitted lazily, alongside its first peer: a seed
                 // with no matching edges is not part of this expansion's
                 // answer, and admitting it eagerly would spend the bound on
                 // isolated nodes before reaching the connected ones.
-                if !admit(*seed, &mut nodes, &mut seen, &mut bytes)
+                if !admit(seed, &mut nodes, &mut seen, &mut bytes)
                     || !admit(peer, &mut nodes, &mut seen, &mut bytes)
                 {
                     truncated = true;
@@ -463,10 +480,11 @@ pub fn expand(
                 }
                 bytes += link_size;
                 let (source, target) = match dir {
-                    Direction::Outgoing => (*seed, peer),
-                    Direction::Incoming => (peer, *seed),
+                    Direction::Outgoing => (seed, peer),
+                    Direction::Incoming => (peer, seed),
                 };
                 edges.push(FoundEdge {
+                    edge_id,
                     source,
                     target,
                     name,
@@ -479,7 +497,7 @@ pub fn expand(
     // reciprocated edge twice, and a per-insert containment check over a Vec is
     // quadratic in the bound.
     edges.sort_unstable();
-    edges.dedup();
+    edges.dedup_by_key(|edge| edge.edge_id);
 
     let info = BoundInfo {
         returned: nodes.len() as u32,
