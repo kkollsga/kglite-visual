@@ -228,10 +228,27 @@ fn router(state: AppState) -> Router {
         .route("/api/layout", post(api::layout))
         .route("/api/subset", post(api::subset))
         .route("/api/caption", post(api::caption))
+        .route("/api/presentation", post(api::presentation))
         // The one route that answers with image bytes rather than JSON (D13).
         // POST like the rest of the vocabulary: it carries a body, and a GET
         // whose query string held a Cypher statement would be logged, cached
         // and re-run by anything in the path.
+        .route(
+            "/api/render/preview",
+            post(crate::output_api::render_preview),
+        )
+        .route(
+            "/api/render/download",
+            post(crate::output_api::render_download),
+        )
+        .route(
+            "/api/export/preview",
+            post(crate::output_api::export_preview),
+        )
+        .route(
+            "/api/export/download",
+            post(crate::output_api::export_download),
+        )
         .route("/api/render", post(api::render))
         // …and the second, for the same reason and by the opposite method
         // (plan E8). A download is what `<a href download>` does, an anchor

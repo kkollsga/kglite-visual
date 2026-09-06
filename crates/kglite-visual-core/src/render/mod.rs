@@ -325,6 +325,7 @@ pub(crate) struct SceneLink {
 /// Everything the emitter needs and nothing it does not.
 #[derive(Debug, Clone)]
 pub(crate) struct Scene {
+    pub legend: Vec<SceneLegend>,
     pub nodes: Vec<SceneNode>,
     pub links: Vec<SceneLink>,
     /// Status lines, drawn top-left in the same order the app's status block
@@ -347,6 +348,12 @@ pub(crate) struct Scene {
     /// no centre, and falls through to [`structure::plan`]. Empty for a request
     /// with no origin at all.
     pub seeds: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SceneLegend {
+    pub text: String,
+    pub color: Option<encoding::Rgba>,
 }
 
 /// Build the slice, lay it out, and emit the image.
@@ -397,7 +404,61 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     let width = check_dimension(request.width, "width")?;
     let height = check_dimension(request.height, "height")?;
 
-    let mut scene = build_scene(session, request)?;
+    let scene = build_scene(session, request)?;
+    draw_checked(scene, request, width, height, &Default::default(), None)
+}
+
+pub(crate) fn draw_scene(
+    scene: Scene,
+    request: &RenderRequest,
+    presentation: &crate::presentation::PresentationSettings,
+) -> Result<Rendered, CoreError> {
+    let width = check_dimension(request.width, "width")?;
+    let height = check_dimension(request.height, "height")?;
+    draw_checked(
+        scene,
+        request,
+        width,
+        height,
+        presentation,
+        Some(crate::output::MAX_OUTPUT_BYTES),
+    )
+}
+
+fn fit_legend(scene: &mut Scene, width: u32, height: u32) {
+    if scene.legend.is_empty() {
+        return;
+    }
+    let allowed = ((f64::from(height) * 0.4 / 18.0) as usize)
+        .saturating_sub(scene.status.len() + scene.banners.len() + 2);
+    let omitted = scene.legend.len().saturating_sub(allowed);
+    scene.legend.truncate(allowed);
+    if omitted > 0 {
+        scene
+            .banners
+            .push(format!("{omitted} legend entries omitted: canvas space"));
+    }
+    let chars = ((f64::from(width) - 80.0).max(0.0) / 7.25) as usize;
+    for entry in &mut scene.legend {
+        if entry.text.chars().count() > chars {
+            entry.text = entry
+                .text
+                .chars()
+                .take(chars.saturating_sub(1))
+                .chain(std::iter::once('…'))
+                .collect();
+        }
+    }
+}
+
+fn draw_checked(
+    mut scene: Scene,
+    request: &RenderRequest,
+    width: u32,
+    height: u32,
+    presentation: &crate::presentation::PresentationSettings,
+    byte_limit: Option<usize>,
+) -> Result<Rendered, CoreError> {
     if scene.nodes.is_empty() {
         // An empty canvas is the worst possible answer here: it is
         // indistinguishable from a rendering failure, and an agent handed one
@@ -480,6 +541,7 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         }
     }
 
+    fit_legend(&mut scene, width, height);
     let links: Vec<(usize, usize)> = scene.links.iter().map(|l| (l.source, l.target)).collect();
     let plan = live_layout::choose_plan(
         request.kernel.unwrap_or_default(),
@@ -517,7 +579,10 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
         width: f64::from(width),
         height: f64::from(height),
         reserved_top: svg::status_block_height(
-            scene.status.len() + scene.banners.len() + usize::from(scene.place_all_labels),
+            scene.status.len()
+                + scene.banners.len()
+                + scene.legend.len()
+                + usize::from(scene.place_all_labels),
         ) + svg::LABEL_REACH_ABOVE,
     };
     let groups = arc_groups(&scene);
@@ -565,14 +630,42 @@ fn draw(session: &Session, request: &RenderRequest) -> Result<Rendered, CoreErro
     // — so the count of names actually drawn is the only honest one to print.
     // Deriving it from the budget alone (which is what round 2 did) reports a
     // number the picture contradicts the moment a region thins.
-    let placed = svg::place_labels(&scene, &positions, width, height);
+    let placed = svg::place_labels_presented(
+        &scene,
+        &positions,
+        width,
+        height,
+        presentation.label_density,
+    );
     let names_shown = (scene.place_all_labels && placed.len() < scene.nodes.len())
         .then_some(clamp_u32(placed.len() as u64));
     if let Some(line) = names_shown_line(scene.place_all_labels, placed.len(), scene.nodes.len()) {
         scene.status.push(line);
     }
 
-    let document = svg::emit(&scene, &positions, width, height, request.theme, &placed);
+    let document = if let Some(limit) = byte_limit {
+        svg::emit_capped(
+            &scene,
+            &positions,
+            width,
+            height,
+            request.theme,
+            &placed,
+            (presentation.edge_opacity, limit),
+        )?
+    } else if presentation.edge_opacity == 1.0 {
+        svg::emit(&scene, &positions, width, height, request.theme, &placed)
+    } else {
+        svg::emit_presented(
+            &scene,
+            &positions,
+            width,
+            height,
+            request.theme,
+            &placed,
+            presentation.edge_opacity,
+        )
+    };
     let bytes = match request.format {
         RenderFormat::Svg => document.into_bytes(),
         RenderFormat::Png => raster::to_png(&document, width, height)?,
@@ -1200,6 +1293,7 @@ fn live_scene(session: &Session) -> Scene {
     }
 
     Scene {
+        legend: Vec::new(),
         status,
         nodes,
         links,
@@ -1358,6 +1452,7 @@ fn meta_scene(meta: &MetaGraphResponse, session: &Session, canvas_names: usize) 
     }
 
     Scene {
+        legend: Vec::new(),
         status,
         nodes,
         links,
@@ -1468,6 +1563,7 @@ fn slice_scene(session: &Session, slice: &GraphSlice, seed_type: Option<&str>) -
     );
 
     Scene {
+        legend: Vec::new(),
         status: status_lines(session, nodes.len(), links.len(), "nodes"),
         nodes,
         links,
@@ -1611,6 +1707,7 @@ mod tests {
     #[test]
     fn a_folded_fan_is_moored_to_its_parent() {
         let scene = Scene {
+            legend: Vec::new(),
             nodes: vec![node("parent", 10.0, None), node("T x 27", 20.0, Some(27))],
             links: vec![SceneLink {
                 source: 0,
@@ -1656,6 +1753,7 @@ mod tests {
     #[test]
     fn a_folded_fan_is_never_moored_under_the_status_block() {
         let scene = Scene {
+            legend: Vec::new(),
             nodes: vec![node("parent", 10.0, None), node("T x 27", 20.0, Some(27))],
             links: vec![SceneLink {
                 source: 0,
@@ -1724,6 +1822,7 @@ mod tests {
         xy.push((540.0, 400.0));
 
         let scene = Scene {
+            legend: Vec::new(),
             nodes,
             links,
             status: Vec::new(),
@@ -1765,6 +1864,7 @@ mod tests {
     #[test]
     fn a_coincident_fan_is_pushed_outward_rather_than_left_on_its_parent() {
         let scene = Scene {
+            legend: Vec::new(),
             nodes: vec![
                 node("far", 6.0, None),
                 node("parent", 10.0, None),

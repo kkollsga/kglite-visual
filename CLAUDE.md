@@ -23,7 +23,7 @@ localhost CLI and a Python wheel.
 > drawn at whichever of three scales the frame can resolve — the simulation
 > stops, dragging goes off, and the server then knows where the points
 > are), and the D2 deterministic mode behind an explicit
-> `?deterministic=1` switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v8)
+> `?deterministic=1` switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v9)
 > with an exact framing baseline, an axum server on localhost with the
 > frontend embedded, **a Python wheel whose `show()` runs that same server
 > lib-linked into the extension**, **`kglite-visual render` /

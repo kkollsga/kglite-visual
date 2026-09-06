@@ -172,7 +172,7 @@ the visualizer's own query store.
 
 | Tool | What it does |
 |---|---|
-| `view_state` | What is on the shared screen right now: the slot space, type nodes and their drill-in state, instance counts by type, tombstones, what the response bound did to the last change, and `connected_viewers`. Read it before acting, and after anything surprising |
+| `view_state` | What is on the shared screen right now: the slot space, type nodes and their drill-in state, instance counts by type, tombstones, what the response bound did to the last change, current appearance/caption/readability settings, and `connected_viewers`. Read it before acting, and after anything surprising |
 | `show_cypher` | Run read-only Cypher and put the resulting nodes and relationships **into** the shared view. Bounded in core. A display verb — to read a table, ask the graph's own MCP server |
 | `browse_type` | Load bounded instances of a type, including disconnected nodes, without writing Cypher |
 | `load_nodes` | Load exact generation-scoped node handles; a handle from another session is refused |
@@ -183,15 +183,15 @@ the visualizer's own query store.
 | `collapse` | Remove a slot's expansion. Slot numbers are not reissued unless the answer carries a compaction, which renumbers everything and says so |
 | `highlight` | Make things stand out. Name `slots`, or give a `search` string and let the server find them — hits already loaded are marked, hits that are not are counted back. `concept` is `highlighted` (a result set) or `selected` (the one thing you are talking about) |
 | `focus` | Zoom the human's camera to frame these slots — the honest way to say "look at this". An empty list frames the whole view. Changes nothing about what is loaded |
-| `set_appearance` | Drive `color_by` / `size_by` from node properties. Omitting a field clears that channel back to the structural encoding |
+| `set_appearance` | Set property colour/size channels and optional shared `presentation` settings. Presentation-only changes preserve channels; supplying a channel uses legacy replacement semantics, where an omitted channel clears it |
 | `set_subset` | Set enabled type, category, numeric-range, missing-value, relation and isolate predicates over loaded instances; all clients receive the same visible subset |
 | `set_caption` | Set the shared caption property, or clear it back to the display title |
 | `set_layout` | Re-arrange the view with a layout computed **here**, and hold it still. See [what an agent may claim](#what-an-agent-may-claim) |
 | `reset_view` | Collapse everything back to the entry screen. Destructive to the human's place in the graph — prefer `collapse` on what *you* added |
-| `render` | Draw an image. `target: live-view` (default), `meta` or `cypher`. Geometry differs from their screen — always |
+| `render` | Draw a deterministic server image. Legacy targets remain available; explicit captured scopes provide a revision/settings digest for preview and final output. Geometry differs from the browser camera |
 | `list_saved_queries` | The Cypher this user saved for this graph, plus recently run queries. **Read it before writing a query of your own** |
 | `run_saved_query` | Run one by name, into the shared view. Same path, same bound; added to the user's recent list, because they are watching it happen |
-| `export_view` | Write the nodes currently in the view out as GraphML / GEXF / CSV / D3 JSON and hand back the text |
+| `export_view` | Preview and export explicit visible or loaded-induced scopes. A preview digest guards final output; omitted scope preserves the legacy loaded-induced text export |
 | `list_views` | List bounded durable and session-only saved-view summaries and storage eligibility |
 | `save_view` | Capture the acknowledged view, verify durable identities where possible, and save under a name; replacement is explicit |
 | `restore_view` | Verify a named view's source and atomically restore its exact membership and settings against the expected revision |
@@ -231,7 +231,26 @@ The consequences for an agent are concrete:
 - Every steering answer carries `connected_viewers`. Zero means you are talking
   to yourself.
 
-### `export_view` takes the view, not the graph
+### Captured output and readability
+
+For a captured visible export, pass `scope: "visible"`, `expected` and
+`subset_revision` from `view_state`. The first `export_view` call returns preview
+metadata. Repeat those settings with `preview_digest` to receive final graph
+text; stale revisions or changed settings refuse. `include_identity:true`
+optionally adds a bounded export-local ID to source-handle mapping. Read the
+format fidelity notes before choosing an output.
+
+`render` supports the same captured scopes and digest check. Its preview includes
+the actual deterministic image. It never captures the browser camera. See
+[export](export.md) for the HTTP routes and bounds.
+
+Read `view_state.presentation` before changing one readability setting. Send the
+complete desired settings object: omitted presentation fields receive their
+defaults. A presentation-only `set_appearance` preserves the current colour and
+size channels. Supplying either channel replaces both under the existing
+semantics, with an omitted channel cleared.
+
+### Legacy export scope
 
 Its default scope is the loaded instance nodes, including instances hidden by
 filters, and every source relationship between those nodes. On an empty view it
@@ -250,7 +269,7 @@ they have:
  "notes":["the nodes are exactly the ones selected; the edges are every edge this graph holds between them, which can be MORE than you saw …"]}
 ```
 
-The two caveats are in [export](export.md#the-two-caveats).
+Scope and format limitations are in [export](export.md#graph-formats).
 
 ### Saved queries first
 

@@ -10,11 +10,13 @@ import type { HighlightRequest } from "./HighlightRequest";
 import type { LayoutRequest } from "./LayoutRequest";
 import type { LoadEntitiesRequest } from "./LoadEntitiesRequest";
 import type { LoadNodesRequest } from "./LoadNodesRequest";
+import type { PresentationSettings } from "./PresentationSettings";
 import type { RecordsRequest } from "./RecordsRequest";
 import type { RevisionStamp } from "./RevisionStamp";
 import type { SearchRequest } from "./SearchRequest";
 import type { SlotRequest } from "./SlotRequest";
+import type { StyleRequest } from "./StyleRequest";
 import type { SubsetRequest } from "./SubsetRequest";
 import type { TypeRequest } from "./TypeRequest";
 
-export type SharedRequest = { expected?: RevisionStamp, request_id?: string, } & ({ "type": "load-entities" } & LoadEntitiesRequest | { "type": "field-detail" } & FieldDetailRequest | { "type": "reset" } | { "type": "subset" } & SubsetRequest | { "type": "appearance" } & AppearanceRequest | { "type": "caption" } & CaptionRequest | { "type": "focus" } & FocusRequest | { "type": "highlight" } & HighlightRequest | { "type": "cypher" } & CypherRequest | { "type": "records" } & RecordsRequest | { "type": "browse-type" } & BrowseTypeRequest | { "type": "load-nodes" } & LoadNodesRequest | { "type": "preview" } & SlotRequest | { "type": "expand" } & ExpandRequest | { "type": "collapse" } & SlotRequest | { "type": "node-detail" } & SlotRequest | { "type": "search" } & SearchRequest | { "type": "property-stats" } & TypeRequest | { "type": "layout" } & LayoutRequest);
+export type SharedRequest = { expected?: RevisionStamp, request_id?: string, } & ({ "type": "load-entities" } & LoadEntitiesRequest | { "type": "field-detail" } & FieldDetailRequest | { "type": "reset" } | { "type": "subset" } & SubsetRequest | { "type": "appearance" } & AppearanceRequest | { "type": "presentation" } & PresentationSettings | { "type": "style" } & StyleRequest | { "type": "caption" } & CaptionRequest | { "type": "focus" } & FocusRequest | { "type": "highlight" } & HighlightRequest | { "type": "cypher" } & CypherRequest | { "type": "records" } & RecordsRequest | { "type": "browse-type" } & BrowseTypeRequest | { "type": "load-nodes" } & LoadNodesRequest | { "type": "preview" } & SlotRequest | { "type": "expand" } & ExpandRequest | { "type": "collapse" } & SlotRequest | { "type": "node-detail" } & SlotRequest | { "type": "search" } & SearchRequest | { "type": "property-stats" } & TypeRequest | { "type": "layout" } & LayoutRequest);

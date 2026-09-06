@@ -85,7 +85,7 @@
 .kglv-canvas-layout:focus-within .kglv-hint { display: block; }
 .kglv-canvas-layout:has(.kglv-error) .kglv-hint { display: block; position: absolute; bottom: 45px; padding: 8px; background: #18222f; }
 .kglv-graph-host .kglv-legend { left: 14px; bottom: 68px; }
-.kglv-graph-host .kglv-export { left: auto; right: 14px; bottom: 68px; }
+.kglv-graph-host .kglv-export { left: auto; right: 14px; bottom: 68px; transform: none; margin-bottom: 0; max-height: calc(100% - 116px); overflow: auto; }
 .kglv-empty-exploration { position: absolute; top: 30%; left: 15%; right: 15%; text-align: center; }
 .kglv-empty-exploration h2 { font-size: 18px; font-weight: 500; }
 .kglv-empty-exploration .kglv-hint { margin: 10px auto 18px; max-width: 34ch; }
@@ -192,3 +192,17 @@
 .kglv-views-dialog pre { white-space:pre-wrap; overflow-wrap:anywhere; }
 @media(max-width:760px) { .kglv-saved-view-header { flex-basis:100%; justify-content:space-between; } .kglv-saved-marker { max-width:50vw; } .kglv-views-dialog { padding:14px; } }
 @media(max-width:760px) { .kglv-workspace-header { flex-wrap:wrap; } .kglv-saved-view-header { order:3; } }
+
+.kglv-readability { display: grid; gap: 10px; border-top: 1px solid var(--kglv-border, #34404d); padding-top: 12px; }
+.kglv-readability label, .kglv-output-dialog label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.kglv-readability input[type=number] { width: 80px; }
+.kglv-readability p, .kglv-output-dialog p { color: #aab7c7; font-size: 12px; line-height: 1.5; }
+.kglv-output-dialog { width: min(720px, calc(100vw - 40px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow: auto; background: #111c29; color: #e9eff5; border: 1px solid #40516a; border-radius: 12px; padding: 20px; }
+.kglv-output-dialog::backdrop { background: #0009; }
+.kglv-output-dialog > label { margin: 12px 0; }
+.kglv-output-dialog fieldset { border: 1px solid #40516a; margin: 16px 0; }
+.kglv-output-dialog img { max-width: 100%; height: auto; margin-top: 12px; }
+.kglv-output-dialog select { max-width: 70%; }
+.kglv-output-dialog input { width: 100px; }
+
+.kglv-readability input[type=number], .kglv-output-dialog input, .kglv-output-dialog select { background: #0d1117; color: #dbe6f2; border: 1px solid #40516a; border-radius: 5px; padding: 6px; }

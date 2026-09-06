@@ -68,10 +68,10 @@ listed under the editor in kglite's own words. It is a real endpoint, so a
 
 ```console
 $ curl -s -XPOST $B/api/validate -H "$C" -d '{"query":"MATCH (w:Wellbor) RETURN w"}'
-{"protocol_version":8,"diagnostics":[{"severity":"warning","message":"MATCH references unknown node label 'Wellbor' — the graph has no such type, so this pattern returns no rows. Did you mean 'Wellbore'?","line":null,"col":null}]}
+{"protocol_version":9,"diagnostics":[{"severity":"warning","message":"MATCH references unknown node label 'Wellbor' — the graph has no such type, so this pattern returns no rows. Did you mean 'Wellbore'?","line":null,"col":null}]}
 
 $ curl -s -XPOST $B/api/validate -H "$C" -d '{"query":"CREATE (n:Person) RETURN n"}'
-{"protocol_version":8,"diagnostics":[{"severity":"error","message":"this viewer runs queries read-only — the engine will refuse a statement that writes","line":null,"col":null}]}
+{"protocol_version":9,"diagnostics":[{"severity":"error","message":"this viewer runs queries read-only — the engine will refuse a statement that writes","line":null,"col":null}]}
 ```
 
 `severity` is `error` (it cannot run: a syntax error, or a write this read-only

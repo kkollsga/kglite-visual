@@ -133,6 +133,11 @@ about 2× the graph's size at the moment of the call.
 
 ## Render and export
 
+The browser’s Export dialog previews visible instances and exact retained
+relationships, the wider loaded-node induced graph, or a deterministic SVG/PNG.
+Downloads refuse stale previews after shared changes. The image uses a server
+layout, separate from the browser camera. Data tables also export scoped CSV.
+
 ```bash
 # an image: --meta, --cypher "…" or --expand type=T rel=R dir=out
 kglite-visual render graph.kgl --meta -o schema.svg

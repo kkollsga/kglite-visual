@@ -71,6 +71,7 @@ pub struct SharedSnapshotMeta {
     pub slice: GraphSliceMeta,
     pub subset: SubsetSnapshot,
     pub appearance: Appearance,
+    pub appearance_mapping: crate::appearance_mapping::AppearanceMapping,
     pub caption_by: Option<String>,
     pub highlighted: Vec<ViewReference>,
     pub selected: Vec<ViewReference>,
@@ -120,6 +121,7 @@ pub(crate) struct SharedViewState {
     pub predicates: Vec<SubsetFilter>,
     pub subset: SubsetSnapshot,
     pub appearance: Appearance,
+    pub appearance_mapping: crate::appearance_mapping::AppearanceMapping,
     pub caption_by: Option<String>,
     pub highlighted: Vec<ViewReference>,
     pub selected: Vec<ViewReference>,
@@ -142,6 +144,7 @@ impl SharedViewState {
             predicates: Vec::new(),
             subset: SubsetSnapshot::default(),
             appearance: Appearance::new(None, None),
+            appearance_mapping: Default::default(),
             caption_by: None,
             highlighted: Vec::new(),
             selected: Vec::new(),
@@ -351,6 +354,7 @@ impl Session {
                 slice: slice.meta,
                 subset: state.subset.clone(),
                 appearance: state.appearance.clone(),
+                appearance_mapping: state.appearance_mapping.clone(),
                 caption_by: state.caption_by.clone(),
                 highlighted: state.highlighted.clone(),
                 selected: state.selected.clone(),
@@ -369,6 +373,18 @@ impl Session {
     ) -> Result<(), CoreError> {
         let mut state = self.state_write();
         let topology_changed = !state.view.same_topology(&before.view);
+        if topology_changed
+            || state.appearance != before.appearance
+            || state.presentation != before.presentation
+            || state.derived != before.derived
+        {
+            state.appearance_mapping = crate::appearance_mapping::compute(
+                self.graph(),
+                &state,
+                self.generation(),
+                self.config().deadline(),
+            )?;
+        }
         if topology_changed
             || state.predicates != before.predicates
             || state.derived != before.derived
@@ -415,6 +431,27 @@ impl Session {
     }
     pub(crate) fn settings_uncommitted(&self, request: &Request) -> Result<Response, CoreError> {
         match request {
+            Request::Presentation(settings) => {
+                settings.validate()?;
+                self.state_write().presentation = settings.clone();
+            }
+            Request::Style(style) => {
+                if let Some(appearance) = &style.appearance {
+                    check_name(&appearance.color_by)?;
+                    check_name(&appearance.size_by)?;
+                }
+                if let Some(presentation) = &style.presentation {
+                    presentation.validate()?;
+                }
+                let mut state = self.state_write();
+                if let Some(appearance) = &style.appearance {
+                    state.appearance =
+                        Appearance::new(appearance.color_by.clone(), appearance.size_by.clone());
+                }
+                if let Some(presentation) = &style.presentation {
+                    state.presentation = presentation.clone();
+                }
+            }
             Request::Subset(request) => {
                 subset::validate(&request.predicates)?;
                 self.state_write().predicates = request.predicates.clone();

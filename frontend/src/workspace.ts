@@ -62,6 +62,7 @@ export class Workspace {
   readonly canvasHost = element('div', 'kglv-canvas')
   readonly status = element('div', 'kglv-status')
   readonly savedViewsHost = element('div', '')
+  readonly exportHost = element('div', '')
   readonly panelHosts: PanelHosts
 
   private readonly explore = element('section', 'kglv-explore')
@@ -121,7 +122,7 @@ export class Workspace {
       revealQuery: () => this.navigate('query'),
     }
     document.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || document.querySelector('dialog:modal') !== null) return
       if (this.activeDrawer !== null) {
         event.preventDefault()
         this.closeDrawer()
@@ -229,7 +230,7 @@ export class Workspace {
     this.graphName.dataset['testid'] = 'graph-name'
     const details = element('details', 'kglv-session-details')
     details.append(element('summary', '', 'Details'), this.status)
-    header.append(identity, this.savedViewsHost, this.connection, details)
+    header.append(identity, this.savedViewsHost, this.exportHost, this.connection, details)
     this.root.appendChild(header)
   }
 

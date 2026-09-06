@@ -33,11 +33,18 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 - Shared history provides bounded checkpoints and revision-checked recovery.
   The active saved-view marker distinguishes saved content from later changes.
 
+- Readability controls adjust instance labels, edge opacity, numeric sizes and
+  legend visibility. Browsers and captured images share one bounded appearance
+  mapping.
+- Scoped export previews distinguish visible retained relationships from loaded
+  nodes with source-induced relationships. Revision-checked downloads include
+  graph formats, deterministic SVG/PNG and explicitly scoped table CSV.
+
 ### Changed
 
 - Shared HTTP, WebSocket and MCP mutations commit and publish in one order.
   Optional expected revisions reject stale actions without changing the view;
-  reconnects receive an atomic snapshot. Protocol 8 carries these snapshots
+  reconnects receive an atomic snapshot. Protocol 9 carries these snapshots
   alongside typed-array topology, positions, typed query cells and field detail.
 - Cumulative explorations refuse additions above 5,000 instance nodes, 20,000
   relationships or 2 MiB of membership/topology, without partially applying them.

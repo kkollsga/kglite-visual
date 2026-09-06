@@ -110,8 +110,42 @@ pub(crate) fn emit(
     theme: Theme,
     placed: &[labels::PlacedLabel],
 ) -> String {
-    let palette = theme.palette();
-    let mut out = String::with_capacity(4_096 + scene.nodes.len() * 256);
+    emit_presented(scene, positions, width, height, theme, placed, 1.0)
+}
+
+pub(crate) fn emit_presented(
+    scene: &Scene,
+    positions: &Positions,
+    width: u32,
+    height: u32,
+    theme: Theme,
+    placed: &[labels::PlacedLabel],
+    edge_opacity: f32,
+) -> String {
+    emit_capped(
+        scene,
+        positions,
+        width,
+        height,
+        theme,
+        placed,
+        (edge_opacity, usize::MAX),
+    )
+    .expect("unlimited SVG emission")
+}
+
+pub(crate) fn emit_capped(
+    scene: &Scene,
+    positions: &Positions,
+    width: u32,
+    height: u32,
+    theme: Theme,
+    placed: &[labels::PlacedLabel],
+    options: (f32, usize),
+) -> Result<String, crate::CoreError> {
+    let mut palette = theme.palette();
+    palette.link_opacity *= f64::from(options.0);
+    let mut out = SvgWriter::new(options.1);
 
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     out.push_str(&format!(
@@ -138,7 +172,7 @@ pub(crate) fn emit(
     emit_status(&mut out, scene, &palette);
 
     out.push_str("</svg>\n");
-    out
+    out.finish()
 }
 
 /// Ink the coastline and the graticule are allowed.
@@ -172,7 +206,7 @@ const GRATICULE_TARGET_LINES: f64 = 6.0;
 /// canvas rectangle, so the coast never runs through the tray of nodes that have
 /// no coordinate; and to the data's own lon/lat box, so the picture shows the
 /// region the data is in rather than a world map with a dot on it.
-fn emit_basemap(out: &mut String, positions: &Positions, palette: &Palette) {
+fn emit_basemap(out: &mut SvgWriter, positions: &Positions, palette: &Palette) {
     let Some(frame) = positions.geo else {
         return;
     };
@@ -193,7 +227,7 @@ fn emit_basemap(out: &mut String, positions: &Positions, palette: &Palette) {
     out.push_str("</g>\n");
 }
 
-fn emit_graticule(out: &mut String, frame: &super::geo::GeoFrame, palette: &Palette) {
+fn emit_graticule(out: &mut SvgWriter, frame: &super::geo::GeoFrame, palette: &Palette) {
     let (west, south, east, north) = frame.bbox;
     let step = |span: f64| -> f64 {
         *GRATICULE_STEPS_DEG
@@ -252,7 +286,7 @@ fn emit_graticule(out: &mut String, frame: &super::geo::GeoFrame, palette: &Pale
 ///
 /// Open polylines, no `Z`: the coast is stroked and never filled, and a closing
 /// chord across a clipped fragment would be a line the world does not have.
-fn emit_coast(out: &mut String, frame: &super::geo::GeoFrame, palette: &Palette) {
+fn emit_coast(out: &mut SvgWriter, frame: &super::geo::GeoFrame, palette: &Palette) {
     let (west, south, east, north) = frame.bbox;
     let span = (east - west).max(north - south);
     let resolution = super::coastline::resolution_for_span(span);
@@ -304,7 +338,7 @@ const ISLAND_CORNER_PX: f64 = 22.0;
 /// The tray of unattached singletons gets a dashed outline and no tint: it is
 /// not a community, and a solid hull round it would claim the opposite of what
 /// the partition found.
-fn emit_islands(out: &mut String, scene: &Scene, positions: &Positions, palette: &Palette) {
+fn emit_islands(out: &mut SvgWriter, scene: &Scene, positions: &Positions, palette: &Palette) {
     if positions.islands.is_empty() {
         return;
     }
@@ -384,7 +418,7 @@ fn emit_islands(out: &mut String, scene: &Scene, positions: &Positions, palette:
 /// reader sees first. Both are drawn — an edge the picture hides is an edge the
 /// reader concludes is not there — and cross-island lines go down first so a
 /// within-island line is never buried under one.
-fn emit_links(out: &mut String, scene: &Scene, positions: &Positions, palette: &Palette) {
+fn emit_links(out: &mut SvgWriter, scene: &Scene, positions: &Positions, palette: &Palette) {
     if scene.links.is_empty() {
         return;
     }
@@ -455,7 +489,7 @@ fn emit_links(out: &mut String, scene: &Scene, positions: &Positions, palette: &
 /// painting the big types first leaves the small ones visible on top of them
 /// instead of swallowed. Ties break on slot, so the order stays a function of
 /// the input.
-fn emit_nodes(out: &mut String, scene: &Scene, positions: &Positions) {
+fn emit_nodes(out: &mut SvgWriter, scene: &Scene, positions: &Positions) {
     let mut order: Vec<usize> = (0..scene.nodes.len()).collect();
     order.sort_by(|a, b| {
         scene.nodes[*b]
@@ -517,7 +551,7 @@ const HALO_RING: f64 = 1.7;
 ///
 /// Drawn in the node's own colour, so the emphasis says "here" rather than
 /// introducing a colour the palette does not otherwise use.
-fn emit_halo(out: &mut String, x: f64, y: f64, radius: f64, color: &str) {
+fn emit_halo(out: &mut SvgWriter, x: f64, y: f64, radius: f64, color: &str) {
     out.push_str(&format!(
         "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{color}\" fill-opacity=\"0.12\"/>\n",
         num(x),
@@ -564,7 +598,7 @@ const WEDGE_APEX_BACK: f64 = 0.55;
 /// not produce today) it opens right, and the arbitrary choice is fixed rather
 /// than derived so the document stays a function of the input.
 fn emit_wedge(
-    out: &mut String,
+    out: &mut SvgWriter,
     scene: &Scene,
     positions: &Positions,
     index: usize,
@@ -713,8 +747,42 @@ pub(crate) fn place_labels(
     )
 }
 
+pub(crate) fn place_labels_presented(
+    scene: &Scene,
+    positions: &Positions,
+    width: u32,
+    height: u32,
+    density: f32,
+) -> Vec<labels::PlacedLabel> {
+    if density == 1.0 || scene.place_all_labels {
+        return place_labels(scene, positions, width, height);
+    }
+    let mut specs = label_specs(scene, positions);
+    specs.sort_by(|a, b| {
+        b.pinned
+            .cmp(&a.pinned)
+            .then_with(|| b.weight.cmp(&a.weight))
+            .then_with(|| b.degree.cmp(&a.degree))
+            .then_with(|| a.slot.cmp(&b.slot))
+    });
+    let ordinary = specs.iter().filter(|spec| !spec.pinned).count();
+    let keep = (ordinary as f64 * f64::from(density)).floor() as usize;
+    let mut remaining = keep;
+    specs.retain(|spec| {
+        if spec.pinned {
+            true
+        } else if remaining > 0 {
+            remaining -= 1;
+            true
+        } else {
+            false
+        }
+    });
+    labels::choose(&specs, false, labels::budget(width, height))
+}
+
 fn emit_labels(
-    out: &mut String,
+    out: &mut SvgWriter,
     scene: &Scene,
     positions: &Positions,
     palette: &Palette,
@@ -841,7 +909,7 @@ fn emit_labels(
 /// without its response; a truncated render that only reported the fact in a
 /// JSON field would be a complete-looking picture the moment anyone pasted it
 /// anywhere.
-fn emit_status(out: &mut String, scene: &Scene, palette: &Palette) {
+fn emit_status(out: &mut SvgWriter, scene: &Scene, palette: &Palette) {
     let lines: Vec<(&str, &str)> = scene
         .status
         .iter()
@@ -859,13 +927,20 @@ fn emit_status(out: &mut String, scene: &Scene, palette: &Palette) {
     let longest = lines
         .iter()
         .map(|(line, _)| line.chars().count())
+        .chain(
+            scene
+                .legend
+                .iter()
+                .map(|entry| entry.text.chars().count() + 3),
+        )
         .max()
         .unwrap_or(0);
     // A monospace advance at 12px; the block only has to be wide enough not to
     // clip, so an estimate is what it needs (there is no text metric here, by
     // the same argument the label widths make).
     let box_width = longest as f64 * 7.25 + 2.0 * STATUS_PAD_X;
-    let box_height = lines.len() as f64 * STATUS_LINE_PX + 2.0 * STATUS_PAD_Y;
+    let box_height =
+        (lines.len() + scene.legend.len()) as f64 * STATUS_LINE_PX + 2.0 * STATUS_PAD_Y;
 
     out.push_str(&format!(
         "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"6\" fill=\"{}\" \
@@ -889,6 +964,25 @@ fn emit_status(out: &mut String, scene: &Scene, palette: &Palette) {
             num(STATUS_Y + STATUS_PAD_Y + (i as f64 + 0.75) * STATUS_LINE_PX),
             color,
             escape(line)
+        ));
+    }
+    for (index, entry) in scene.legend.iter().enumerate() {
+        let y =
+            STATUS_Y + STATUS_PAD_Y + (lines.len() as f64 + index as f64 + 0.75) * STATUS_LINE_PX;
+        if let Some(color) = entry.color {
+            out.push_str(&format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"10\" height=\"10\" fill=\"{}\"/>\n",
+                num(STATUS_X + STATUS_PAD_X),
+                num(y - 9.0),
+                rgb(color[0], color[1], color[2])
+            ));
+        }
+        out.push_str(&format!(
+            "<text x=\"{}\" y=\"{}\" fill=\"{}\">{}</text>\n",
+            num(STATUS_X + STATUS_PAD_X + 18.0),
+            num(y),
+            palette.status_text,
+            escape(&entry.text)
         ));
     }
     out.push_str("</g>\n");
@@ -992,5 +1086,52 @@ mod tests {
         assert_eq!(rgb(0.0, 0.0, 0.0), "#000000");
         assert_eq!(rgb(1.0, 1.0, 1.0), "#ffffff");
         assert_eq!(rgb(2.0, -1.0, 0.5), "#ff0080", "out-of-range clamps");
+    }
+}
+
+struct SvgWriter {
+    text: String,
+    limit: usize,
+    overflow: bool,
+}
+impl SvgWriter {
+    fn new(limit: usize) -> Self {
+        Self {
+            text: String::with_capacity(4096.min(limit)),
+            limit,
+            overflow: false,
+        }
+    }
+    fn push_str(&mut self, text: &str) {
+        if self.overflow {
+            return;
+        }
+        if text.len() > self.limit.saturating_sub(self.text.len()) {
+            self.overflow = true;
+            return;
+        }
+        self.text.push_str(text);
+    }
+    fn finish(self) -> Result<String, crate::CoreError> {
+        if self.overflow {
+            Err(crate::CoreError::Request(
+                "SVG exceeds its encoded output byte limit".into(),
+            ))
+        } else {
+            Ok(self.text)
+        }
+    }
+}
+
+#[cfg(test)]
+mod bounded_writer_tests {
+    use super::SvgWriter;
+    #[test]
+    fn byte_cap_refuses_before_appending_the_overflowing_chunk() {
+        let mut writer = SvgWriter::new(10);
+        writer.push_str("12345");
+        writer.push_str("123456");
+        assert_eq!(writer.text.len(), 5);
+        assert!(writer.finish().is_err());
     }
 }

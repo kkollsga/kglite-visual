@@ -1,22 +1,4 @@
-/**
- * What the colours and sizes on screen mean (plan E11).
- *
- * **A reader of this app's own state, not a second source of truth.** Every
- * entry is built from the values the appearance layer is *currently* filling
- * its typed arrays with — `categoricalLegend` returns the same value→colour
- * pairs `compileCategoricalColor` assigns, and the structural swatches are the
- * literals `baseColor` returns. A legend that computed its own colours would be
- * a second opinion about the picture, and the swatch is the half a reader
- * trusts, so it is the half that would be wrong.
- *
- * **No wire.** Nothing here asks the server anything: the encoding is entirely
- * a client decision (which is why `control::Appearance` had to exist at all),
- * so a legend over it is DOM and nothing else.
- *
- * It is collapsible and starts collapsed on a view whose encoding is purely
- * structural, because "big circle = many members" is not worth a card until
- * something less obvious is driving the colours.
- */
+/** The shared encoding supplies legend rows; this DOM never chooses a palette. */
 
 import type { Rgba } from './appearance'
 
@@ -114,6 +96,8 @@ export class Legend {
 
   /** Rows currently drawn — what `__kglv` reports and an e2e asserts. */
   entryCount = 0
+
+  setVisible(visible: boolean): void { this.root.hidden = !visible }
 
   /**
    * Show the card without waiting to be clicked.

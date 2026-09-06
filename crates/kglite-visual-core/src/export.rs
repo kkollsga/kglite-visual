@@ -31,7 +31,7 @@
 //! stay in step.
 
 use kglite::api::io::{to_csv, to_d3_json, to_gexf, to_graphml};
-use kglite::api::{CurrentSelection, DirGraph, NodeIndex};
+use kglite::api::{CurrentSelection, DirGraph, GraphRead, NodeIndex};
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
@@ -150,12 +150,14 @@ pub struct ExportedView {
 impl ExportedView {
     /// The caveats that apply to *this* export.
     ///
-    /// One today, and it is format-independent: [`EDGE_SUPERSET_NOTE`] is true
-    /// of every format. The signature stays a `Vec` because the per-format
-    /// shape is the honest one — GraphML carried a second note until kglite
-    /// 0.16.16 closed the gap, and the next format-specific caveat lands here.
+    /// Loaded-induced scope is common to every format; reserved-field loss
+    /// is additionally named for D3 JSON.
     pub fn notes(&self) -> Vec<&'static str> {
-        vec![EDGE_SUPERSET_NOTE]
+        let mut notes = vec![EDGE_SUPERSET_NOTE];
+        if self.format == ExportFormat::Json {
+            notes.push("D3 JSON omits a genuine node property named type because that name is reserved for the structural node type");
+        }
+        notes
     }
 }
 
@@ -177,6 +179,9 @@ pub fn export_nodes(
              query with 'show in graph' first."
                 .to_string(),
         ));
+    }
+    if format == ExportFormat::Json {
+        validate_d3_topology_keys(graph, nodes)?;
     }
 
     // The selection is built here and passed as `Some` unconditionally. This is
@@ -205,6 +210,27 @@ pub fn export_nodes(
         nodes: nodes.len() as u32,
         filename: filename_for(label, format),
     })
+}
+
+fn validate_d3_topology_keys(graph: &DirGraph, nodes: &[NodeIndex]) -> Result<(), CoreError> {
+    let _guard = graph.begin_read_pass();
+    let selected: std::collections::HashSet<_> = nodes.iter().copied().collect();
+    for &node in nodes {
+        for edge in graph
+            .graph
+            .edges(node)
+            .filter(|edge| selected.contains(&edge.target()))
+        {
+            if edge
+                .weight()
+                .property_iter(&graph.interner)
+                .any(|(key, _)| matches!(key, "source" | "target" | "type"))
+            {
+                return Err(CoreError::Request("D3 JSON cannot preserve a relation property named source, target, or type without overwriting topology; choose GraphML".into()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Every node in the graph, in index order — the caller-writes-the-list form

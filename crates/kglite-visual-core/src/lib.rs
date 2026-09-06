@@ -6,6 +6,7 @@
 //! the seam between them. A `use axum::…` reaching this crate is the boundary
 //! being crossed, not a convenience.
 
+pub mod appearance_mapping;
 pub mod bookmark;
 mod bookmark_capture;
 mod bookmark_members;
@@ -21,6 +22,10 @@ pub mod launch;
 pub mod layout;
 pub mod loader;
 pub mod meta_graph;
+pub mod output;
+mod output_capture;
+mod output_render;
+mod output_values;
 pub mod presentation;
 pub mod protocol;
 pub mod query;

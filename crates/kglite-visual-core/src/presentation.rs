@@ -4,6 +4,13 @@ use ts_rs::TS;
 
 use crate::CoreError;
 
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/generated/")]
+pub struct StyleRequest {
+    pub appearance: Option<crate::control::AppearanceRequest>,
+    pub presentation: Option<PresentationSettings>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 #[serde(default)]

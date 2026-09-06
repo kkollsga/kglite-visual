@@ -80,7 +80,9 @@ use std::fmt;
 /// carry explicit source references; scalar values never imply graph identity.
 /// **v8** carries saved-view association, bounded recovery history and shared
 /// presentation settings in the atomic snapshot, with a separate content revision.
-pub const PROTOCOL_VERSION: u32 = 8;
+/// **v9** adds canonical source-handle appearance mappings, shared by browser,
+/// reconnect and server-rendered output instead of per-client statistic order.
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Header size in bytes (6 × `u32`).
 pub const HEADER_BYTES: usize = 24;

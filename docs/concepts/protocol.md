@@ -13,11 +13,15 @@ headless renderer are three consumers of it.
 
 ## The version number
 
-Every response carries `protocol_version`. It currently reads **8**.
+Every response carries `protocol_version`. It currently reads **9**.
 
 ```json
-{"protocol_version":8,"core_version":"<package version>","tier":"compact","slot_count":98,…}
+{"protocol_version":9,"core_version":"<package version>","tier":"compact","slot_count":98,…}
 ```
+
+Version 9 adds the canonical bounded appearance mapping and shared readability
+settings requests. Browsers and captured images consume the same colour/size
+mapping instead of depending on statistics fetched by one client.
 
 Version 7 adds paged field detail, exact query-row entity references, typed query
 cells, handle-based source search and an explicit compaction event flag. Version 8 adds content revisions, saved-view

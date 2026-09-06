@@ -65,7 +65,7 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
 
     // ── the entry screen ────────────────────────────────────────────────
     const entry = await state(page)
-    expect(entry.protocolVersion).toBe(8)
+    expect(entry.protocolVersion).toBe(9)
     expect(entry.tier).toBe('full')
     expect(entry.pointCount).toBe(META_POINTS)
     expect(entry.linkCount).toBe(META_LINKS)

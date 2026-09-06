@@ -2,24 +2,28 @@
 
 ## Colour and size
 
-The **Appearance** panel drives two channels from node properties: `colour by`
-and `size by`. Clearing one returns it to the app's structural encoding — type
-colour, log-scaled member count.
+The **Appearance** panel maps properties to colour and size. Clearing a channel
+returns it to the structural encoding. The core publishes the same bounded
+mapping and legend to every browser and to captured server images; opening a
+property inspector in one browser does not determine another browser's colours.
 
-The candidates in each picker come from the type's
-[property statistics](index.md#inspecting-a-node), not from a list of every
-property name: a property with ten distinct values over full coverage makes a
-readable colour channel, and one with sixty unique strings does not.
-
-The same two channels are drivable from outside the browser, which is how an
-agent recolours the view you are looking at:
+Property domains describe loaded instances, so hiding nodes with a filter does
+not silently change the scale. Typed category labels distinguish a number from
+a string containing the same characters. Missing and unavailable values remain
+explicit rather than becoming invented measurements.
 
 ```bash
 curl -s -XPOST $B/api/appearance -H "$C" -d '{"color_by":"city","size_by":"age"}'
 ```
 
-The property name is not validated: the viewer's own statistics decide what is
-meaningful, and a name nothing carries renders uniformly rather than failing.
+## Readability
+
+Shared controls adjust instance-label density, selected/hovered label priority,
+edge opacity, the numeric size-by range and legend visibility. Schema labels
+remain present. Numeric size limits affect property-based sizes; structural
+schema and instance sizes keep their established meaning. These choices survive
+reconnect and saved-view restoration, and captured images receive the same
+presentation settings.
 
 ## Captions
 
@@ -55,9 +59,8 @@ restores that node without another source search or an unbounded load.
 
 ## Export
 
-The **export** card beside the legend writes the current view out as GraphML,
-GEXF, node CSV, edge CSV or D3 JSON. The default scope is loaded instances, including those hidden by filters, with
-every source relationship between the selected nodes. An empty view is refused
-by name rather than answered with an empty file.
+Open **Export** to preview visible instances, loaded instances with
+source-induced relationships, or a deterministic server image. The preview
+names its scope and revision; download refuses after the shared view changes.
 
-See [export](../export.md) for the format and relationship-scope caveats.
+See [export](../export.md) for formats, bounds and relationship-scope caveats.

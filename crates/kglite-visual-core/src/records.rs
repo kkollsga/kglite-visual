@@ -173,10 +173,26 @@ pub(crate) fn read_cell(graph: &DirGraph, node_id: u32, field: &str) -> RecordCe
         };
     };
     if field == "type" {
-        return cell(&Value::String(node.node_type_str(&graph.interner).into()));
+        return string_cell(node.node_type_str(&graph.interner));
+    }
+    let mut string = None;
+    let field_value = match field {
+        "id" => node.id_field(),
+        "title" => node.title_field(),
+        _ => node.str_field(InternedKey::from_str(field)),
+    };
+    field_value.is(|text| {
+        string = Some(string_cell(text));
+        true
+    });
+    if let Some(cell) = string {
+        return cell;
     }
     match node.get_field_ref(field) {
         Some(value) => cell(&value),
+        None if node.property_count() > 4096 => RecordCell::Unavailable {
+            reason: "null/absence inspection exceeds 4096 source properties".into(),
+        },
         None if node
             .property_key_set()
             .contains(&InternedKey::from_str(field)) =>
@@ -185,6 +201,16 @@ pub(crate) fn read_cell(graph: &DirGraph, node_id: u32, field: &str) -> RecordCe
         }
         None => RecordCell::Missing,
     }
+}
+
+fn string_cell(text: &str) -> RecordCell {
+    if text.len() > MAX_CELL_BYTES.saturating_sub(32) {
+        return RecordCell::Truncated {
+            preview: text.chars().take(256).collect(),
+            reason: "string exceeds 4096 byte conversion budget".into(),
+        };
+    }
+    cell(&Value::String(text.into()))
 }
 
 pub fn cell(value: &Value) -> RecordCell {

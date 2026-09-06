@@ -21,6 +21,9 @@ import { DataWorkspace, handleKey } from './data'
 import { FieldDetails } from './field-detail'
 import { ExplorationTrail } from './trail'
 import { SavedViews } from './views'
+import { PresentationControls, DEFAULT_PRESENTATION } from './presentation'
+import { AppearanceMappingIndex } from './mapping'
+import { typedText } from './cells'
 import type { NodeHandle } from './generated/NodeHandle'
 import type { QueryRowReferences } from './generated/QueryRowReferences'
 import type { SharedWireMeta } from './generated/SharedWireMeta'
@@ -30,9 +33,6 @@ import type { RecordTable } from './generated/RecordTable'
 import type { RecordCell } from './generated/RecordCell'
 
 import {
-  categoricalLegend,
-  compileCategoricalColor,
-  compileNumericSize,
   fillColors,
   HIGHLIGHT_COLOR,
   linkWidth,
@@ -60,7 +60,7 @@ import { LabelOverlay } from './labels'
 import { ExportCard } from './export'
 import { PathBuilder } from './path'
 import { Legend, type LegendEntry, type LegendSection } from './legend'
-import { formatCell, Panels } from './panels'
+import { Panels } from './panels'
 import {
   assertLittleEndian,
   fnv1a,
@@ -182,7 +182,11 @@ const legend = new Legend(workspace.graphHost)
  * about *this view* rather than about the app. The legend says what the picture
  * means; this says what leaves with it (plan E8).
  */
-const exportCard = new ExportCard(workspace.graphHost)
+const exportCard = new ExportCard(workspace.graphHost, root)
+const exportButton = document.createElement('button'); exportButton.type = 'button'; exportButton.className = 'kglv-button'
+exportButton.textContent = 'Export'; exportButton.dataset['testid'] = 'workspace-export'
+exportButton.onclick = () => exportCard.openScoped(exportButton)
+workspace.exportHost.append(exportButton)
 const assembler = new ResponseAssembler()
 const transport = new WebSocketTransport('ws')
 const shared = new SharedState()
@@ -197,6 +201,8 @@ let pendingGraphFocus: string | null = null
 const privateRequests = new Map<string, string>()
 const pendingSharedRequests = new Map<string, string>()
 const filters = new Filters(workspace.panelHosts.filters, predicates => send({type: 'subset', predicates}))
+const readability = new PresentationControls(workspace.panelHosts.appearance, settings => send({type: 'presentation', ...settings}))
+const mappedAppearance = new AppearanceMappingIndex()
 
 let surface: Surface | null = null
 let lastMeta: MetaGraphMeta | null = null
@@ -218,12 +224,8 @@ let truncationBanner: string | null = null
  */
 let fitOnSettle = true
 
-/** Appearance state: a compiled getter plus the values it reads. */
-let colorByStat: PropertyStat | null = null
+let colorByName: string | null = null
 let sizeByName: string | null = null
-const appearanceValues = new Map<number, unknown>()
-/** Values for the size channel, keyed by slot. Separate array, separate query. */
-const sizeValues = new Map<number, number>()
 /**
  * The property each type's nodes are captioned by, or `null` for the title
  * kglite chose (plan E11).
@@ -268,7 +270,7 @@ const panels = new Panels(workspace.panelHosts.inspector, {
     panels.showTableNote(null)
     send({ type: 'cypher', query, params: {}, limit: null, as_graph: asGraph })
     // The one place a user-typed query is recorded. The app's own queries —
-    // appearance values, "load into view" — go through `send` directly and are
+    // generated path queries go through `send` directly and are
     // deliberately not history.
     void refreshQueries(store.recordQuery(query))
   },
@@ -511,39 +513,6 @@ void refreshQueries()
 if (startupMode === 'deterministic') panels.hideLayoutPicker()
 
 /**
- * The colour channel, from either driver.
- *
- * Extracted when the `appearance` command landed (plan D14): the menu and a
- * remote agent must move the same channel through the same code, or the two
- * drivers would drift into two behaviours for one control.
- */
-function applyColorBy(property: string | null): void {
-  colorByStat = property === null ? null : (lastStats.get(property) ?? null)
-  appearanceValues.clear()
-  debugState.colorBy = property
-  // A colour the user chose is the one encoding nobody can read off the
-  // picture, so this is the moment the card earns its space.
-  if (property !== null) legend.open()
-  if (property === null) {
-    redraw()
-    return
-  }
-  requestValues(property, 'color')
-}
-
-/** The size channel, from either driver. See {@link applyColorBy}. */
-function applySizeBy(property: string | null): void {
-  sizeByName = property
-  sizeValues.clear()
-  debugState.sizeBy = property
-  if (property === null) {
-    redraw()
-    return
-  }
-  requestValues(property, 'size')
-}
-
-/**
  * Frame the named slots, or the whole view when the list is empty.
  *
  * Slots ARE renderer point indices — that is the D4 identity contract, and it
@@ -661,8 +630,9 @@ function applyLayout(message: LayoutMessage): void {
 /** Drive both appearance channels from a remote command. */
 function applyAppearance(command: AppearanceCommand): void {
   panels.setAppearanceSelection(command.color_by, command.size_by)
-  applyColorBy(command.color_by)
-  applySizeBy(command.size_by)
+  colorByName = command.color_by; sizeByName = command.size_by
+  debugState.colorBy = colorByName; debugState.sizeBy = sizeByName
+  redraw()
 }
 
 /** The property statistics behind the dropdowns, by property name. */
@@ -674,6 +644,7 @@ const transportHandlers: TransportHandlers = {
   onStatus: (connected) => {
     connectedAtom.set(connected)
     workspace.setConnected(connected)
+    if (!connected) readability.disconnected()
     renderStatus()
   },
   onError: (message) => fail(message),
@@ -692,7 +663,7 @@ const transportHandlers: TransportHandlers = {
 }
 transport.connect(transportHandlers)
 
-const sharedMutations = new Set(['expand', 'collapse', 'browse-type', 'load-nodes', 'load-entities', 'reset', 'layout', 'appearance', 'caption', 'subset', 'focus', 'highlight'])
+const sharedMutations = new Set(['expand', 'collapse', 'browse-type', 'load-nodes', 'load-entities', 'reset', 'layout', 'appearance', 'presentation', 'caption', 'subset', 'focus', 'highlight'])
 function send(request: Request): string {
   const request_id = `browser-${++requestSerial}`
   const mutation = sharedMutations.has(request.type) || (request.type === 'cypher' && request.as_graph)
@@ -865,6 +836,7 @@ async function handle(completed: Completed): Promise<void> {
         pendingSharedRequests.delete(completed.request_id)
         if (requestKind === undefined && ![...privateRequests.values()].includes(completed.request_id)) break
       }
+      if (requestKind === 'presentation') { readability.error(completed.value); break }
       if (requestKind === 'subset') { filters.error(completed.conflict !== undefined ? `Shared view changed: ${completed.value}. Review and apply again.` : completed.value); break }
       if (completed.conflict !== undefined) { filters.error(`Shared view changed: ${completed.value}. Review the current filters and apply again.`); break }
       if (pendingLayoutKernel !== null) {
@@ -945,6 +917,10 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
   const bound = snapshot.last_slice?.bound ?? snapshot.slice.bound
   noteTruncation(bound.truncated, bound.returned, bound.total, 'nodes', snapshot.last_slice?.link_bound ?? snapshot.slice.link_bound)
   filters.update(snapshot.subset)
+  readability.update(snapshot.presentation, message.meta.request_id)
+  exportCard.update(snapshot)
+  legend.setVisible(snapshot.presentation.legend_visible)
+  if (previous?.presentation.edge_opacity !== snapshot.presentation.edge_opacity) surface?.graph.setConfigPartial({linkOpacity: snapshot.presentation.edge_opacity})
   dataWorkspace?.update(snapshot)
   savedViews?.update(snapshot)
   redraw(layoutChanged || (topology && layoutKernel !== 'simulation') ? 'server' : undefined, topology)
@@ -953,11 +929,6 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
   if (pendingGraphFocus !== null && message.meta.request_id === pendingGraphFocus) { pendingGraphFocus = null; focusSelection() }
   if (topology && layoutKernel === 'simulation') { fitOnSettle = firstAdmission; surface?.reheat() }
   if (encodingChanged || previous?.stamp.revision !== snapshot.stamp.revision) {
-    if (snapshot.appearance.color_by !== null) {
-      requestValues(snapshot.appearance.color_by, 'color')
-      if (colorByStat === null) refreshSharedColorStat(snapshot.appearance.color_by)
-    }
-    if (sizeByName !== null) requestValues(sizeByName, 'size')
     for (const [type, property] of captionByType) if (property !== null) requestValues(property, 'caption', type)
   }
 }
@@ -1000,12 +971,14 @@ function applySnapshotEncoding(change: SnapshotChange): boolean {
   const {snapshot, previous, topology} = change
   const encodingChanged = topology || JSON.stringify(previous?.appearance) !== JSON.stringify(snapshot.appearance)
   if (encodingChanged) {
-    colorByStat = snapshot.appearance.color_by === null ? null : lastStats.get(snapshot.appearance.color_by) ?? null
+    colorByName = snapshot.appearance.color_by
+    if (colorByName !== null) legend.open()
     sizeByName = snapshot.appearance.size_by
-    appearanceValues.clear(); sizeValues.clear()
+
     debugState.colorBy = snapshot.appearance.color_by; debugState.sizeBy = sizeByName
     panels.setAppearanceSelection(snapshot.appearance.color_by, sizeByName)
   }
+  if (encodingChanged || previous?.presentation.node_size_min !== snapshot.presentation.node_size_min || previous?.presentation.node_size_max !== snapshot.presentation.node_size_max) mappedAppearance.set(snapshot.appearance_mapping)
   panels.setCaptionSelection(snapshot.caption_by)
   const captionChanged = topology || previous?.caption_by !== snapshot.caption_by
   if (captionChanged) {
@@ -1028,20 +1001,6 @@ function applySnapshotLayout(snapshot: SharedSnapshotMeta): void {
     surface.setAxes(axesFor(debugState.layoutMode))
   }
   panels.showLayoutKernel(layoutKernel, layoutKernel, view.liveCount)
-}
-
-function refreshSharedColorStat(property: string): void {
-  const stamp = shared.stamp
-  const nodeType = instanceTypesOnScreen()[0]
-  if (nodeType === undefined) return
-  void fetch(apiUrl('api/property-stats'), {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({node_type: nodeType})})
-    .then(async response => {
-      if (!response.ok) return
-      const stats = await response.json() as PropertyStatsResponse
-      if (stamp === null || !shared.matches(stamp) || shared.snapshot?.appearance.color_by !== property) return
-      colorByStat = stats.properties.find(stat => stat.name === property) ?? null
-      redraw()
-    }).catch(error => fail(String(error)))
 }
 
 async function showMetaGraph(message: {
@@ -1165,7 +1124,6 @@ function viewHasPlaceableNodes(): boolean {
 function appearance(): Appearance {
   const slots = view.slotCount
   const sizes = new Float32Array(slots)
-  const sizeOf = compileNumericSize([...sizeValues.values()])
   const largestType = maxTypeCount()
   for (let slot = 0; slot < slots; slot += 1) {
     const label = view.label(slot)
@@ -1176,8 +1134,9 @@ function appearance(): Appearance {
       sizes[slot] = 0
       continue
     }
-    if (sizeByName !== null && sizeValues.has(slot)) {
-      sizes[slot] = sizeOf(sizeValues.get(slot))
+    const mapped = mappedAppearance.get(label.handle)
+    if (mapped?.radius != null) {
+      sizes[slot] = mapped.radius
     } else if (label.isType) {
       sizes[slot] = typeRadius(label.weight, largestType, label.supporting)
     } else {
@@ -1185,11 +1144,10 @@ function appearance(): Appearance {
     }
   }
 
-  const colorOf = colorByStat === null ? null : compileCategoricalColor(colorByStat)
   const highlighted = new Set(interaction.highlightedSlots())
   const colors = fillColors(
     slots,
-    (slot) => baseColor(slot, colorOf),
+    (slot) => baseColor(slot),
     highlighted,
   )
 
@@ -1238,8 +1196,8 @@ function linkWidths(): Float32Array {
  * A slot's colour before highlighting.
  *
  * **Ported to Rust** as `base_color` in
- * `crates/kglite-visual-core/src/render/encoding.rs` (minus the colour-by
- * branch, which a render request has no equivalent of).
+ * `crates/kglite-visual-core/src/render/encoding.rs`; explicit channel
+ * overrides come from the shared core mapping used by captured images too.
  *
  * With no colour-by chosen, the two bits a type node carries are whether it
  * declares any capability and whether it is a *supporting* type — a type with
@@ -1249,14 +1207,15 @@ function linkWidths(): Float32Array {
  * the picture. An instance node is drawn in its own muted hue so the
  * meta-graph stays legible under an expansion.
  */
-function baseColor(slot: number, colorOf: ((value: unknown) => Rgba) | null): Rgba {
+function baseColor(slot: number): Rgba {
   const label = view.label(slot)
   if (label === undefined) return UNSET_COLOR
   // Size zero already stops the point drawing; alpha zero is the belt to that
   // brace, because a size the renderer clamps to a floor would otherwise leave
   // a coloured speck where the filter said there was nothing.
   if (hiddenSlots.has(slot)) return HIDDEN_COLOR
-  if (colorOf !== null && appearanceValues.has(slot)) return colorOf(appearanceValues.get(slot))
+  const mapped = mappedAppearance.get(label.handle)
+  if (mapped?.color != null) return mapped.color
   // An instance node takes its type's hue; a type node keeps the
   // capability/supporting encoding, which is a different fact and would be
   // destroyed by overwriting it with a hue.
@@ -1316,49 +1275,17 @@ function recomputeProjection(): void {
 }
 
 
-/**
- * Describe the encoding currently on screen (plan E11).
- *
- * Built from the same state `appearance()` fills its arrays from, one function
- * below it, so the two cannot drift: the categorical swatches come from
- * `categoricalLegend` — the palette's own assignment — and the structural ones
- * are the literals `baseColor` returns, cited there.
- *
- * The colour section is the one that earns the card. Size and links are listed
- * because a reader who has just learned that colour means something reasonably
- * asks what the other two channels mean, and "nothing you chose" is an answer.
- */
+/** Legend rows use the core mapping and the same structural fallback as the points. */
 function legendSections(): LegendSection[] {
   const sections: LegendSection[] = []
-  const palette = colorByStat === null ? null : categoricalLegend(colorByStat)
-
-  if (colorByStat !== null && palette !== null) {
-    const entries: LegendEntry[] = palette.map(({ value, color }) => ({
-      color,
-      label: formatCell(value) === '' ? '(no value)' : formatCell(value),
-    }))
-    // Only when something on screen actually landed there. An "other" row on a
-    // view where every node matched a value is a swatch for the empty set.
-    const covered = new Set(palette.map(({ value }) => JSON.stringify(value ?? null)))
-    const hasOther = [...appearanceValues.values()].some(
-      (value) => !covered.has(JSON.stringify(value ?? null)),
-    )
-    const unset = view.liveSlots().some((slot) => !appearanceValues.has(slot))
-    if (hasOther || unset) entries.push({ color: UNSET_COLOR, label: 'not set / other' })
-    sections.push({
-      title: `colour — ${colorByStat.name}`,
-      entries,
-      note: colorByStat.approx ? 'these values are approximate (kglite sampled)' : undefined,
-    })
-  } else if (colorByStat !== null) {
-    // The compiler refused to build a palette, so nothing IS coloured by it.
-    // Saying so is the whole job: a legend that listed the values anyway would
-    // be captioning colours the canvas does not carry.
-    sections.push({
-      title: `colour — ${colorByStat.name}`,
-      entries: [{ color: UNSET_COLOR, label: 'not coloured by this property' }],
-      note: 'its distinct values are a lower bound, so some nodes would silently get no colour',
-    })
+  const mapping = shared.snapshot?.appearance_mapping
+  if (colorByName !== null && mapping !== undefined) {
+    const entries: LegendEntry[] = mapping.categories.map(category => ({color: category.color, label: `${typedText(category.value)} · ${category.count}`}))
+    const states = new Map<string, number>()
+    for (const node of mapping.nodes) if (node.color_state !== null && node.color_state !== 'value') states.set(node.color_state, (states.get(node.color_state) ?? 0) + 1)
+    if (mapping.other_categories > 0) entries.push({color: UNSET_COLOR, label: `other · ${mapping.other_categories} categories`})
+    for (const [state, count] of states) entries.push({color: UNSET_COLOR, label: `${state} · ${count}`})
+    sections.push({title: `colour — ${colorByName}`, entries, note: 'Domain: loaded instances. Visual filters keep these colors stable.'})
   } else {
     // The structural encoding. These four literals mirror `baseColor` above.
     const entries: LegendEntry[] = [
@@ -1385,7 +1312,7 @@ function legendSections(): LegendSection[] {
     note:
       sizeByName === null
         ? 'a type circle grows with its member count (log); an instance node is fixed'
-        : `node size is ${sizeByName}`,
+        : `node size is ${sizeByName} · loaded instances · ${mapping?.size_min == null ? 'no numeric values' : `${typedText(mapping.size_min)} to ${typedText(mapping.size_max ?? mapping.size_min)}`} · ${shared.snapshot?.presentation.node_size_min ?? 4}–${shared.snapshot?.presentation.node_size_max ?? 22} radius; missing/non-numeric values use the minimum`,
   })
   sections.push({
     title: 'links',
@@ -1497,7 +1424,7 @@ function applyInteraction(): void {
   interaction.apply(surface.graph)
   const outlined = outlinedSlots()
   surface.graph.setConfigPartial({outlinedPointIndices: outlined.length > 0 ? outlined : undefined})
-  labels.setPinned(outlinedSlots())
+  labels.setPinned(priorityLabelSlots())
   updateTrackedPoints()
   surface.graph.render(undefined, 0)
   positionLabels(surface)
@@ -1512,7 +1439,7 @@ function applyInteraction(): void {
  * slice funnels through.
  */
 function refreshLabelSpecs(): void {
-  const selected = new Set(outlinedSlots())
+  const selected = new Set(priorityLabelSlots())
   labels.setLabels(
     view.liveSlots().filter((slot) => !hiddenSlots.has(slot)).map((slot) => {
       const label = view.label(slot)
@@ -1526,6 +1453,7 @@ function refreshLabelSpecs(): void {
         // that says so on every node is width spent on nothing.
         showCount: label?.isType === true || (label?.weight ?? 0) > 1,
         pinned: selected.has(slot),
+        schema: label?.isType === true,
         dimmed: label?.supporting === true,
       }
     }),
@@ -1567,6 +1495,7 @@ function positionLabels(current: Surface): void {
       radius: (index: number) => graph.getPointRadiusByIndex(index) ?? 0,
     },
     wholeSchema,
+    shared.snapshot?.presentation.label_density ?? 1,
   )
 }
 
@@ -1589,10 +1518,18 @@ function everyPoint(current: Surface): { indices: number[]; positions: number[] 
   return { indices, positions }
 }
 
+function priorityLabelSlots(): number[] {
+  const settings = shared.snapshot?.presentation ?? DEFAULT_PRESENTATION
+  const slots = settings.prioritize_selected_labels ? outlinedSlots() : []
+  const hover = interaction.hoveredSlot()
+  if (settings.prioritize_hovered_labels && hover !== null && !hiddenSlots.has(hover)) slots.push(hover)
+  return [...new Set(slots)]
+}
+
 let trackedPointsKey = ''
 function updateTrackedPoints(): void {
   if (surface === null) return
-  const slots = isMetaGraphOnly() ? visibleSlots() : outlinedSlots()
+  const slots = isMetaGraphOnly() ? visibleSlots() : [...new Set([...outlinedSlots(), ...priorityLabelSlots()])]
   const key = slots.join(',')
   if (key === trackedPointsKey) return
   trackedPointsKey = key
@@ -1709,7 +1646,7 @@ function showSummaryPanel(meta: MetaGraphMeta): void {
 }
 
 /** Handle-based field reads preserve exact source keys and never use Cypher identity guesses. */
-function requestValues(property: string, channel: 'color' | 'size' | 'caption', ofType: string | null = null): void {
+function requestValues(property: string, channel: 'caption', ofType: string | null = null): void {
   const key = `${channel}:${ofType ?? '*'}`
   const token = (valueTokens.get(key) ?? 0) + 1
   valueTokens.set(key, token)
@@ -1729,12 +1666,7 @@ function requestValues(property: string, channel: 'color' | 'size' | 'caption', 
         const slot = view.slotForHandle(row.handle)
         if (slot === undefined) continue
         const value = cellScalar(row.cells[0])
-        if (channel === 'color') appearanceValues.set(slot, value)
-        else if (channel === 'size' && value !== null && (typeof value === 'number' || typeof value === 'string')) {
-          const number = Number(value)
-          if (Number.isFinite(number)) sizeValues.set(slot, number)
-        }
-        else if (channel === 'caption' && typeof value === 'string' && value !== '') captionValues.set(slot, value)
+        if (typeof value === 'string' && value !== '') captionValues.set(slot, value)
       }
       offset = table.next_offset
     }

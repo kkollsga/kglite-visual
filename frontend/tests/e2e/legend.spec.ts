@@ -1,20 +1,11 @@
-/**
- * The legend says what the encoding on screen actually is (plan E11).
- *
- * **Asserted against the server's own statistics, not against a literal.** The
- * spec asks `POST /api/property-stats` for the type it is about to colour by,
- * takes the distinct values kglite reported, and requires the legend to list
- * those and no others. A test with the values written into it would still pass
- * against a legend that had stopped tracking the palette — which is the only
- * failure this card can have, since a decorative legend and a truthful one look
- * identical in a screenshot.
- */
+/** Legend assertions consume the acknowledged canonical domain, including its category bound. */
 
 import { keepSchemaContext, openDrawer, closeDrawer } from './navigation'
 
 import { expect, test, type Page } from '@playwright/test'
+import { typedText } from '../../src/cells'
 
-import { appUrl, launch, type Launched } from './harness'
+import { appUrl, launch, Listener, type Launched } from './harness'
 
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => window.__kglv?.ready === true, undefined, {
@@ -76,16 +67,24 @@ test('the legend lists the encoding in force, and changes when it does', async (
     // the picture is the one the user just invented.
     await expect(body).toBeVisible()
     await expect(body).toContainText(`colour — ${property}`)
-    for (const value of values) {
-      await expect(body).toContainText(String(value))
-    }
+    const listener = new Listener(server.info.url.replace(/^http/, 'ws') + 'ws')
+    await listener.open()
+    const message = listener.received.find(message => message.kind === 'shared-update')
+    listener.close()
+    if (message?.kind !== 'shared-update') throw new Error('Missing canonical appearance mapping')
+    const mapping = message.value.meta.snapshot.appearance_mapping
+    expect(mapping.categories).toHaveLength(Math.min(8, values.length))
+    for (const category of mapping.categories) await expect(body).toContainText(`${typedText(category.value)} · ${category.count}`)
+    expect(mapping.categories.length + mapping.other_categories).toBe(values.length)
+    if (mapping.other_categories > 0) await expect(body).toContainText(`other · ${mapping.other_categories} categories`)
+    await expect(body).toContainText('Domain: loaded instances')
     // The structural rows are GONE — the legend describes what is drawn, not
     // everything it knows how to describe. Without this the assertions above
     // would pass on a card that simply lists both encodings forever.
     await expect(body).not.toContainText('type with capabilities')
 
     const withPalette = await page.evaluate(() => window.__kglv.legendEntries)
-    expect(withPalette).toBeGreaterThanOrEqual(values.length)
+    expect(withPalette).toBeGreaterThanOrEqual(mapping.categories.length + (mapping.other_categories > 0 ? 1 : 0))
 
     // ── back to structural ──────────────────────────────────────────────
     await openDrawer(page, 'appearance')

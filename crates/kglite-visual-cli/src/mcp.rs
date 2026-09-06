@@ -52,6 +52,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::broadcast::{AppState, DispatchError, Execution};
 
+#[path = "mcp_output.rs"]
+mod output;
+
 /// The path the MCP endpoint is mounted at, owned here so the router and the
 /// launch contract cannot disagree about it.
 pub const MCP_PATH: &str = "/mcp";
@@ -109,9 +112,10 @@ a static kernel and the arrangement becomes this server's own: their simulation 
 stops, dragging is disabled, and relative position is then safe to describe. \
 Read the `geometry_caveat` that comes back rather than remembering which mode \
 you are in.
-- `render` is a separate pass either way. It draws the same content with its \
-own fold and its own separation, so its picture can differ from the screen even \
-under a static kernel: content-identical, geometry-similar at best.
+- `render` is a separate deterministic server pass. Its legacy live-view target \
+includes loaded content and schema context, including hidden nodes. Explicit \
+`scope: visible` captures the visible retained instance subset. Both recompute \
+geometry with their own folding and labels; neither is a browser screenshot.
 
 Scope: this server steers a picture. It is not the place to mine the graph. \
 Bulk querying, schema exploration and result tables belong to the graph's own \
@@ -126,10 +130,11 @@ before writing Cypher of your own — a saved query is what the person you are \
 working with already decided was worth keeping, and running one shows them a \
 result they will recognise.
 
-`export_view` writes a file of what is on screen. Its scope is the VIEW, not \
-the graph: it exports the instance nodes currently loaded and refuses when \
-nothing is, so load what you want first. Read the `notes` it returns before \
-telling the user what they have — they name two things the file cannot.
+`export_view` defaults to loaded instance nodes and all source relations between \
+them, including content hidden by filters. Explicit `scope: visible` previews \
+and exports exactly the visible retained instance subset. It refuses empty \
+instance scope, so load what you want first. Read the `notes` it returns before \
+telling the user what they have — the notes describe format fidelity limits.
 
 Every response is bounded in core and says so. A truncated answer is reported \
 as truncated in `view_state.last_slice` and drawn into the banner of any \
@@ -527,15 +532,51 @@ struct HighlightArgs {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
 struct AppearanceArgs {
-    /// Property driving the colour channel, or omit/null to clear it back to
-    /// the structural encoding. Must be a property the viewer's own
-    /// property-statistics menu offers for the type on screen; a name nothing
-    /// carries colours the view uniformly rather than failing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color_by: Option<String>,
-    /// Property driving the size channel. Same rules as `color_by`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size_by: Option<String>,
+    /// Omit/null clears this channel in legacy mode; presentation-only preserves it.
+    #[serde(
+        default,
+        deserialize_with = "present_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub color_by: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "present_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub size_by: Option<Option<String>>,
+    #[serde(default)]
+    pub presentation: Option<PresentationArgs>,
+}
+fn present_nullable<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+struct PresentationArgs {
+    label_density: f32,
+    prioritize_selected_labels: bool,
+    prioritize_hovered_labels: bool,
+    edge_opacity: f32,
+    node_size_min: f32,
+    node_size_max: f32,
+    legend_visible: bool,
+}
+impl Default for PresentationArgs {
+    fn default() -> Self {
+        let settings = kglite_visual_core::presentation::PresentationSettings::default();
+        Self {
+            label_density: settings.label_density,
+            prioritize_selected_labels: settings.prioritize_selected_labels,
+            prioritize_hovered_labels: settings.prioritize_hovered_labels,
+            edge_opacity: settings.edge_opacity,
+            node_size_min: settings.node_size_min,
+            node_size_max: settings.node_size_max,
+            legend_visible: settings.legend_visible,
+        }
+    }
 }
 
 /// Which arrangement `set_layout` asks for. A local mirror of core's
@@ -630,14 +671,43 @@ impl From<ExportFormatArg> for ExportFormat {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum OutputScopeArg {
+    Visible,
+    LoadedInduced,
+}
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct CapturedArgs {
+    /// Omit for legacy output. Explicit scope requires expected and subset_revision.
+    #[serde(default)]
+    scope: Option<OutputScopeArg>,
+    #[serde(default)]
+    expected: Option<ExpectedArg>,
+    #[serde(default)]
+    subset_revision: Option<String>,
+    /// Omit for a preview; supply its exact digest to validate final output.
+    #[serde(default)]
+    preview_digest: Option<String>,
+    /// Export-local file ID to session source-handle mapping, capped at 2 MiB.
+    #[serde(default)]
+    include_identity: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
 struct ExportArgs {
     #[serde(default)]
     pub format: ExportFormatArg,
+    #[serde(flatten)]
+    pub captured: CapturedArgs,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
 struct RenderArgs {
+    #[serde(flatten)]
+    pub captured: CapturedArgs,
+    #[serde(default)]
+    pub seed: u32,
     #[serde(default)]
     pub target: RenderTargetArg,
     /// Cypher to draw. Required when `target` is `cypher`, ignored otherwise.
@@ -1011,34 +1081,40 @@ impl ViewControl {
     }
 
     #[tool(
-        description = "Drive the colour-by and size-by channels of the shared view from node \
-                       properties. Omitting a field clears that channel back to the app's \
-                       structural encoding. The property name is not validated here — the \
-                       viewer's own property statistics decide what is meaningful, and a name \
-                       nothing carries renders uniformly rather than failing."
+        description = "Set shared colour/size property channels and optional presentation settings. Without presentation, omitted/null channels clear to structural defaults. Presentation-only preserves both channels. When any channel is supplied, omitted channels clear. Explicit channel fields plus presentation change atomically; explicit null clears a channel. Presentation defaults are applied to omitted presentation fields; density/opacity0–1 and finite numeric size range are bounded in core."
     )]
     async fn set_appearance(
         &self,
         Parameters(shared): Parameters<SharedArgs<AppearanceArgs>>,
     ) -> Result<CallToolResult, McpError> {
         let SharedArgs { args, options } = shared;
+        let has_channels = args.color_by.is_some() || args.size_by.is_some();
+        let appearance = AppearanceRequest {
+            color_by: args.color_by.clone().flatten(),
+            size_by: args.size_by.clone().flatten(),
+        };
+        if let Some(presentation) = args.presentation {
+            let presentation = catalog_args(presentation)?;
+            let request = if has_channels {
+                Request::Style(kglite_visual_core::presentation::StyleRequest {
+                    appearance: Some(appearance),
+                    presentation: Some(presentation),
+                })
+            } else {
+                Request::Presentation(presentation)
+            };
+            return self.settings(request, options).await;
+        }
         let execution = match self
-            .execute(
-                Request::Appearance(AppearanceRequest {
-                    color_by: args.color_by.clone(),
-                    size_by: args.size_by.clone(),
-                }),
-                options,
-            )
+            .execute(Request::Appearance(appearance), options)
             .await?
         {
             Ok(execution) => execution,
             Err(error) => return Ok(refused(&error)),
         };
         ok_json(&serde_json::json!({
-            "color_by": args.color_by, "size_by": args.size_by,
-            "connected_viewers": self.state.bus.client_count(), "stamp": execution.stamp,
-            "request_id": execution.request_id,
+            "color_by":args.color_by.flatten(),"size_by":args.size_by.flatten(),
+            "connected_viewers":self.state.bus.client_count(),"stamp":execution.stamp,"request_id":execution.request_id,
         }))
     }
 
@@ -1137,20 +1213,21 @@ impl ViewControl {
     }
 
     #[tool(
-        description = "Draw an image you can actually look at. `target: live-view` (the default) \
-                       draws exactly the nodes and links on the human's screen; `meta` and \
-                       `cypher` draw something new WITHOUT touching their view. \
-                       GEOMETRY DIFFERS FROM THEIR SCREEN: this is a separate layout pass \
-                       with its own fold and its own separation — even under a static kernel \
-                       set by `set_layout` it is not a photograph of the canvas, and with \
-                       their GPU simulation running it is a different arrangement entirely. \
-                       Same nodes, same links, same truncation banner, different positions — \
-                       so describe what is in the picture, never where it sits."
+        description = "Draw a deterministic server image, never a browser screenshot. Omitted scope preserves legacy target behavior: live-view includes loaded content and schema context, including hidden nodes; meta/cypher draw a private scene. Explicit visible or loaded-induced scope requires expected and subset_revision from view_state. No preview_digest returns an image preview with digest; supplying the digest validates the exact settings before final output. Read scope/counts/folding/label/geometry notes; positions differ from the browser camera and simulation."
     )]
     async fn render(
         &self,
         Parameters(args): Parameters<RenderArgs>,
     ) -> Result<CallToolResult, McpError> {
+        if args.captured.scope.is_some() {
+            return output::render_captured(self, args).await;
+        }
+        if args.captured.has_capture_fields() {
+            return Ok(refused_text(
+                "captured output fields require an explicit scope",
+            ));
+        }
+
         let source = match args.target {
             RenderTargetArg::LiveView => RenderSource::LiveView,
             RenderTargetArg::Meta => RenderSource::Meta,
@@ -1182,7 +1259,7 @@ impl ViewControl {
             height: args
                 .height
                 .unwrap_or(kglite_visual_core::render::DEFAULT_HEIGHT),
-            seed: 0,
+            seed: u64::from(args.seed),
             theme: match args.theme {
                 ThemeArg::Dark => Theme::Dark,
                 ThemeArg::Light => Theme::Light,
@@ -1258,19 +1335,21 @@ impl ViewControl {
     }
 
     #[tool(
-        description = "Write the nodes currently in the shared view out as a graph file — \
-                       GraphML, GEXF, CSV or D3 JSON — and hand back the text so you can read \
-                       or save it. The SCOPE IS THE VIEW: exactly the instance nodes on the \
-                       human's screen, never the whole graph, so `expand` or `show_cypher` \
-                       what you want first and check `view_state` before calling. One thing \
-                       the file will not tell you and this answer does: the edge set can be a \
-                       superset of what the canvas drew. Reading `notes` in the reply is how \
-                       you avoid explaining that to the user after they hit it."
+        description = "Export graph text as GraphML, GEXF, CSV or D3 JSON. Omitted scope preserves legacy loaded nodes and induced source relations, including hidden or previously unretained relations. Explicit visible scope keeps the exact visible retained relation multiset; loaded-induced explicitly requests the wider relation scope. Explicit scope requires expected and subset_revision. No preview_digest returns preview metadata only; supplying it validates unchanged scope/settings before returning final text. include_identity optionally maps export-local file IDs to session-scoped source handles under2MiB. Read format fidelity notes; file IDs are not durable source keys."
     )]
     async fn export_view(
         &self,
         Parameters(args): Parameters<ExportArgs>,
     ) -> Result<CallToolResult, McpError> {
+        if args.captured.scope.is_some() {
+            return output::export_captured(self, args).await;
+        }
+        if args.captured.has_capture_fields() {
+            return Ok(refused_text(
+                "captured output fields require an explicit scope",
+            ));
+        }
+
         let session = Arc::clone(&self.state.session);
         let format: ExportFormat = args.format.into();
         let exported = match tokio::task::spawn_blocking(move || session.export_view(format))
@@ -1706,9 +1785,10 @@ mod tests {
         for phrase in [
             "human being is looking at",
             "stale prepared work always refuses",
-            // E8: an agent that reads `export_view` as "dump this graph" calls
-            // it on the entry screen and reports the refusal as a broken tool.
-            "scope is the VIEW, not the graph",
+            // Export defaults and exact visible scope are distinct contracts.
+            "including content hidden by filters",
+            "exports exactly the visible retained instance subset",
+            "It refuses empty instance scope",
             // Conditional since G3, so the phrase asserted is the condition
             // rather than the old absolute claim: an agent that reads only
             // "you cannot know geometry" would never reach for `set_layout`.
@@ -1749,7 +1829,8 @@ mod tests {
             .clone()
             .expect("render has a description");
         assert!(
-            render.contains("GEOMETRY DIFFERS FROM THEIR SCREEN"),
+            render.contains("never a browser screenshot")
+                && render.contains("positions differ from the browser camera and simulation"),
             "the render tool must warn about geometry in its own description too"
         );
     }

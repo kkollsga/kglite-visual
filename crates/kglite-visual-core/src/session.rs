@@ -204,6 +204,9 @@ pub struct ViewBounds {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ViewState {
     pub stamp: RevisionStamp,
+    pub appearance: crate::control::Appearance,
+    pub caption_by: Option<String>,
+    pub presentation: crate::presentation::PresentationSettings,
     pub subset: SubsetSnapshot,
     pub subset_revision: String,
     pub topology_revision: String,
@@ -665,6 +668,8 @@ impl Session {
             Request::Reset => Ok(Response::Slice(self.reset_uncommitted())),
             Request::Subset(_)
             | Request::Appearance(_)
+            | Request::Presentation(_)
+            | Request::Style(_)
             | Request::Caption(_)
             | Request::Focus(_)
             | Request::Highlight(_) => self.settings_uncommitted(request),
@@ -1323,6 +1328,9 @@ impl Session {
 
         ViewState {
             stamp: view.stamp(self.generation()),
+            appearance: view.appearance.clone(),
+            caption_by: view.caption_by.clone(),
+            presentation: view.presentation.clone(),
             subset: view.subset.clone(),
             subset_revision: view.subset_revision.to_string(),
             topology_revision: view.topology_revision.to_string(),

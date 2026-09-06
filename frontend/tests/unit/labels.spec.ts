@@ -100,3 +100,17 @@ test('a wide label reserves the cells it actually covers', () => {
   const narrow = wide.map((c) => ({ ...c, width: 40 }))
   expect(chooseLabels(narrow)).toHaveLength(2)
 })
+
+test('density zero retains schema and priority labels; fractional density uses stable ordinary weight order', () => {
+  const candidates = [
+    {slot: 0, x: 0, y: 0, weight: 0, pinned: true},
+    {slot: 1, x: 1000, y: 0, weight: 0, schema: true},
+    {slot: 2, x: 2000, y: 0, weight: 1},
+    {slot: 3, x: 3000, y: 0, weight: 10},
+    {slot: 4, x: 4000, y: 0, weight: 9},
+    {slot: 5, x: 5000, y: 0, weight: 8},
+  ]
+  expect(chooseLabels(candidates, false, 0).map(label => label.slot)).toEqual([0, 1])
+  expect(chooseLabels(candidates, false, 0.5).map(label => label.slot)).toEqual([0, 1, 3, 4])
+  expect(chooseLabels([...candidates].reverse(), false, 0.5)).toEqual(chooseLabels(candidates, false, 0.5))
+})

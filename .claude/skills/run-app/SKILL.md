@@ -81,8 +81,8 @@ curl -s -XPOST $B/api/search         -H "$C" -d '{"query":"ada","node_type":"Per
 curl -s -XPOST $B/api/property-stats -H "$C" -d '{"node_type":"Person"}'
 curl -s -XPOST $B/api/validate       -H "$C" -d '{"query":"MATCH (n:Persn) RETRN n"}'
 curl -s -XPOST $B/api/layout         -H "$C" -d '{"kernel":"islands"}'
-# The one GET in the vocabulary (E8). A download is `<a href download>`, an
-# anchor issues a GET, and this route reads the view and mutates nothing.
+# Legacy GET export keeps its loaded-induced scope. Captured scoped downloads
+# use the preview/digest POST routes described below.
 # formats: graphml | gexf | csv | csv-edges | json. `source` is `live-view`.
 curl -sD- "$B/api/export?format=graphml&source=live-view" -o view.graphml
 ```
@@ -222,8 +222,9 @@ streamable HTTP, no second process, no discovery file. Twenty-six tools:
 `export_view`, `list_views`, `save_view`, `restore_view`, `delete_view`,
 `view_history`, `restore_history`.
 
-`export_view` returns the loaded nodes and their source-induced relationships
-as GraphML / GEXF / CSV / D3 JSON text without moving the screen. Its scope is the VIEW, so load what you want
+`export_view` without an explicit scope returns loaded nodes and their
+source-induced relationships as GraphML / GEXF / CSV / D3 JSON text without
+moving the screen. Its scope is the VIEW, so load what you want
 first — on an empty view it refuses by name rather than dumping the graph —
 and read the `notes` in the reply before telling the user what they have.
 
@@ -272,6 +273,32 @@ broadcast without an MCP client. The steering endpoints answer with
 `{"clients":n}`: a command that reached nobody is otherwise indistinguishable
 from one that reached the user.
 
+### Captured export and readability
+
+Read `stamp` and `subset_revision` from `/api/view-state`, then POST
+`{scope:"visible",format:"gexf",expected:stamp,subset_revision}` to
+`/api/export/preview`. POST those same fields plus its `preview_digest` to
+`/api/export/download`. `loaded-induced` requests the wider scope explicitly.
+A changed revision/settings digest refuses409. Preview is private; no shared
+change is published. GraphML preserves attributes that structural CSV/GEXF omit.
+
+`/api/render/preview` and `/api/render/download` accept the same capture fields
+with format, width, height, seed, theme and static kernel settings. Image preview
+is bounded metadata plus base64; final returns raw bytes. It is a deterministic
+server image with shared selection/highlights, never local hover/selection or a
+browser camera screenshot. Read image scope, folding and omission annotations.
+The MCP `export_view`/`render` tools expose these modes additively; no digest means
+preview, a supplied digest requests final output.
+
+`view_state` includes appearance, caption_by and presentation from the same
+revision. POST the complete desired presentation object with expected stamp to
+`/api/presentation`, or use MCP `set_appearance` with presentation. A presentation-
+only MCP call preserves channels; supplied channels retain legacy replacement
+semantics. Browser and image consume one canonical mapping. TestIDs include
+`workspace-export` (header), `export-scoped` (legacy card),
+`export-preview`, `export-download`, and the readability drawer's controls;
+inspect the current accessibility tree for their labels before driving them.
+
 ## 3d. Records and generated paths
 
 A type's table opens Data's bounded Records lane using source handles. It does
@@ -319,7 +346,7 @@ already in memory.
   pair**, with `slotCount`: a client holds a position for every slot it was
   told about and an *identity* only for the ones whose `SliceNode` it
   received — unequal on any browser that joined mid-session until the
-  connect-time resync (G5). `exportNodes` is what the Export card would
+  connect-time resync (G5). `exportNodes` is what the legacy loaded-induced quick export would
   write: instance nodes on screen, filter or no filter, because the server's
   export walks the slot space rather than the client's appearance arrays.
   `layoutMode` is `force` / `deterministic` / `static` and `layoutKernel`

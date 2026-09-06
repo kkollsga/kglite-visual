@@ -480,7 +480,7 @@ fn numeric(value: &TypedValue) -> Option<Number> {
         _ => None,
     }
 }
-fn compare(a: &TypedValue, b: &TypedValue) -> Option<std::cmp::Ordering> {
+pub(crate) fn compare(a: &TypedValue, b: &TypedValue) -> Option<std::cmp::Ordering> {
     Some(match (numeric(a)?, numeric(b)?) {
         (Number::Integer(a), Number::Integer(b)) => a.cmp(&b),
         (Number::Float(a), Number::Float(b)) => a.partial_cmp(&b)?,

@@ -19,6 +19,7 @@ pub mod broadcast;
 pub mod cli;
 pub mod export_cmd;
 pub mod mcp;
+pub mod output_api;
 pub mod queries;
 pub mod render_cmd;
 pub mod server;

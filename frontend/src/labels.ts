@@ -38,6 +38,7 @@ export type LabelSpec = {
   /** Placed before every other candidate and never dropped — see
    * `chooseLabels`. Set for the selected slot. */
   pinned?: boolean
+  schema?: boolean
   /** A supporting type's name is drawn quieter, matching its circle. */
   dimmed?: boolean
 }
@@ -208,8 +209,10 @@ export function chooseLabels(
      * instance node weighs 1, which is last.
      */
     pinned?: boolean
+    schema?: boolean
   }[],
   placeAll = false,
+  density = 1,
 ): Placed[] {
   // Sorted rather than compared in place: the winner of a cell must not depend
   // on the sampler's output order, which changes on every zoom. Pinned first,
@@ -223,7 +226,9 @@ export function chooseLabels(
   )
   const taken = new Set<string>()
   const placed: Placed[] = []
+  let ordinary = density >= 1 ? Infinity : Math.floor(ordered.filter(candidate => !candidate.pinned && !candidate.schema).length * Math.max(0, density))
   for (const candidate of ordered) {
+    if (!candidate.pinned && !candidate.schema && ordinary-- <= 0) continue
     const [from, to] = columnsFor(candidate.x, candidate.width ?? CELL_WIDTH)
     const rows = rowsFor(candidate.y)
     if (isFree(taken, from, to, rows)) {
@@ -318,7 +323,7 @@ export class LabelOverlay {
    * The sampled-points pass, and the only one a camera event runs: it touches
    * what the renderer says is on screen, not what the view holds.
    */
-  update(source: ScreenSource, placeAll = false): void {
+  update(source: ScreenSource, placeAll = false, density = 1): void {
     const sampled = source.sampledPoints()
     const candidates: Parameters<typeof chooseLabels>[0] = []
     for (let i = 0; i < sampled.indices.length; i += 1) {
@@ -338,10 +343,11 @@ export class LabelOverlay {
         weight: spec.weight,
         width: estimateWidth(spec),
         pinned: spec.pinned,
+        schema: spec.schema,
       })
     }
 
-    const placed = chooseLabels(candidates, placeAll)
+    const placed = chooseLabels(candidates, placeAll, density)
     const live = new Set(placed.map((p) => p.slot))
     for (const [slot, element] of this.elements) {
       if (!live.has(slot)) {

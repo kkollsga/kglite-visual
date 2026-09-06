@@ -11,8 +11,6 @@ import { expect, test } from '@playwright/test'
 
 import { InteractionState, type InteractionTarget } from '../../src/interaction'
 import {
-  compileCategoricalColor,
-  compileNumericSize,
   fillColors,
   HIGHLIGHT_COLOR,
   linkWidth,
@@ -107,22 +105,6 @@ const CITY: PropertyStat = {
   role: 'categorical',
 }
 
-test('a categorical colour getter is compiled once and covers its value set', () => {
-  const color = compileCategoricalColor(CITY)
-  expect(color).not.toBeNull()
-  if (color === null) return
-  expect(color('oslo')).not.toEqual(color('bergen'))
-  expect(color('somewhere else')).toEqual(UNSET_COLOR)
-})
-
-test('an approximate value set never becomes a palette', () => {
-  // The D12 rule: kglite sets `approx` when it sampled or hit its distinct-value
-  // cap, so the value set is a LOWER BOUND. Colouring by it leaves the values
-  // nobody enumerated silently uncoloured, which reads as missing data.
-  expect(compileCategoricalColor({ ...CITY, approx: true })).toBeNull()
-  expect(compileCategoricalColor({ ...CITY, values: [] })).toBeNull()
-})
-
 test('the approximate label says "approximate", verbatim', () => {
   // Phase 0 finding: never present sampled statistics as exact. The word is
   // asserted rather than the styling, because the styling is not what a
@@ -130,20 +112,6 @@ test('the approximate label says "approximate", verbatim', () => {
   expect(statLabel({ ...CITY, approx: true })).toContain('approximate')
   expect(statLabel({ ...CITY, approx: true })).toContain('3+')
   expect(statLabel(CITY)).not.toContain('approximate')
-})
-
-test('a numeric size ramp spreads four orders of magnitude', () => {
-  const size = compileNumericSize([1, 10, 100, 10_000])
-  expect(size(1)).toBeCloseTo(4, 5)
-  expect(size(10_000)).toBeCloseTo(22, 5)
-  // Fourth root, measured against the alternative rather than a guessed
-  // threshold: a value 1% of the way up the range lands at 9.7 px, where a
-  // linear ramp would put it at 4.2 — within a rounding error of the minimum,
-  // and therefore invisible.
-  const linear = 4 + 18 * (99 / 9999)
-  expect(size(100)).toBeGreaterThan(linear + 4)
-  expect(size(100)).toBeCloseTo(9.678, 3)
-  expect(size('not a number')).toBe(4)
 })
 
 test('one colour fill covers every slot, with highlights winning', () => {

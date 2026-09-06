@@ -74,6 +74,8 @@ impl HistoryAction {
             }
             Request::Subset(_) => Self::named("subset", None),
             Request::Appearance(_) => Self::named("appearance", None),
+            Request::Presentation(_) => Self::named("presentation", None),
+            Request::Style(_) => Self::named("style", None),
             Request::Caption(_) => Self::named("caption", None),
             _ => return None,
         };

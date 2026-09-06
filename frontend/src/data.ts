@@ -1,4 +1,5 @@
 import { compareCells, recordCell } from './cells'
+import { saveTableCsv } from './table-csv'
 import type { NodeHandle } from './generated/NodeHandle'
 import type { RecordRow } from './generated/RecordRow'
 import type { RecordTable } from './generated/RecordTable'
@@ -36,6 +37,7 @@ export class DataWorkspace {
   private readonly pager = el('div')
   private readonly selectionStatus = el('span')
   private readonly showSelected: HTMLButtonElement
+  private readonly csv = button('Download fetched records CSV', 'records-csv', () => this.exportCsv())
   private readonly fieldInput = el('input')
   private snapshot: SharedSnapshotMeta | null = null
   private fields = ['id', 'title']
@@ -74,7 +76,7 @@ export class DataWorkspace {
     this.grid.className = 'kglv-record-grid'; this.fieldsHost.className = 'kglv-field-chips'
     this.showSelected = button('Show selection in Explore', 'records-show-selected', () => this.handlers.showGraph([...this.selected.values()]))
     const actions = el('div'); actions.className = 'kglv-data-actions'
-    actions.append(this.scopeControl(), this.showSelected, this.selectionStatus)
+    actions.append(this.scopeControl(), this.showSelected, this.selectionStatus, this.csv)
     this.recordsHost.append(actions, this.typeNote, this.fieldControls(), this.fieldsHost, this.status, this.grid, this.pager)
     host.append(tabs, this.recordsHost, this.queryHost)
     this.paintFields(); this.paintLanes(); this.paintSelection()
@@ -219,7 +221,16 @@ export class DataWorkspace {
       return compareCells(left, right, sort.descending) || a.index - b.index
     }).map(item => item.row)
   }
+  private exportCsv(): void {
+    try {
+      const rows = this.ordered()
+      saveTableCsv(this.fields, rows.map(row => row.cells), `records-${this.scope.value}-fetched.csv`)
+      this.status.textContent = `Downloaded ${rows.length} fetched ${this.scope.value} records in current sort order. Each field includes cell state, value type and detail columns; partial previews stay partial.${this.note ? ` ${this.note}` : ''}`
+    } catch (error) { this.status.textContent = error instanceof Error ? error.message : String(error) }
+  }
   private paintGrid(): void {
+    this.csv.disabled = this.loading || this.dirty || this.rows.length === 0
+    this.csv.textContent = `Download ${this.rows.length} fetched ${this.scope.value} records CSV`
     if (this.loading) { this.grid.replaceChildren(); this.pager.replaceChildren(); return }
     const rows = this.ordered()
     this.page = Math.min(this.page, Math.max(0, Math.ceil(rows.length / this.pageSize) - 1))

@@ -1,126 +1,118 @@
-# Export: the graph as somebody else's file
+# Export a scoped graph or image
 
-Three faces write the same five formats: the **export** card beside the legend,
-`GET /api/export` on the running server, and the `kglite-visual export`
-subcommand. Agents get a fourth, the MCP `export_view` tool.
+Open **Export** to choose the data scope and format, inspect a preview, then
+download. The preview identifies its graph revision, node and relationship
+counts, and format limitations.
 
-## Formats
+## Choose the scope
 
-| `--format` | What it is |
+- **Visible instances** exports the nodes that pass the current filters and
+  exactly their retained visible relationships. Parallel relationships and
+  self-loops remain separate records.
+- **Loaded instances with source-induced relationships** includes hidden loaded
+  nodes and every source relationship between them. It can contain relationships
+  the exploration never loaded.
+- **Deterministic server image** renders the chosen scope as SVG or PNG with
+  explicit dimensions. Its layout is computed for the image; it is not a
+  screenshot of the browser camera or live force simulation.
+
+Changing the shared view or export settings after a preview requires refreshing
+it. Download refuses a stale preview instead of silently exporting a different
+result. Captured output remains private: preview and download do not alter the
+shared exploration.
+
+## Graph formats
+
+| Format | Contents and limitations |
 |---|---|
-| `graphml` | XML that Gephi, yEd and Cytoscape all open. The default — and it [names its nodes](#the-graphml-label-note) |
-| `gexf` | Gephi's own XML |
-| `csv` | `id,type,title`, one row per node |
-| `csv-edges` | `source,target,type`, one row per edge — the other half of `csv` |
-| `json` | D3's `{"nodes": [...], "links": [...]}` |
+| `graphml` | XML with readable node/relationship labels and JSON-valued property data. |
+| `gexf` | XML with node type/title and relationship labels; arbitrary source properties are omitted. |
+| `csv` | Structural node columns: `id,type,title`. |
+| `csv-edges` | Structural relationship columns: `source,target,type`. |
+| `json` | D3 nodes/links. Large integers require a lossless JSON parser. |
 
-`csv` and `csv-edges` are two calls rather than one zip: a zip would be a new
-dependency for two text files.
+Structural CSV exports are separate node and relationship files. The Data
+workspace also offers table CSV with the exported lane and scope named: query
+results, selected records or visible records. A partial fetched result remains
+labelled partial; downloading it does not fetch the whole source graph.
 
-## From the CLI
+Scoped graph files use export-local IDs. These are not durable source keys.
+Machine callers can request an identity mapping in preview metadata; source
+handles are valid only in their session generation. No format is advertised as
+a lossless typed round trip. D3 JSON refuses relationship properties that
+collide with its reserved topology fields; GraphML preserves those properties.
+D3 JSON also omits a source node property named `type`, which is reserved for
+the node type. Choose GraphML when that property must be retained.
+
+## Images
+
+Choose SVG or PNG, dimensions, theme and a static layout kernel. The image and
+its metadata identify scope, revision, omissions and rendering limitations.
+Dense labels can be omitted or nodes folded to fit; these outcomes are reported
+in the image. A self-loop retained in data may be reported as not drawn by the
+image renderer. Preview and download use the same settings. Label priority and highlighting use
+shared selection/highlights; ordinary browser-local selection and hover are not
+captured in the server image.
+
+Scoped output preparation admits at most the existing loaded-member limits,
+8 MiB of copied properties and a conservative 16 MiB encoded artifact bound.
+Oversize output is refused as a whole. It never silently drops properties or
+relationships to fit an export. Image dimensions retain their own limits. KGLite may materialize selected disk
+values internally before the viewer can inspect their size, so these limits
+are not a total process-memory ceiling. Traversal checks a ten-second work
+budget; individual layout/format library calls are checked after returning and
+are not forcibly interrupted at that deadline.
+
+## HTTP and MCP
+
+Read the current `stamp` and `subset_revision` from `GET /api/view-state`, then
+submit the explicit scope and format to `POST /api/export/preview`:
+
+```json
+{"scope":"visible","format":"gexf",
+ "expected":{"generation":"<session generation>","revision":"<revision>"},
+ "subset_revision":"<subset revision>"}
+```
+
+Send the same fields plus the returned `preview_digest` to
+`POST /api/export/download`. A stale stamp or changed settings returns `409`.
+`include_identity:true` adds the bounded source-handle mapping to export preview
+metadata. It does not put that mapping into HTTP headers.
+
+Images use `POST /api/render/preview` and `POST /api/render/download`, with
+format, width, height, seed, theme and static kernel settings. Image preview
+returns bounded metadata and base64 image data.
+
+MCP `export_view` and `render` accept explicit captured scopes and revision
+fields. Their descriptions distinguish preview from download/final output.
+Omitting the new scope preserves their existing behavior.
+
+The compatibility route remains:
+
+```bash
+curl -sD- "$B/api/export?format=graphml&source=live-view" -o view.graphml
+```
+
+Its scope is loaded instances and source-induced relationships, including hidden
+nodes. It does not export the whole graph. An empty loaded view is refused.
+The `x-kglv-note` header describes its relationship-scope caveat.
+
+## CLI whole-source export
 
 ```bash
 kglite-visual export graph.kgl --format gexf -o graph.gexf
 kglite-visual export graph.kgl --format csv --cypher "MATCH (n:Field) RETURN n"
 ```
 
-This is the **one place a whole-graph dump is on offer**, and the reason is not
-that the CLI is trusted — it is that the question is different. Nobody clicking
-a button on a bounded, progressively-disclosed view asked for 546,850 nodes.
-Here the caller named a `.kgl` file and a path to write it to, at a terminal,
-with no view in existence and no browser to hang. "Dump this file" is exactly
-what they typed.
-
-`--cypher` is the narrower form and the one to reach for on a large graph: the
-query's nodes are the selection, bounded by the same row and byte ceilings
-every other query obeys.
-
-One JSON line on stdout, after the file is on disk; the caveats go to stderr
-too, because a person watching a shell will not parse the line:
-
-```console
-$ kglite-visual export graph.kgl --format gexf -o out.gexf
-kglite-visual: the nodes are exactly the ones selected; the edges are every edge this graph holds between them, which can be MORE than you saw …
-{"out":"out.gexf","format":"gexf","nodes":118,"bytes":105848,"notes":["…"]}
-```
-
-## From the running server
-
-```bash
-curl -sD- "$B/api/export?format=graphml&source=live-view" -o view.graphml
-```
-
-The one `GET` in the API vocabulary, because a download is an `<a href
-download>`, an anchor issues a GET, and this route reads the view and mutates
-nothing.
-
-```text
-content-type: application/xml; charset=utf-8
-content-disposition: attachment; filename="graph-view.graphml"; filename*=UTF-8''graph-view.graphml
-x-kglv-nodes: 144
-x-kglv-format: graphml
-x-kglv-note: …
-```
-
-The filename is derived from the graph, in UTF-8, so a Norwegian graph keeps
-its letters.
-
-**The default scope is loaded instances and their source-induced relationships.**
-It includes loaded nodes hidden by a visual filter and every source edge between
-those nodes, which can include relationships absent from the retained view.
-It does not export the whole source graph. An export over the entry
-screen is a `400` naming what to load first:
-
-```json
-{"error":"there is nothing to export: no instance nodes are loaded. Expand a type or run a query with 'show in graph' first."}
-```
-
-The filter does not change this legacy export scope: it uses loaded membership,
-so `window.__kglv.exportNodes` is
-the honest count of what the card would write — filter or no filter.
-
-## From an agent
-
-The MCP `export_view` tool writes the same file and hands back the text, with
-the counts first so a caller that stops reading at the summary still learns the
-size of what follows:
-
-```json
-{"bytes":27033,"filename":"graph-view.gexf","format":"gexf","nodes":144,
- "notes":["the nodes are exactly the ones selected; the edges are every edge this graph holds between them, which can be MORE than you saw …"]}
-```
-
-Every one of these formats is UTF-8 text, an MCP reply has no file channel, and
-base64 would be a decode step for something the agent can already read.
-
-## The two caveats
-
-Both are true of the file and invisible in it, so they ride in `x-kglv-note`,
-in the CLI's `notes`, and in the MCP reply's `notes`. Report them; do not
-discover them in Gephi.
-
-### The edge set is a superset
-
-> the nodes are exactly the ones selected; the edges are every edge this graph
-> holds between them, which can be **MORE** than you saw — a link the view's
-> byte budget refused, or one a query's rows never mentioned, is still an edge
-> in this file
-
-The node set is exact. The edge set is *every* edge the graph holds between
-those nodes, which is generally more than the canvas drew. Nodes and links
-share one byte budget in the live view, so a slice can hold a complete node
-list and an incomplete link list — and a query that returned nodes without
-relationships never mentioned any edges at all.
+The standalone export command can export an entire source file. With `--cypher`,
+it exports the query's bounded node selection and the source-induced
+relationships between those nodes. It writes the file, then prints one JSON
+line with filename, format, counts, bytes and notes. This is separate from a
+running viewer's captured visible scope.
 
 (the-graphml-label-note)=
-### GraphML names its nodes
+## GraphML labels
 
-Every GraphML export declares an `attr.name="label"` key — `node_label` holds
-the node's title, `edge_label` the connection type — so Gephi, yEd and
-Cytoscape all show readable names on import rather than `n0`, `n1`, ….
-
-This was a caveat until kglite 0.16.16. Before that release kglite wrote the
-readable name only under `attr.name="title"`, which no importer looks at, and
-this page told you to export GEXF instead. The `title`, `id`, `type`,
-`connection_type` and `properties` keys are unchanged, so anything already
-reading them keeps working.
+GraphML declares `attr.name="label"` keys: `node_label` holds the node title and
+`edge_label` the relationship type. These give external consumers readable
+names while preserving the separate `id`, `type` and property data.

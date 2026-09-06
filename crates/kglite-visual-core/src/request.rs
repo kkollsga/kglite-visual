@@ -120,6 +120,8 @@ pub enum Request {
     Reset,
     Subset(crate::subset::SubsetRequest),
     Appearance(crate::control::AppearanceRequest),
+    Presentation(crate::presentation::PresentationSettings),
+    Style(crate::presentation::StyleRequest),
     Caption(crate::shared::CaptionRequest),
     Focus(crate::control::FocusRequest),
     Highlight(crate::control::HighlightRequest),
@@ -236,6 +238,8 @@ impl Request {
             | Self::Reset
             | Self::Subset(_)
             | Self::Appearance(_)
+            | Self::Presentation(_)
+            | Self::Style(_)
             | Self::Caption(_)
             | Self::Focus(_)
             | Self::Highlight(_)

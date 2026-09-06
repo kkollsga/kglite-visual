@@ -6,6 +6,7 @@ use kglite::api::DirGraph;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut graph = DirGraph::new();
     let summary = std::env::args().any(|arg| arg == "--summary");
+    let appearance = std::env::args().any(|arg| arg == "--appearance");
     if summary {
         for index in 0..5001 {
             execute_mut(
@@ -14,6 +15,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &ExecuteOptions::eager(&Default::default()),
             )?;
         }
+    } else if appearance {
+        execute_mut(&mut graph,"CREATE (:Person {id:1,title:'Small integer category',mixed:2,score:9007199254740993}) CREATE (:Person {id:2,title:'Large integer category',mixed:9007199254740993,score:9007199254740994}) CREATE (:Person {id:3,title:'Numeric-looking string category',mixed:'9007199254740993',score:9007199254740995})",&ExecuteOptions::eager(&Default::default()))?;
     } else {
         execute_mut(&mut graph,"CREATE (a:Person {id:9007199254740993,title:'Ada',score:0,active:false,category:'alpha'}) CREATE (b:Person {id:9007199254740993,title:'Duplicate Ada key',score:10,active:true,category:'beta'}) CREATE (c:Person {id:null,title:'Null key',score:5,category:''}) CREATE (:Disconnected {id:'outside',title:'Outside the relationships'}) CREATE (a)-[:KNOWS]->(b) CREATE (a)-[:KNOWS]->(b) CREATE (b)-[:KNOWS]->(b) CREATE (b)-[:LIKES]->(c)",&ExecuteOptions::eager(&Default::default()))?;
     }
@@ -23,6 +26,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     prepare_kgl_write(&mut graph);
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(if summary {
         "tests/fixtures/viewer-summary.kgl"
+    } else if appearance {
+        "tests/fixtures/viewer-appearance.kgl"
     } else {
         "tests/fixtures/viewer-identity.kgl"
     });

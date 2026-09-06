@@ -200,8 +200,9 @@ pub async fn node_detail(
 /// `core::render_for` opens a private session over the same read-only graph, so
 /// a `POST /api/render` cannot move the slot space of whatever browser tab is
 /// attached. `{"source": {"type": "live-view"}}` is the exception and the P10
-/// addition: it *reads* this session and draws what is on the shared screen —
-/// still without moving it. The geometry differs from the user's screen; core
+/// addition: it reads loaded content and schema context, including hidden nodes,
+/// without moving the view. Scoped preview routes explicitly apply visibility.
+/// The geometry differs from the user's screen; core
 /// owns that caveat's wording (`session::GEOMETRY_CAVEAT`).
 pub async fn render(State(state): State<AppState>, Json(body): Json<RenderRequest>) -> Response {
     let session = Arc::clone(&state.session);
@@ -337,7 +338,7 @@ pub async fn export(
 /// RFC 5987's `filename*` carries the real one in UTF-8, and every browser this
 /// project targets prefers it when both are present — so the ASCII copy is the
 /// fallback for whatever does not, not the name we expect anyone to see.
-fn content_disposition(filename: &str) -> String {
+pub(crate) fn content_disposition(filename: &str) -> String {
     let ascii: String = filename
         .chars()
         .map(|c| {
@@ -459,6 +460,13 @@ pub async fn subset(
     Json(body): Json<RequestBody<SubsetRequest>>,
 ) -> Response {
     dispatch(state, body.request(Request::Subset)).await
+}
+
+pub async fn presentation(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<kglite_visual_core::presentation::PresentationSettings>>,
+) -> Response {
+    dispatch(state, body.request(Request::Presentation)).await
 }
 
 pub async fn caption(

@@ -58,7 +58,7 @@ The server asks kglite for a schema sized for the graph it has, and reports
 which tier it used on stderr and in `GET /api/session`:
 
 ```json
-{"protocol_version":8,"tier":"compact","slot_count":98,
+{"protocol_version":9,"tier":"compact","slot_count":98,
  "stats":{"node_count":546850,"edge_count":765373,"node_type_count":98,
           "relationship_type_count":54,"core_type_count":35}}
 ```
@@ -76,7 +76,7 @@ each direction, with a count:
 
 ```console
 $ curl -s -XPOST $B/api/preview -H 'content-type: application/json' -d '{"slot":0}'
-{"protocol_version":8,"slot":0,"scope":"type","node_type":"Person","title":"",
+{"protocol_version":9,"slot":0,"scope":"type","node_type":"Person","title":"",
  "relationships":[
    {"name":"HAS_SKILL","direction":"out","other_type":"Skill","count":180},
    {"name":"KNOWS","direction":"out","other_type":"Person","count":180},

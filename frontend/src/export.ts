@@ -1,21 +1,7 @@
-/**
- * Taking the view out of the viewer (plan E8).
- *
- * **Anchors, not fetches.** Each format is an `<a href download>` pointing at
- * `GET /api/export`, so the browser streams the file straight to disk under the
- * name the server's `Content-Disposition` gives it. Fetching the bytes into
- * JavaScript to build a blob URL would mean holding a whole graph in the tab's
- * memory to hand it to the same download the browser can do on its own — and it
- * would lose the server's filename, which is the half that carries a Norwegian
- * graph's letters.
- *
- * **It sits beside the legend and says the same kind of thing.** The legend
- * explains what the picture means; this says what leaves with it — how many
- * nodes, and the one way the file differs from the canvas. Both are cards over
- * the canvas rather than sidebar sections because both are about *this view*.
- */
-
+/** Legacy loaded-induced links and a revision-bound scoped preview share one entry point. */
 import { apiUrl } from './urls'
+import { ScopedExport } from './scoped-export'
+import type { SharedSnapshotMeta } from './generated/SharedSnapshotMeta'
 
 /** The formats offered, in the order a user reads them. */
 const FORMATS: readonly (readonly [string, string, string])[] = [
@@ -44,8 +30,9 @@ export class ExportCard {
   private readonly note: HTMLDivElement
   private readonly links: HTMLAnchorElement[] = []
   private open = false
+  private readonly scoped: ScopedExport
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, dialogHost: HTMLElement = container) {
     this.root = document.createElement('div')
     this.root.className = 'kglv-export'
     this.root.setAttribute('data-testid', 'export')
@@ -62,6 +49,12 @@ export class ExportCard {
     this.body.className = 'kglv-export-body'
     this.body.setAttribute('data-testid', 'export-body')
 
+    this.scoped = new ScopedExport(dialogHost)
+    const preview = document.createElement('button'); preview.type = 'button'; preview.className = 'kglv-button'
+    preview.textContent = 'Preview scoped export…'; preview.dataset['testid'] = 'export-scoped'
+    preview.onclick = () => this.scoped.open(preview)
+    const legacy = document.createElement('p'); legacy.textContent = 'Quick export: loaded nodes + induced relations'
+    this.body.append(preview, legacy)
     for (const [format, label, hint] of FORMATS) {
       const row = document.createElement('a')
       row.className = 'kglv-export-link'
@@ -128,6 +121,10 @@ export class ExportCard {
 
   /** Instance nodes the next export would carry — what `__kglv` reports. */
   count = 0
+
+  openScoped(opener: HTMLElement): void { this.scoped.open(opener) }
+
+  update(snapshot: SharedSnapshotMeta): void { this.scoped.update(snapshot) }
 
   private applyOpenState(): void {
     this.body.style.display = this.open ? '' : 'none'

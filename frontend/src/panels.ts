@@ -1,3 +1,4 @@
+import { saveTableCsv } from './table-csv'
 /**
  * The side panels: Cypher, selection, search, appearance.
  *
@@ -905,7 +906,14 @@ export class Panels {
     grid.append(head, ...order.slice(first, first + this.queryPageSize).map(row => this.queryRow(table, row, linked)))
     const pager = this.queryPager(rows, first)
     const notice = element('div', 'kglv-hint', table.graph_references_truncated ? 'Graph references are partial; actions use only the available entity references.' : '')
-    this.queryResults.replaceChildren(notice, grid, pager)
+    const csv = element('button', 'kglv-button', `Download ${rows} returned query rows CSV`); csv.dataset['testid'] = 'query-csv'
+    csv.onclick = () => {
+      try {
+        saveTableCsv(table.columns, order.map(row => table.columns.map((_, column) => table.cells[column]?.[row] ?? {state: 'missing'})), 'query-returned-rows.csv')
+        notice.textContent = `Downloaded ${rows} returned query rows in current sort order; each field includes cell state, value type and detail columns; partial previews stay partial.${table.bound.truncated ? ' The source query result is partial.' : ''}`
+      } catch (error) { notice.textContent = error instanceof Error ? error.message : String(error) }
+    }
+    this.queryResults.replaceChildren(notice, csv, grid, pager)
   }
   private queryRow(table: QueryTable, row: number, linked: boolean): HTMLTableRowElement {
     const tr = element('tr')
