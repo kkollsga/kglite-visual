@@ -16,6 +16,8 @@
  * override survives the property statistics arriving again.
  */
 
+import { keepSchemaContext, openDrawer, closeDrawer } from './navigation'
+
 import { expect, test, type Page } from '@playwright/test'
 
 import { appUrl, launch, type Launched } from './harness'
@@ -32,6 +34,7 @@ test('a caption redraws the labels, and an override sticks', async ({ page }) =>
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await keepSchemaContext(page)
 
     // The server suggests nothing for this fixture, because its titles are
     // already names. A suggestion here would be the failure the title gate
@@ -47,6 +50,7 @@ test('a caption redraws the labels, and an override sticks', async ({ page }) =>
     expect(suggested).toBeNull()
 
     // Load Person instances and open their statistics.
+    await closeDrawer(page)
     await page.locator('.kglv-label:has-text("Person")').click()
     await page.getByTestId('expand-KNOWS-out').click()
     await page.waitForFunction(() => window.__kglv.lastSliceKind === 'expand', undefined, {
@@ -58,6 +62,7 @@ test('a caption redraws the labels, and an override sticks', async ({ page }) =>
 
     // ── caption by a property that is not the title ─────────────────────
     const before = await page.evaluate(() => window.__kglv)
+    await openDrawer(page, 'appearance')
     await page.getByTestId('caption-by').selectOption('city')
     await page.waitForSelector('.kglv-label:has-text("City_")', { timeout: 15_000 })
     // The chips now carry city names where they carried person names.
@@ -75,13 +80,16 @@ test('a caption redraws the labels, and an override sticks', async ({ page }) =>
     // Re-selecting the type re-sends `property-stats`, and the server's own
     // suggestion rides in with it. A handler that re-seeded from the response
     // would walk the user's choice back while they watched.
+    await closeDrawer(page)
     await page.locator('.kglv-label:has-text("City_")').first().click()
+    await closeDrawer(page)
     await page.locator('.kglv-label[data-slot="0"]').click()
     await expect(page.getByTestId('appearance-note')).toContainText('Person: 60 nodes')
     await expect(page.getByTestId('caption-by')).toHaveValue('city')
     await expect(page.locator('.kglv-label:has-text("City_")').first()).toBeVisible()
 
     // ── back to the stored title ────────────────────────────────────────
+    await openDrawer(page, 'appearance')
     await page.getByTestId('caption-by').selectOption('')
     await page.waitForSelector('.kglv-label:has-text("Person_")', { timeout: 15_000 })
     await expect(page.getByTestId('caption-by')).toHaveValue('')

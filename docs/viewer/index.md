@@ -1,8 +1,14 @@
 # The viewer
 
-`kglite-visual graph.kgl` opens one page: a WebGL canvas on the left and a
-column of panels on the right. This page is the tour. Four subjects are big
-enough to have their own:
+`kglite-visual graph.kgl` opens a workspace with **Explore**, **Data** and
+**Query** destinations. Explore keeps the graph and selection inspector;
+Query holds the editor and path builder; table answers open Data immediately.
+The renderer, selection and editor draft survive destination changes.
+
+Filters and Appearance open drawers. The scope line separates source totals
+from loaded, visible and selected instances; schema types are counted separately.
+On a narrow screen, **Inspect** opens the selection sheet and Escape returns
+focus to its trigger. Four subjects have their own guides:
 
 - **[The honesty model](honesty.md)** — bounds, truncation, and every place the
   app tells you what it is *not* showing. This is the product philosophy, not a
@@ -49,7 +55,7 @@ The server asks kglite for a schema sized for the graph it has, and reports
 which tier it used on stderr and in `GET /api/session`:
 
 ```json
-{"protocol_version":4,"tier":"compact","slot_count":98,
+{"protocol_version":5,"tier":"compact","slot_count":98,
  "stats":{"node_count":546850,"edge_count":765373,"node_type_count":98,
           "relationship_type_count":54,"core_type_count":35}}
 ```
@@ -59,7 +65,7 @@ the supporting types hanging off them — 35 of 98 in the example. The tier
 decides how much per-type detail the schema carries, not what the picture
 draws.
 
-## Selection, preview, expansion
+## Selection, browsing and expansion
 
 Clicking a node does not load anything. It fills the **Selection** panel with
 what expanding it *would* add — every relationship that type actually has, in
@@ -67,7 +73,7 @@ each direction, with a count:
 
 ```console
 $ curl -s -XPOST $B/api/preview -H 'content-type: application/json' -d '{"slot":0}'
-{"protocol_version":4,"slot":0,"scope":"type","node_type":"Person","title":"",
+{"protocol_version":5,"slot":0,"scope":"type","node_type":"Person","title":"",
  "relationships":[
    {"name":"HAS_SKILL","direction":"out","other_type":"Skill","count":180},
    {"name":"KNOWS","direction":"out","other_type":"Person","count":180},
@@ -79,6 +85,11 @@ $ curl -s -XPOST $B/api/preview -H 'content-type: application/json' -d '{"slot":
 
 Preview before expansion is the whole progressive-disclosure idea in one
 interaction: you learn the size of the answer before it costs anything.
+
+**Browse instances** loads a bounded set of the selected type, including
+instances with no relationships. Use **Schema** to return to the type picture
+without unloading the exploration; **Instances** returns to those same nodes.
+**Schema context** optionally shows type nodes alongside the instance view.
 
 Then expand. A type slot loads instances of that type; an instance slot loads
 what it is connected to. Naming a relationship is the cheap case; walking every

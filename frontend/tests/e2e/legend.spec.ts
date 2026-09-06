@@ -10,6 +10,8 @@
  * identical in a screenshot.
  */
 
+import { keepSchemaContext, openDrawer, closeDrawer } from './navigation'
+
 import { expect, test, type Page } from '@playwright/test'
 
 import { appUrl, launch, type Launched } from './harness'
@@ -26,6 +28,7 @@ test('the legend lists the encoding in force, and changes when it does', async (
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await keepSchemaContext(page)
 
     // ── structural, and collapsed ───────────────────────────────────────
     const body = page.getByTestId('legend-body')
@@ -37,6 +40,7 @@ test('the legend lists the encoding in force, and changes when it does', async (
     await expect(body).toContainText('grows with its member count')
 
     // ── expand, so instance nodes are on screen and have properties ─────
+    await closeDrawer(page)
     await page.locator('.kglv-label:has-text("Person")').click()
     await page.getByTestId('expand-KNOWS-out').click()
     await page.waitForFunction(() => window.__kglv.lastSliceKind === 'expand', undefined, {
@@ -63,6 +67,7 @@ test('the legend lists the encoding in force, and changes when it does', async (
     const values = stats.properties.find((p) => p.name === property)?.values ?? []
     expect(values.length).toBeGreaterThan(1)
 
+    await openDrawer(page, 'appearance')
     await page.getByTestId('color-by').selectOption(property as string)
     await page.waitForFunction((name) => window.__kglv.colorBy === name, property, {
       timeout: 15_000,
@@ -83,6 +88,7 @@ test('the legend lists the encoding in force, and changes when it does', async (
     expect(withPalette).toBeGreaterThanOrEqual(values.length)
 
     // ── back to structural ──────────────────────────────────────────────
+    await openDrawer(page, 'appearance')
     await page.getByTestId('color-by').selectOption('')
     await page.waitForFunction(() => window.__kglv.colorBy === null, undefined, {
       timeout: 15_000,

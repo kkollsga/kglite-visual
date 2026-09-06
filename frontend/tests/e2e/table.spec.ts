@@ -7,6 +7,8 @@
  * back as numbers and asserting it is monotonic is what separates the two.
  */
 
+import { keepSchemaContext } from './navigation'
+
 import { expect, test, type Page } from '@playwright/test'
 
 import { appUrl, launch, queryText, type Launched } from './harness'
@@ -45,6 +47,7 @@ test('the type panel builds a table of what is on screen, and its columns sort',
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await keepSchemaContext(page)
 
     // Select the type first — that is what fetches its property statistics,
     // and the statistics are where the table's columns come from — then drill
@@ -64,7 +67,7 @@ test('the type panel builds a table of what is on screen, and its columns sort',
       { timeout: 15_000 },
     )
     await expect(action).toBeVisible()
-    await expect(action).toHaveText(`table of ${KNOWS_REACHABLE} on screen`)
+    await expect(action).toHaveText(`table of ${KNOWS_REACHABLE} loaded`)
 
     await action.click()
     await page.waitForFunction(() => window.__kglv.queryRows > 0, undefined, { timeout: 15_000 })

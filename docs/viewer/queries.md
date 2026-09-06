@@ -7,11 +7,13 @@ what they wrote before running it. That is the rule — **what is on screen is
 what runs** — and it is why there is no "smart mode" checkbox anywhere in this
 app.
 
-## The Cypher panel
+## Query and Data
 
-Write a query, press **Run** or Ctrl/Cmd+Enter. Leave **show in graph**
-unticked and the answer is a table; tick it and the nodes and relationships the
-query returns are added to the view.
+Open **Query**, write a query, and press **Run** or Ctrl/Cmd+Enter. Leave **show in graph**
+unticked and **Data** opens with the table; tick it and the returned nodes
+and relationships are added to **Explore**. Returning to Query retains the draft.
+The Data heading labels a query answer as source scope; it does not claim that
+scalar rows belong to the graph selection.
 
 Both go through `POST /api/cypher`, so a `curl` and the panel are the same
 request:
@@ -66,10 +68,10 @@ listed under the editor in kglite's own words. It is a real endpoint, so a
 
 ```console
 $ curl -s -XPOST $B/api/validate -H "$C" -d '{"query":"MATCH (w:Wellbor) RETURN w"}'
-{"protocol_version":4,"diagnostics":[{"severity":"warning","message":"MATCH references unknown node label 'Wellbor' — the graph has no such type, so this pattern returns no rows. Did you mean 'Wellbore'?","line":null,"col":null}]}
+{"protocol_version":5,"diagnostics":[{"severity":"warning","message":"MATCH references unknown node label 'Wellbor' — the graph has no such type, so this pattern returns no rows. Did you mean 'Wellbore'?","line":null,"col":null}]}
 
 $ curl -s -XPOST $B/api/validate -H "$C" -d '{"query":"CREATE (n:Person) RETURN n"}'
-{"protocol_version":4,"diagnostics":[{"severity":"error","message":"this viewer runs queries read-only — the engine will refuse a statement that writes","line":null,"col":null}]}
+{"protocol_version":5,"diagnostics":[{"severity":"error","message":"this viewer runs queries read-only — the engine will refuse a statement that writes","line":null,"col":null}]}
 ```
 
 `severity` is `error` (it cannot run: a syntax error, or a write this read-only

@@ -10,7 +10,7 @@
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { appUrl, launch, queryText, type Launched } from './harness'
+import { appUrl, openDestination, launch, queryText, type Launched } from './harness'
 
 const META_POINTS = 5
 /** Every Person works at a Company, and every Company is in exactly one City. */
@@ -33,6 +33,7 @@ test('the path builder offers real hops, counts them, and runs what it shows', a
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await openDestination(page, 'query')
 
     const start = page.locator('[data-testid="path-start"]')
     await expect(start).toBeVisible()
@@ -125,6 +126,7 @@ test('a filter is bound, not written, and narrows the count it is beside', async
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await openDestination(page, 'query')
 
     await page.locator('[data-testid="path-start"]').selectOption('Person')
     await page.locator('[data-testid="path-add"]').click()

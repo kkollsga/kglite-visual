@@ -269,6 +269,7 @@ export type LabelHandlers = {
 export class LabelOverlay {
   private readonly root: HTMLDivElement
   private specs = new Map<number, LabelSpec>()
+  private pinned = new Set<number>()
   private readonly elements = new Map<number, HTMLDivElement>()
 
   constructor(
@@ -293,8 +294,22 @@ export class LabelOverlay {
    */
   setLabels(specs: LabelSpec[]): void {
     this.specs = new Map(specs.map((spec) => [spec.slot, spec]))
+    this.pinned = new Set(specs.filter((spec) => spec.pinned).map((spec) => spec.slot))
     for (const element of this.elements.values()) element.remove()
     this.elements.clear()
+  }
+
+  /** Update selection priority without rebuilding or dropping the other label elements. */
+  setPinned(slots: number[]): void {
+    for (const slot of this.pinned) {
+      const spec = this.specs.get(slot)
+      if (spec !== undefined) spec.pinned = false
+    }
+    this.pinned = new Set(slots)
+    for (const slot of this.pinned) {
+      const spec = this.specs.get(slot)
+      if (spec !== undefined) spec.pinned = true
+    }
   }
 
   /**
@@ -371,6 +386,14 @@ export class LabelOverlay {
 
     if (this.handlers !== null) {
       const handlers = this.handlers
+      element.tabIndex = 0
+      element.setAttribute('role', 'button')
+      element.setAttribute('aria-label', spec.text)
+      element.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        handlers.onSelect(spec.slot)
+      })
       element.addEventListener('click', () => handlers.onSelect(spec.slot))
       element.addEventListener('mouseenter', () => handlers.onHover(spec.slot))
       element.addEventListener('mouseleave', () => handlers.onHover(null))

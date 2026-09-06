@@ -155,6 +155,11 @@ export class InteractionState {
     return this.visible(this.selected)
   }
 
+  /** Local selection survives filtering; its renderer projection may be empty. */
+  allSelectedSlots(): number[] {
+    return [...this.selected]
+  }
+
   /**
    * Project the four sets onto cosmos.gl's channels.
    *

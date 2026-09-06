@@ -17,7 +17,7 @@
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { appUrl, fillQuery, launch, queryText, type Launched } from './harness'
+import { appUrl, openDestination, fillQuery, launch, queryText, type Launched } from './harness'
 
 const HOST = '[data-testid="query-editor"]'
 
@@ -44,6 +44,7 @@ test('the query editor: CodeMirror replaces the textarea and keeps its contract'
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await openDestination(page, 'query')
 
     // ── the swap happened ───────────────────────────────────────────────
     await expect(page.locator(`${HOST} .cm-content`)).toBeVisible()
@@ -77,6 +78,8 @@ test('the query editor: CodeMirror replaces the textarea and keeps its contract'
     await expect(page.getByTestId('query-table').locator('th').first()).toHaveText('who')
 
     // ── undo, which a textarea got from the browser for free ────────────
+    await openDestination(page, 'query')
+    await page.locator(`${HOST} .cm-content`).click()
     await page.keyboard.press('End')
     await page.keyboard.type(' // scratch')
     expect(await queryText(page)).toContain('// scratch')
@@ -108,6 +111,7 @@ test('completions come from this graph, not from a word list', async ({ page }) 
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await openDestination(page, 'query')
     await expect(page.locator(`${HOST} .cm-content`)).toBeVisible()
 
     // ── ':' in a node pattern offers the fixture's node labels ───────────
@@ -154,6 +158,7 @@ test('diagnostics come from the engine, on an idle timer', async ({ page }) => {
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await openDestination(page, 'query')
     await expect(page.locator(`${HOST} .cm-content`)).toBeVisible()
 
     // ── a syntax error underlines, and is listed ────────────────────────

@@ -88,11 +88,11 @@ export function resolveBinary(): string {
 const QUERY_STORE = mkdtempSync(path.join(os.tmpdir(), 'kglv-e2e-queries-'))
 process.on('exit', () => rmSync(QUERY_STORE, { recursive: true, force: true }))
 
-export async function launch(): Promise<Launched> {
-  if (!existsSync(path.join(REPO, FIXTURE))) {
-    throw new Error(`fixture ${FIXTURE} not found under ${REPO}`)
+export async function launch(fixture = FIXTURE): Promise<Launched> {
+  if (!existsSync(path.join(REPO, fixture))) {
+    throw new Error(`fixture ${fixture} not found under ${REPO}`)
   }
-  const child = spawn(resolveBinary(), [FIXTURE, '--no-open', '--port', '0'], {
+  const child = spawn(resolveBinary(), [fixture, '--no-open', '--port', '0'], {
     cwd: REPO,
     env: { ...process.env, KGLITE_VISUAL_CONFIG_DIR: QUERY_STORE },
   })
@@ -184,6 +184,11 @@ export class Listener {
   }
 }
 
+export async function openDestination(page: Page, destination: 'explore' | 'data' | 'query'): Promise<void> {
+  const tab = page.getByTestId(`destination-${destination}`)
+  if (await tab.getAttribute('aria-selected') !== 'true') await tab.click()
+}
+
 /**
  * Put text in the query editor, whichever editor is live.
  *
@@ -201,6 +206,7 @@ export class Listener {
  * exactly two ways: CodeMirror mounted, or the note saying it did not.
  */
 export async function fillQuery(page: Page, text: string): Promise<void> {
+  await openDestination(page, 'query')
   await page
     .locator('[data-testid="query-editor"] .cm-content, [data-testid="editor-note"].kglv-warn')
     .first()

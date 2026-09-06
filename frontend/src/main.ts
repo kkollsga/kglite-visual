@@ -13,6 +13,8 @@
  */
 
 import './styles.css'
+import './workspace.css'
+import { Workspace, type GraphScope } from './workspace'
 
 import {
   categoricalLegend,
@@ -116,22 +118,32 @@ const root = document.createElement('div')
 root.className = 'kglv-root'
 mount.appendChild(root)
 
-const canvasHost = document.createElement('div')
-canvasHost.className = 'kglv-canvas'
-root.appendChild(canvasHost)
+let graphScope: GraphScope = 'schema'
+let schemaContext = false
+const workspace = new Workspace(root, {
+  setScope: (scope, context) => {
+    graphScope = scope
+    schemaContext = context
+    redraw()
+  },
+  fitVisible: () => fitVisible(),
+  zoom: (factor) => {
+    if (surface === null) return
+    surface.graph.zoom(surface.graph.getZoomLevel() * factor, 0)
+  },
+  focusSelection: () => focusSelection(),
+  clearSelection: () => clearSelection(),
+  inspectType: (slot) => selectSlot(slot),
+})
+const canvasHost = workspace.canvasHost
+const status = workspace.status
 
-const status = document.createElement('div')
-status.className = 'kglv-status'
-root.appendChild(status)
-
-const labels = new LabelOverlay(root, {
+const labels = new LabelOverlay(workspace.graphHost, {
   // A label is the addressable handle on a node: clicking the name selects it
   // and pointing at it emphasises its neighbourhood, both without a single
   // pixel guess. Same code path as a canvas click — `onPointClick` below.
   onSelect: (slot) => {
-    interaction.setSelected([slot])
-    applyInteraction()
-    send({ type: 'preview', slot })
+    selectSlot(slot)
   },
   onHover: (slot) => {
     if (surface === null) return
@@ -148,13 +160,13 @@ const interaction = new InteractionState()
  * first colour-by choice, which is the point at which a colour means something
  * only the person who picked it knows.
  */
-const legend = new Legend(root)
+const legend = new Legend(workspace.graphHost)
 /**
  * Above the legend, in the same corner and for the same reason: both cards are
  * about *this view* rather than about the app. The legend says what the picture
  * means; this says what leaves with it (plan E8).
  */
-const exportCard = new ExportCard(root)
+const exportCard = new ExportCard(workspace.graphHost)
 const assembler = new ResponseAssembler()
 const transport = new WebSocketTransport('ws')
 
@@ -208,7 +220,7 @@ const captionValues = new Map<number, string>()
  */
 const schema = new SchemaCache()
 
-const panels = new Panels(root, {
+const panels = new Panels(workspace.panelHosts.inspector, {
   runQuery: (query, asGraph) => {
     if (query.trim() === '') return
     // The note describes a GENERATED table — which columns were capped, which
@@ -227,6 +239,7 @@ const panels = new Panels(root, {
   expand: (slot, relationship, direction, limit) =>
     send({ type: 'expand', slot, relationship, direction, limit }),
   collapse: (slot) => send({ type: 'collapse', slot }),
+  browseType: (nodeType, limit) => send({ type: 'browse-type', node_type: nodeType, limit }),
   search: (query, nodeType) => {
     if (query.trim() === '') return
     send({
@@ -255,9 +268,7 @@ const panels = new Panels(root, {
     })
   },
   focusSlot: (slot) => {
-    interaction.setSelected([slot])
-    applyInteraction()
-    send({ type: 'preview', slot })
+    selectSlot(slot)
   },
   setColorBy: (property) => applyColorBy(property),
   setSizeBy: (property) => applySizeBy(property),
@@ -270,10 +281,10 @@ const panels = new Panels(root, {
   // query and never moves the view.
   validateQuery: (query) => validateQuery(query),
   showTypeTable: (nodeType) => showTypeTable(nodeType),
-}, schema)
+}, schema, workspace.panelHosts)
 
 /**
- * The path builder (plan E9), in the sidebar under its own heading.
+ * The path builder (plan E9), under its own heading in Query.
  *
  * Its Run goes down the same `cypher` request the Run button sends, with
  * `as_graph` on: a path is a picture, and the nodes and relationships the
@@ -288,7 +299,10 @@ const pathBuilder = new PathBuilder(document.createElement('div'), schema, {
     panels.loadGeneratedQuery(query)
     send({ type: 'cypher', query, params, limit: null, as_graph: true })
   },
-  copyToEditor: (query) => panels.loadGeneratedQuery(query),
+  copyToEditor: (query) => {
+    panels.loadGeneratedQuery(query)
+    workspace.navigate('query')
+  },
   countRows: async (query, params) => {
     const response = await fetch(apiUrl('api/cypher'), {
       method: 'POST',
@@ -303,6 +317,69 @@ const pathBuilder = new PathBuilder(document.createElement('div'), schema, {
   },
 })
 panels.addSection('Path', pathBuilder.root)
+
+function selectSlot(slot: number): void {
+  interaction.setSelected([slot])
+  lastPreview = null
+  lastDetail = null
+  panels.clearSelection()
+  applyInteraction()
+  send({ type: 'preview', slot })
+  workspace.setInspectedType(view.label(slot)?.isType === true ? slot : null)
+  workspace.openInspector()
+}
+
+function clearSelection(): void {
+  workspace.setInspectedType(null)
+  interaction.setSelected([])
+  lastPreview = null
+  lastDetail = null
+  panels.clearSelection()
+  applyInteraction()
+}
+
+function presentationSlots(): number[] {
+  return view.liveSlots().filter((slot) => graphScope === 'schema'
+    ? view.label(slot)?.isType === true : schemaContext || view.label(slot)?.isType === false)
+}
+
+function visibleSlots(): number[] {
+  return view.liveSlots().filter((slot) => !hiddenSlots.has(slot))
+}
+
+function visibleLinkCount(): number {
+  let count = 0
+  for (let i = 0; i < view.links.length; i += 2) {
+    if (!hiddenSlots.has(view.links[i] as number) && !hiddenSlots.has(view.links[i + 1] as number)) count += 1
+  }
+  return count
+}
+
+function fitVisible(): void {
+  const slots = visibleSlots()
+  if (slots.length > 0) surface?.graph.fitViewByPointIndices(slots, 0)
+}
+
+function focusSelection(): void {
+  const slots = interaction.selectedSlots()
+  if (slots.length === 0) return
+  workspace.navigate('explore')
+  surface?.graph.fitViewByPointIndices(slots, 0)
+}
+
+/** Selected labels participate even when the renderer's density sampler omitted them. */
+function samplesWithSelection(current: Surface): { indices: number[]; positions: number[] } {
+  const sampled = current.graph.getSampledPoints()
+  const indices = [...sampled.indices]
+  const positions = [...sampled.positions]
+  const included = new Set(indices)
+  for (const [slot, position] of current.graph.getTrackedPointPositionsMap()) {
+    if (included.has(slot) || hiddenSlots.has(slot)) continue
+    indices.push(slot)
+    positions.push(position[0], position[1])
+  }
+  return { indices, positions }
+}
 
 /**
  * A type's on-screen nodes, as a table of their properties (plan E9).
@@ -336,9 +413,9 @@ function showTypeTable(nodeType: string): void {
   if (ids.length === 0) {
     panels.showQueryError(
       unnameable > 0
-        ? `none of the ${unnameable} ${nodeType} nodes on screen carry an id field, so no ` +
+        ? `none of the ${unnameable} ${nodeType} loaded nodes carry an id field, so no ` +
             'query can name them — select them in the graph instead'
-        : `no ${nodeType} nodes are on screen`,
+        : `no ${nodeType} nodes are loaded`,
     )
     return
   }
@@ -361,12 +438,12 @@ function showTypeTable(nodeType: string): void {
     // rather than left for the user to notice a missing column.
     notes.push(
       `${columns.length} of ${lastStats.size} properties, the ones most ${nodeType} nodes ` +
-        'carry — edit the RETURN clause above for the rest',
+        'carry — edit the RETURN clause in Query for the rest',
     )
   }
   if (unnameable > 0) {
     notes.push(
-      `${unnameable} of ${ids.length + unnameable} on screen have no id field and cannot be ` +
+      `${unnameable} of ${ids.length + unnameable} loaded nodes have no id field and cannot be ` +
         'named by a query — they are not in these rows',
     )
   }
@@ -452,13 +529,13 @@ function applySizeBy(property: string | null): void {
 function applyFocus(command: Focus): void {
   debugState.focusedSlots = [...command.slots]
   if (surface === null) return
-  const live = new Set(view.liveSlots())
+  const live = new Set(visibleSlots())
   const targets = command.slots.filter((slot) => live.has(slot))
   // Duration zero: this is a jump to somewhere the agent is about to talk
   // about, not an animation, and an in-flight transition auto-pauses the
   // simulation (see `render.ts`).
   if (targets.length === 0) {
-    surface.graph.fitView(0)
+    fitVisible()
   } else {
     surface.graph.fitViewByPointIndices(targets, 0)
   }
@@ -552,6 +629,7 @@ function applyLayout(message: LayoutMessage): void {
   }
   view.applyLayout(message.points)
   redraw('server')
+  surface.framePayload(view)
 }
 
 /** Drive both appearance channels from a remote command. */
@@ -582,6 +660,7 @@ const pendingValues: ValueRequest[] = []
 transport.connect({
   onStatus: (connected) => {
     connectedAtom.set(connected)
+    workspace.setConnected(connected)
     renderStatus()
   },
   onError: (message) => fail(message),
@@ -612,6 +691,7 @@ async function handle(completed: Completed): Promise<void> {
       // actually do, which needs the ceiling the server enforces rather than a
       // number this file remembers.
       pathBuilder.setRowCeiling(completed.value.max_query_rows)
+      workspace.setSession(completed.value)
       renderStatus()
       break
     case 'meta-graph':
@@ -652,7 +732,12 @@ async function handle(completed: Completed): Promise<void> {
         lastDetail = null
         panels.clearSelection()
       }
+      if (meta.kind !== 'collapse' && instancesOnScreen() > 0) {
+        graphScope = 'instances'
+        workspace.showInstances()
+      }
       redraw()
+      if (surface !== null && !surface.axes.simulation) surface.framePayload(view)
       // The node set changed, so the layout has new work to do — and *which*
       // work depends on who owns the layout.
       //
@@ -677,7 +762,9 @@ async function handle(completed: Completed): Promise<void> {
       break
     }
     case 'preview':
+      if (!interaction.allSelectedSlots().includes(completed.value.slot)) break
       lastPreview = completed.value
+      if (lastDetail?.slot !== completed.value.slot) lastDetail = null
       // A type node has no stored properties; an instance does, and the panel
       // shows both in one place, so the detail is fetched alongside.
       if (completed.value.scope === 'node') {
@@ -689,6 +776,7 @@ async function handle(completed: Completed): Promise<void> {
       debugState.previewRows = panels.showPreview(completed.value, lastDetail)
       break
     case 'node-detail':
+      if (lastPreview?.slot !== completed.value.slot) break
       lastDetail = completed.value
       if (lastPreview !== null) {
         debugState.previewRows = panels.showPreview(lastPreview, lastDetail)
@@ -781,6 +869,7 @@ async function showMetaGraph(message: {
   debugState.protocolVersion = message.meta.protocol_version
   debugState.positionsHash = fnv1a(message.points)
   panels.setNodeTypes(message.meta.nodes.map((node) => node.name))
+  workspace.setTypes(message.meta.nodes)
   schema.setMetaGraph(message.meta)
   // After `schema.setMetaGraph`, which is where the builder's hop lists come
   // from: filling the start picker first would offer types with no hops behind
@@ -798,10 +887,13 @@ async function showMetaGraph(message: {
   }
 
   try {
-    surface = await mountGraph(canvasHost, view, appearance(), layoutAxes)
-    attachHandlers(surface)
+    if (surface === null) {
+      surface = await mountGraph(canvasHost, view, appearance(), layoutAxes)
+      attachHandlers(surface)
+    }
     debugState.simRunning = surface.graph.isSimulationRunning
     redraw()
+    fitVisible()
     markRendererMounted(surface.graph)
     debugState.ready = true
   } catch (err) {
@@ -824,6 +916,8 @@ function redraw(authority?: SeedAuthority): void {
   // keystroke: the view moves underneath a filter, and slots an expansion just
   // added have never been matched against the terms.
   recomputeFilter()
+  recomputeProjection()
+  updateTrackedPoints()
   surface.upload(view, appearance(), authority)
   interaction.apply(surface.graph)
   refreshLabelSpecs()
@@ -1044,6 +1138,7 @@ function slotCaption(slot: number): string {
  * "clear the filter" a re-fetch.
  */
 let filterTerms: FilterTerm[] = []
+let filterHiddenSlots: ReadonlySet<number> = new Set()
 let hiddenSlots: ReadonlySet<number> = new Set()
 
 /**
@@ -1096,8 +1191,7 @@ function recomputeFilter(): void {
     // A refused term hides NOTHING. Applying the terms it could answer would
     // be filtering on less than the user typed while looking like it worked —
     // the failure the refusal exists to prevent, arriving one term later.
-    hiddenSlots = new Set()
-    interaction.setHidden(hiddenSlots)
+    filterHiddenSlots = new Set()
     panels.showFilterState(null, refused)
     return
   }
@@ -1105,10 +1199,22 @@ function recomputeFilter(): void {
   for (const slot of view.liveSlots()) {
     if (!matches(filterTerms, slotFacts(slot))) hidden.add(slot)
   }
+  filterHiddenSlots = hidden
+  const projected = presentationSlots()
+  panels.showFilterState(filterLine(projected.filter((slot) => !hidden.has(slot)).length, projected.length), [])
+}
+
+/** Presentation is local and never changes loaded membership or the active filter. */
+function recomputeProjection(): void {
+  const hidden = new Set(filterHiddenSlots)
+  for (const slot of view.liveSlots()) {
+    const isType = view.label(slot)?.isType === true
+    if (graphScope === 'schema' ? !isType : isType && !schemaContext) hidden.add(slot)
+  }
   hiddenSlots = hidden
   interaction.setHidden(hiddenSlots)
-  panels.showFilterState(filterLine(view.liveCount - hidden.size, view.liveCount), [])
 }
+
 
 /**
  * Describe the encoding currently on screen (plan E11).
@@ -1251,17 +1357,11 @@ function attachHandlers(current: Surface): void {
       if (interaction.hover(current.graph, null)) applyInteraction()
     },
     onPointClick: (index: number) => {
-      interaction.setSelected([index])
-      applyInteraction()
-      send({ type: 'preview', slot: index })
+      selectSlot(index)
     },
     onClick: (index: number | undefined) => {
       if (index !== undefined) return
-      interaction.setSelected([])
-      applyInteraction()
-      lastPreview = null
-      lastDetail = null
-      panels.clearSelection()
+      clearSelection()
     },
     // Camera events reposition the labels already on screen; they never rebuild
     // the spec table. The spec list is a function of the *view*, and the camera
@@ -1280,13 +1380,10 @@ function attachHandlers(current: Surface): void {
     onSimulationEnd: () => {
       debugState.simRunning = false
       // The settled layout's extent is not the seed's, so the data-derived
-      // zoom no longer frames it. A fit is a viewport-dependent operation and
-      // therefore banned wherever the positions are an assertion (D2). This
-      // callback fires only with the simulation axis on, where the layout was
-      // already viewport-independent up to the simulation and nothing is left
-      // to protect — `Surface.upload` reads the same axis to decide whether to
-      // apply the data-derived zoom instead.
-      if (fitOnSettle) current.graph.fitView(0)
+      // zoom no longer frames it. Fitting changes only the camera; seeded
+      // coordinates remain deterministic. Membership changes request a fit,
+      // while appearance and destination changes preserve the user's camera.
+      if (fitOnSettle) fitVisible()
       fitOnSettle = false
       positionLabels(current)
       syncCounts()
@@ -1298,7 +1395,11 @@ function attachHandlers(current: Surface): void {
 function applyInteraction(): void {
   if (surface === null) return
   interaction.apply(surface.graph)
+  labels.setPinned(interaction.selectedSlots())
+  updateTrackedPoints()
   surface.graph.render(undefined, 0)
+  positionLabels(surface)
+  requestAnimationFrame(() => { if (surface !== null) positionLabels(surface) })
   syncCounts()
 }
 
@@ -1345,7 +1446,7 @@ function refreshLabelSpecs(): void {
  * thinnings come back.
  */
 function isMetaGraphOnly(): boolean {
-  return view.liveSlots().every((slot) => view.label(slot)?.isType === true)
+  return graphScope === 'schema' || view.liveSlots().every((slot) => view.label(slot)?.isType === true)
 }
 
 /** Re-place the already-built candidates against the current camera. */
@@ -1359,7 +1460,7 @@ function positionLabels(current: Surface): void {
   const wholeSchema = isMetaGraphOnly()
   labels.update(
     {
-      sampledPoints: () => (wholeSchema ? everyPoint(current) : graph.getSampledPoints()),
+      sampledPoints: () => (wholeSchema ? everyPoint(current) : samplesWithSelection(current)),
       toScreen: (position: [number, number]) => graph.spaceToScreenPosition(position),
       radius: (index: number) => graph.getPointRadiusByIndex(index) ?? 0,
     },
@@ -1376,20 +1477,24 @@ function positionLabels(current: Surface): void {
  * the server's seed, and the simulation holds where the point actually is.
  */
 function everyPoint(current: Surface): { indices: number[]; positions: number[] } {
-  const live = current.graph.getPointPositions()
   const indices: number[] = []
   const positions: number[] = []
-  for (const slot of view.liveSlots()) {
+  for (const [slot, position] of current.graph.getTrackedPointPositionsMap()) {
     if (hiddenSlots.has(slot)) continue
-    const x = live[slot * 2]
-    const y = live[slot * 2 + 1]
-    if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) {
-      continue
-    }
     indices.push(slot)
-    positions.push(x, y)
+    positions.push(position[0], position[1])
   }
   return { indices, positions }
+}
+
+let trackedPointsKey = ''
+function updateTrackedPoints(): void {
+  if (surface === null) return
+  const slots = isMetaGraphOnly() ? visibleSlots() : interaction.selectedSlots()
+  const key = slots.join(',')
+  if (key === trackedPointsKey) return
+  trackedPointsKey = key
+  surface.graph.trackPointPositionsByIndices(slots)
 }
 
 function syncCounts(): void {
@@ -1400,8 +1505,11 @@ function syncCounts(): void {
   // reporting hidden nodes would be the instrument every agent and every e2e
   // assertion reads, describing a screen nobody is looking at.
   debugState.pointCount = view.liveCount - hiddenSlots.size
-  debugState.filteredOut = hiddenSlots.size
-  debugState.linkCount = view.linkCount
+  debugState.filteredOut = [...filterHiddenSlots].filter((slot) =>
+    graphScope === 'schema' ? view.label(slot)?.isType === true
+      : schemaContext || view.label(slot)?.isType === false,
+  ).length
+  debugState.linkCount = visibleLinkCount()
   debugState.slotCount = view.slotCount
   debugState.tombstoneCount = view.tombstoneCount
   debugState.namedSlots = view.namedCount
@@ -1409,6 +1517,16 @@ function syncCounts(): void {
   debugState.emphasizedCount = interaction.emphasizedSlots().length
   debugState.highlightedCount = interaction.highlightedSlots().length
   debugState.selectedCount = interaction.selectedSlots().length
+  const instances = view.liveSlots().filter((slot) => view.label(slot)?.isType === false)
+  const selected = interaction.allSelectedSlots().filter((slot) => view.label(slot)?.isType === false)
+  workspace.setCounts({
+    loaded: instances.length,
+    visible: instances.filter((slot) => !filterHiddenSlots.has(slot)).length,
+    selected: selected.length,
+    hiddenSelected: selected.filter((slot) => hiddenSlots.has(slot)).length,
+    types: view.liveCount - instances.length,
+    hasSelection: interaction.allSelectedSlots().length > 0,
+  })
   debugState.truncation =
     truncation === null
       ? null
@@ -1580,7 +1698,7 @@ function renderStatus(): void {
     }
   }
   if (view.slotCount > 0) {
-    const drawn = `${view.liveCount.toLocaleString('en-US')} drawn`
+    const drawn = `${view.liveCount.toLocaleString('en-US')} loaded slots`
     const dead =
       view.tombstoneCount > 0
         ? ` / ${view.tombstoneCount.toLocaleString('en-US')} collapsed`
@@ -1591,15 +1709,16 @@ function renderStatus(): void {
   // it, because they say the same kind of thing: you are not looking at all of
   // it. Its own testid, because the two have different causes and a test that
   // could not tell them apart would pass on either.
-  const filtered = filterLine(view.liveCount - hiddenSlots.size, view.liveCount)
+  const projected = presentationSlots()
+  const filtered = filterLine(projected.filter((slot) => !filterHiddenSlots.has(slot)).length, projected.length)
   if (filtered !== null) {
     lines.push(
-      `<span class="kglv-warn" data-testid="filter-banner">${escapeHtml(filtered)}</span>`,
+      `<span class="kglv-warn" >${escapeHtml(filtered)}</span>`,
     )
   }
   if (truncationBanner !== null) {
     lines.push(
-      `<span class="kglv-warn" data-testid="truncation-banner">${escapeHtml(truncationBanner)}</span>`,
+      `<span class="kglv-warn" >${escapeHtml(truncationBanner)}</span>`,
     )
   }
   if (!debugState.deviceFeatures.webgl2) {
@@ -1609,6 +1728,11 @@ function renderStatus(): void {
     lines.push(`<span class="kglv-error">${escapeHtml(debugState.error)}</span>`)
   }
   status.innerHTML = lines.join('<br>')
+  const notices: { kind: 'filter' | 'truncation' | 'error'; message: string }[] = []
+  if (filtered !== null) notices.push({ kind: 'filter', message: filtered })
+  if (truncationBanner !== null) notices.push({ kind: 'truncation', message: truncationBanner })
+  if (debugState.error !== null) notices.push({ kind: 'error', message: debugState.error })
+  workspace.setNotices(notices)
 }
 
 function escapeHtml(text: string): string {

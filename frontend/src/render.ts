@@ -311,11 +311,8 @@ export class Surface {
     this.graph.setPointColors(appearance.colors)
     this.graph.setLinks(view.links)
     this.graph.setLinkWidths(appearance.linkWidths)
-    // The data-derived zoom, re-applied per upload — but only where nothing is
-    // going to move afterwards. A running simulation reframes at
-    // `onSimulationEnd` instead (`main.ts`), and framing the *seed* first would
-    // be a zoom to an arrangement the user never sees.
-    if (!this.axes.simulation) this.zoomToPayload(view)
+    // Camera movement belongs to an explicit fit, a changed node set or a new layout.
+    // Appearance and local presentation uploads preserve the current framing.
     // `render(undefined, 0)` — keep the current simulation alpha, no
     // transition. With on-demand rendering a static scene draws exactly one
     // frame, and that frame has to be asked for. Zero duration is what makes a
@@ -348,8 +345,8 @@ export class Surface {
    * this setter. Before that was found, every expansion after the meta-graph
    * kept the meta-graph's zoom and ran off screen.
    */
-  private zoomToPayload(view: SlotView): void {
-    this.graph.setZoomLevel(zoomFor(view.positions))
+  framePayload(view: SlotView): void {
+    this.graph.setZoomLevel(zoomFor(view.positions), 0)
   }
 
   /**
@@ -461,6 +458,7 @@ export async function mountGraph(
 
   const surface = new Surface(graph, axes)
   surface.upload(view, appearance)
+  surface.framePayload(view)
   await graph.ready
   graph.render(undefined, 0)
   surface.reheat()

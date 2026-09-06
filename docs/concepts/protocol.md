@@ -16,7 +16,7 @@ headless renderer are three consumers of it.
 Every response carries `protocol_version`. It currently reads **4**.
 
 ```json
-{"protocol_version":4,"core_version":"0.1.1","tier":"compact","slot_count":98,…}
+{"protocol_version":5,"core_version":"0.1.1","tier":"compact","slot_count":98,…}
 ```
 
 Version 4 added the `layout` message and request: the server computes a static

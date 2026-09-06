@@ -13,6 +13,8 @@
  * phase is for.
  */
 
+import { keepSchemaContext } from './navigation'
+
 import { expect, test, type Page } from '@playwright/test'
 
 import { appUrl, launch, type Launched } from './harness'
@@ -144,6 +146,7 @@ test('guided navigation: an agent shows the user a slice, points at it, and puts
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await keepSchemaContext(page)
 
     const mcp = new McpClient(server.info.mcp)
     await mcp.initialize()

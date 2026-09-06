@@ -15,6 +15,7 @@
  */
 
 import { statLabel } from './appearance'
+import type { PanelHosts } from './workspace'
 import type { Diagnostic } from './generated/Diagnostic'
 import type { QueryEditor, SchemaSource } from './editor/contract'
 import type { EdgeDirection } from './generated/EdgeDirection'
@@ -37,6 +38,7 @@ export type PanelHandlers = {
     limit: number | null,
   ): void
   collapse(slot: number): void
+  browseType(nodeType: string, limit: number | null): void
   search(query: string, nodeType: string | null): void
   loadHits(nodeIds: number[], nodeType: string | null): void
   focusSlot(slot: number): void
@@ -136,7 +138,7 @@ const GEO_HINT = 'positions only — render for the map picture'
  */
 const FILTER_HINT =
   'hides what is already loaded — nothing is fetched. Try "type:Wellbore", or a property ' +
-  'you are colouring or sizing by. Use Search above to bring nodes in.'
+  'you are colouring or sizing by. Use Search source in Explore to bring nodes in.'
 
 export class Panels {
   readonly root: HTMLDivElement
@@ -196,6 +198,7 @@ export class Panels {
     container: HTMLElement,
     private readonly handlers: PanelHandlers,
     private readonly schema: SchemaSource,
+    private readonly hosts: PanelHosts,
   ) {
     this.root = element('div', 'kglv-panels')
     container.appendChild(this.root)
@@ -235,7 +238,7 @@ export class Panels {
     searchRow.append(this.searchInput, this.searchType, searchButton)
     this.searchResults = element('div', 'kglv-results')
     searchBox.append(searchRow, this.searchResults)
-    this.root.appendChild(this.section('Search', searchBox))
+    this.root.appendChild(this.section('Search source', searchBox))
 
     // ── filter ────────────────────────────────────────────────────────────
     // Its own card, directly under Search, and the hint under the box exists
@@ -261,7 +264,7 @@ export class Panels {
     this.filterNote.setAttribute('data-testid', 'filter-note')
     this.filterNote.textContent = FILTER_HINT
     filterBox.append(filterRow, this.filterNote)
-    this.root.appendChild(this.section('Filter', filterBox))
+    this.hosts.filters.appendChild(this.section('Filter loaded content', filterBox))
 
     // ── appearance ────────────────────────────────────────────────────────
     const appearance = element('div', 'kglv-card')
@@ -290,10 +293,6 @@ export class Panels {
       )
     })
     this.captionRow = this.labelled('caption by', this.captionBy)
-    // The fourth thing this card does with a type, and the one that is not a
-    // display channel: read its nodes as rows. It sits here because this card
-    // IS the type panel — its contents are the selected type's property
-    // statistics — and the table's columns come from exactly those statistics.
     this.tableButton = element('button', 'kglv-button kglv-button-small', 'table')
     this.tableButton.setAttribute('data-testid', 'type-table')
     this.tableButton.addEventListener('click', () => {
@@ -305,17 +304,12 @@ export class Panels {
       this.labelled('colour by', this.colorBy),
       this.labelled('size by', this.sizeBy),
       this.captionRow,
-      this.tableRow,
     )
+    this.selection.parentElement?.appendChild(this.tableRow)
     this.appearanceNote = element('div', 'kglv-hint')
     this.appearanceNote.setAttribute('data-testid', 'appearance-note')
     appearance.appendChild(this.appearanceNote)
 
-    // ── layout ────────────────────────────────────────────────────────────
-    // In the appearance card rather than a card of its own: colour, size and
-    // arrangement are the three channels that change how the same graph looks
-    // without changing what is in it, and a fourth heading for one select is a
-    // sidebar that scrolls.
     this.layoutKernel = element('select', 'kglv-select')
     this.layoutKernel.setAttribute('data-testid', 'layout-kernel')
     for (const [value, label] of LAYOUT_CHOICES) {
@@ -329,9 +323,9 @@ export class Panels {
     this.layoutRow = this.labelled('layout', this.layoutKernel)
     this.layoutNote = element('div', 'kglv-hint')
     this.layoutNote.setAttribute('data-testid', 'layout-note')
-    appearance.append(this.layoutRow, this.layoutNote)
+    this.hosts.layout.append(this.layoutRow, this.layoutNote)
 
-    this.root.appendChild(this.section('Appearance', appearance))
+    this.hosts.appearance.appendChild(this.section('Selected type', appearance))
 
     // ── cypher ────────────────────────────────────────────────────────────
     const query = element('div', 'kglv-card')
@@ -427,13 +421,18 @@ export class Panels {
       savedRow,
       this.savedNote,
       this.historyList,
+    )
+    const results = element('div', 'kglv-card')
+    results.append(
       this.queryStatus,
       this.queryDiagnostics,
       this.queryProfile,
       this.tableNote,
       this.queryResults,
     )
-    this.root.appendChild(this.section('Cypher', query))
+    this.hosts.query.appendChild(this.section('Cypher', query))
+    this.hosts.data.appendChild(results)
+    this.queryStatus.textContent = 'No query result yet. Run a query, or inspect a loaded type as a table.'
 
     void this.upgradeEditor()
   }
@@ -501,7 +500,7 @@ export class Panels {
   }
 
   /**
-   * Put another card in the sidebar, under its own heading.
+   * Add a Query tool under its own heading.
    *
    * The path builder (plan E9) is a card this class does not own: it holds a
    * spec, a generator and a probe queue, none of which belong in a file whose
@@ -510,7 +509,7 @@ export class Panels {
    * this class a second home for it.
    */
   addSection(title: string, body: HTMLElement): void {
-    this.root.appendChild(this.section(title, body))
+    this.hosts.query.appendChild(this.section(title, body))
   }
 
   private section(title: string, body: HTMLElement): HTMLElement {
@@ -550,6 +549,7 @@ export class Panels {
    * button as the only thing that runs anything.
    */
   private setQueryText(query: string): void {
+    this.hosts.revealQuery()
     this.editor.setValue(query)
     this.editor.focus()
   }
@@ -564,7 +564,7 @@ export class Panels {
    * app rather than this panel.
    */
   loadGeneratedQuery(query: string): void {
-    this.setQueryText(query)
+    this.editor.setValue(query)
   }
 
   /**
@@ -591,7 +591,7 @@ export class Panels {
     const loaded =
       this.statsType === null ? 0 : (this.instanceCounts.get(this.statsType) ?? 0)
     this.tableRow.hidden = loaded === 0
-    this.tableButton.textContent = `table of ${count(loaded)} on screen`
+    this.tableButton.textContent = `table of ${count(loaded)} loaded`
   }
 
   private loadSaved(): void {
@@ -665,7 +665,7 @@ export class Panels {
       this.filterNote.className = 'kglv-hint kglv-error'
       this.filterNote.textContent =
         `nothing loaded carries ${refused.map((key) => `"${key}"`).join(', ')} — this box only ` +
-        'reads values already on screen. Colour or size by it first, or use Search above to ' +
+        'reads values already on screen. Colour or size by it first, or use Search source in Explore to ' +
         'ask the server for it.'
       return
     }
@@ -709,12 +709,19 @@ export class Panels {
         : `${preview.title || `${preview.node_type} node`} — ${preview.node_type}`
     this.selection.appendChild(heading)
 
+    const browse = element('button', 'kglv-button kglv-browse-action',
+      preview.scope === 'type' ? `Browse ${preview.node_type} instances` : `Browse more ${preview.node_type}`)
+    browse.dataset['testid'] = 'browse-type'
+    browse.addEventListener('click', () => this.handlers.browseType(preview.node_type, this.requestedLimit()))
+    this.selection.appendChild(browse)
+
     if (detail !== null && detail.properties.length > 0) {
       const list = element('dl', 'kglv-props')
       list.setAttribute('data-testid', 'node-properties')
       for (const [key, value] of detail.properties) {
         const dt = element('dt', undefined, key)
-        const dd = element('dd', undefined, formatCell(value))
+        const dd = element('dd')
+        dd.appendChild(cellValue(value))
         list.append(dt, dd)
       }
       this.selection.appendChild(list)
@@ -906,6 +913,7 @@ export class Panels {
 
   /** The results table. Rows are already bounded by the server (D5). */
   showQueryTable(table: QueryTable): number {
+    this.hosts.revealData()
     this.queryResults.replaceChildren()
     this.showQueryDiagnostics(table)
     this.showProfile(table)
@@ -978,7 +986,9 @@ export class Panels {
     for (const row of order) {
       const tr = element('tr')
       for (let column = 0; column < table.columns.length; column += 1) {
-        tr.appendChild(element('td', undefined, formatCell(table.data[column]?.[row])))
+        const cell = element('td')
+        cell.appendChild(cellValue(table.data[column]?.[row]))
+        tr.appendChild(cell)
       }
       grid.appendChild(tr)
     }
@@ -1053,6 +1063,7 @@ export class Panels {
   }
 
   showQueryError(message: string): void {
+    this.hosts.revealData()
     this.queryResults.replaceChildren()
     // The failed query's predecessor is not this query's result. Left in place,
     // a header click on the old grid would re-draw rows for a question that is
@@ -1324,4 +1335,16 @@ export function formatCell(value: unknown): string {
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return JSON.stringify(value)
+}
+
+/** Preserve full bounded values without making a wide property dictate every column's width. */
+function cellValue(value: unknown): HTMLElement {
+  const text = formatCell(value)
+  if (text.length <= 120) return element('span', undefined, text)
+  const details = element('details', 'kglv-full-value')
+  details.append(
+    element('summary', undefined, `${text.slice(0, 70)}… · read full value`),
+    element('div', undefined, text),
+  )
+  return details
 }

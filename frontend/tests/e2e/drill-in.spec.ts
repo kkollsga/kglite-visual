@@ -13,9 +13,11 @@
  * pinned exactly in the core L1 suite too, so a divergence names its own side.
  */
 
+import { keepSchemaContext } from './navigation'
+
 import { expect, test, type Page } from '@playwright/test'
 
-import { appUrl, fillQuery, launch, queryText, type Launched } from './harness'
+import { appUrl, openDestination, fillQuery, launch, queryText, type Launched } from './harness'
 
 /** The fixture's Person type: 60 members, largest type, therefore slot 0. */
 const PERSON_SLOT = 0
@@ -59,6 +61,7 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await keepSchemaContext(page)
 
     // ── the entry screen ────────────────────────────────────────────────
     const entry = await state(page)
@@ -219,6 +222,7 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
     await expect(page.getByTestId('saved-note')).toContainText('0 of 64 saved')
 
     // ── collapse back to the meta-graph ─────────────────────────────────
+    await openDestination(page, 'explore')
     await page.getByTestId('collapse').click()
     await page.waitForFunction(() => window.__kglv.lastSliceKind === 'collapse', undefined, {
       timeout: 15_000,
@@ -253,6 +257,7 @@ test('a full expansion compacts on collapse and the client applies the remap', a
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await keepSchemaContext(page)
 
     // No limit this time: all 60 Persons, which puts the view at 65 slots —
     // over the compaction minimum, so collapsing it reclaims them.
@@ -267,6 +272,7 @@ test('a full expansion compacts on collapse and the client applies the remap', a
     expect(full.truncation?.truncated).toBe(false)
     expect(full.pointCount).toBe(5 + KNOWS_REACHABLE)
 
+    await openDestination(page, 'explore')
     await page.getByTestId('collapse').click()
     await page.waitForFunction(() => window.__kglv.compactions === 1, undefined, {
       timeout: 15_000,
@@ -295,6 +301,7 @@ test('server-side search highlights what is loaded and offers to load the rest',
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await keepSchemaContext(page)
 
     // Nothing is loaded yet, so every hit is cold: the answer is a list plus a
     // bounded "load into view", never a client-side index over data the

@@ -11,6 +11,8 @@
  * click, no keystroke and no polling anywhere in the page.
  */
 
+import { keepSchemaContext } from './navigation'
+
 import { expect, test, type Page } from '@playwright/test'
 
 import { Listener, appUrl, launch, type Launched } from './harness'
@@ -84,6 +86,7 @@ test('the browser follows an agent: curl moves the view with no UI action', asyn
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await keepSchemaContext(page)
 
     const entry = await page.evaluate(() => window.__kglv)
     expect(entry.slotCount).toBe(META_POINTS)

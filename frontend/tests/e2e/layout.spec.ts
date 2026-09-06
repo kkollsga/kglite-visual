@@ -15,6 +15,8 @@
  * positions, not over the view's: what is asserted is that the picture moved.
  */
 
+import { keepSchemaContext } from './navigation'
+
 import { expect, test, type Page } from '@playwright/test'
 
 import { launch, type Launched } from './harness'
@@ -62,6 +64,7 @@ test('force mode: switch to a static kernel, expand under it, switch back', asyn
     // No `?deterministic=1`: this is the user's mode.
     await page.goto(server.info.url)
     await ready(page)
+    await keepSchemaContext(page)
 
     const entry = await page.evaluate(() => window.__kglv)
     expect(entry.layoutMode).toBe('force')
@@ -186,6 +189,7 @@ test('the picker is absent in the fixture mode, and a map of nowhere is refused'
     // button for breaking the suite, so there is no control.
     await page.goto(`${server.info.url}?deterministic=1`)
     await ready(page)
+    await keepSchemaContext(page)
     expect((await page.evaluate(() => window.__kglv)).layoutMode).toBe('deterministic')
     await expect(page.getByTestId('layout-kernel')).toHaveCount(0)
 
@@ -231,6 +235,7 @@ test('the map is offered once the view holds nodes that are somewhere', async ({
     server = await launch()
     await page.goto(server.info.url)
     await ready(page)
+    await keepSchemaContext(page)
 
     const options = page.getByTestId('layout-kernel').locator('option[value="geo"]')
     await expect(options).toHaveCount(0)

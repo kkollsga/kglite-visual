@@ -9,6 +9,8 @@
  * come back.
  */
 
+import { keepSchemaContext, openDrawer } from './navigation'
+
 import { expect, test, type Page } from '@playwright/test'
 
 import { appUrl, launch, type Launched } from './harness'
@@ -27,6 +29,7 @@ test('filtering hides without unloading, counts honestly, and clears', async ({ 
     server = await launch()
     await page.goto(appUrl(server.info))
     await ready(page)
+    await keepSchemaContext(page)
 
     // Load instance nodes, so the view holds two kinds of thing.
     await page.locator('.kglv-label:has-text("Person")').click()
@@ -44,6 +47,7 @@ test('filtering hides without unloading, counts honestly, and clears', async ({ 
     expect(loaded.selectedCount).toBe(1)
 
     // ── hide all but one type ───────────────────────────────────────────
+    await openDrawer(page, 'filters')
     await page.getByTestId('filter-input').fill('type:Company')
     await page.waitForFunction(() => window.__kglv.filteredOut > 0, undefined, {
       timeout: 15_000,
@@ -72,15 +76,17 @@ test('filtering hides without unloading, counts honestly, and clears', async ({ 
     await expect(page.locator('.kglv-label:has-text("Person")')).toHaveCount(0)
 
     // ── a term nothing loaded can answer is refused, and hides nothing ──
+    await openDrawer(page, 'filters')
     await page.getByTestId('filter-input').fill('depth:2000')
     await expect(page.getByTestId('filter-note')).toContainText('nothing loaded carries "depth"')
-    await expect(page.getByTestId('filter-note')).toContainText('Search above')
+    await expect(page.getByTestId('filter-note')).toContainText('Search source in Explore')
     const refused = await page.evaluate(() => window.__kglv)
     expect(refused.filteredOut).toBe(0)
     expect(refused.pointCount).toBe(everything)
     expect(refused.lastMessageSeq).toBe(loaded.lastMessageSeq)
 
     // ── clear gives everything back ─────────────────────────────────────
+    await openDrawer(page, 'filters')
     await page.getByTestId('filter-input').fill('type:Company')
     await page.waitForFunction(() => window.__kglv.filteredOut > 0, undefined, {
       timeout: 15_000,
