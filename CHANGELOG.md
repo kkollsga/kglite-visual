@@ -13,6 +13,11 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- A reproducible, downloadable 17-node team graph now supports a complete
+  first-use tour through browsing, records, queries, filters, calculations,
+  saved views and scoped export, with current workspace screenshots. Preview
+  documentation labels unreleased behavior and links View/Edit actions to the
+  exact revision Read the Docs built.
 - Explore, Data and Query destinations keep the graph mounted and preserve local
   selection and camera context. Types can be browsed directly, including types
   with no relationships; schema navigation preserves the loaded exploration.

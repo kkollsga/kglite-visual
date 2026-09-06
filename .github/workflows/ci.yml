@@ -158,6 +158,9 @@ jobs:
       - name: Generated TypeScript is in step with the Rust types
         if: matrix.os == 'ubuntu-latest'
         run: make check-generated-ts
+      - name: Documentation sample is reproducible
+        if: matrix.os == 'ubuntu-latest'
+        run: make check-docs-sample
       - name: Protocol framing baseline
         if: matrix.os == 'ubuntu-latest'
         run: make check-protocol-baseline
@@ -290,6 +293,8 @@ jobs:
       # `.readthedocs.yaml` asks for too (`fail_on_warning: true`). A broken
       # cross-reference is a broken page; catching it here is catching it
       # before the published site has it.
+      - name: Check documentation preview configuration
+        run: python3 scripts/check_docs_config.py
       - name: Build the documentation
         run: make docs
 

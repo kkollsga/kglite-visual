@@ -1,5 +1,9 @@
 # The viewer
 
+New to the workspace? Follow [Your first exploration](../first-exploration.md)
+for one complete, checked journey through Explore, Data, filters, calculations,
+saved views and export using the downloadable team sample.
+
 `kglite-visual graph.kgl` opens a workspace with **Explore**, **Data** and
 **Query** destinations. Explore keeps the graph and selection inspector;
 Query holds the editor and path builder; table answers open Data immediately.

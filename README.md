@@ -23,27 +23,39 @@ The Python wheel has no required runtime dependencies: the graph engine, the
 HTTP server and the WebGL frontend bundle are all inside one compiled
 extension. No Node, no separate server process, no database service.
 
+> **Workspace preview:** Explore, Data, filters, calculations, saved views and
+> scoped export are currently unreleased work in
+> [PR 4](https://github.com/kkollsga/kglite-visual/pull/4). PyPI `0.1.7` does not
+> contain that workspace. Follow the
+> [source-preview setup](https://kglite-visual--4.org.readthedocs.build/en/4/getting-started.html#preview-the-workspace)
+> for the interface described below; use the
+> [stable documentation](https://kglite-visual.readthedocs.io/en/stable/) with
+> the published package.
+
 ## Quick Start
 
+The released package:
+
 ```bash
-pip install kglite-visual
-kglite-visual graph.kgl        # opens a browser on localhost
+pip install kglite-visual==0.1.7
+kglite-visual graph.kgl
 ```
 
-What you land on is **not** the graph. `.kgl` files reach 100M+ nodes and no
-browser renders that, so the entry screen is the **type-level meta-graph** —
-the labels and relationship types with their counts, always small whatever sits
-underneath — and you drill in from there with Cypher and bounded neighbourhood
-expansion.
+To try the unreleased workspace, build the pinned source revision in
+[Getting started](https://kglite-visual--4.org.readthedocs.build/en/4/getting-started.html),
+then open the included 17-node team sample. The
+[first exploration](https://kglite-visual--4.org.readthedocs.build/en/4/first-exploration.html)
+takes it through browse, inspect, query, filter, calculate, save and export.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/kkollsga/kglite-visual/main/docs/_static/sodir-geo-fields.png"
-       alt="144 fields drawn where they actually are, on a real coastline at the scale the frame can resolve"
+  <img src="docs/_static/team-overview.png"
+       alt="The kglite-visual workspace showing the team sample"
        width="720">
 </p>
 
-*Above: `kglite-visual render graph.kgl --cypher "MATCH (f:Field) RETURN f"
---layout geo`. No tiles, no network — the coastline ships in the binary.*
+What you land on is a type-level meta-graph, rather than every instance in the
+source. `.kgl` files reach 100M+ nodes, so you inspect counts first and load a
+bounded slice only when it is useful.
 
 Two more commands, no server and no browser in either:
 
@@ -168,7 +180,8 @@ prebuilt frontend, so neither needs Node at install time.
 
 Full docs at **[kglite-visual.readthedocs.io](https://kglite-visual.readthedocs.io)**.
 
-- **[Getting started](https://kglite-visual.readthedocs.io/en/latest/getting-started.html)** — install, first launch, the entry screen, the first drill-in, `show()` in a notebook.
+- **[Getting started](https://kglite-visual--4.org.readthedocs.build/en/4/getting-started.html)** — choose the published or preview path and open the sample.
+- **[Your first exploration](https://kglite-visual--4.org.readthedocs.build/en/4/first-exploration.html)** — browse, inspect, query, filter, calculate, save and export one graph.
 - **[The viewer](https://kglite-visual.readthedocs.io/en/latest/viewer/index.html)** — the app in full:
   [the honesty model](https://kglite-visual.readthedocs.io/en/latest/viewer/honesty.html) ·
   [layouts](https://kglite-visual.readthedocs.io/en/latest/viewer/layouts.html) ·

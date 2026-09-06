@@ -1,87 +1,72 @@
 # kglite-visual
 
-A viewer, a renderer and an agent interface for `.kgl` knowledge-graph files.
-One command opens a browser on a localhost server; the same binary draws an
-image without one; and while the server runs it speaks the Model Context
-Protocol, so an agent can drive the window a person is watching.
+Open a `.kgl` knowledge graph as a workspace for exploring its structure,
+records and query results. Start with a small schema, load only the instances
+you need, and keep every partial answer visibly bounded.
 
-```bash
-pip install kglite-visual
-kglite-visual graph.kgl
+<a href="_static/team-overview.png"><img src="_static/team-overview.png"
+alt="The kglite-visual workspace showing the team sample"></a>
+
+```{admonition} This workspace is an unreleased preview
+:class: warning
+The Explore, Data and Query walkthrough on this site describes
+[PR 4](https://github.com/kkollsga/kglite-visual/pull/4). The
+published `kglite-visual 0.1.7` package does not contain this workspace yet.
+Use the [preview source checkout](getting-started.md#preview-the-workspace) to
+follow the tour. For the released package, use the
+[stable documentation](https://kglite-visual.readthedocs.io/en/stable/).
 ```
 
-`.kgl` files reach 100M+ nodes and no browser renders that, so the entry screen
-is never the whole graph. It is the **type-level meta-graph** — the labels and
-relationship types with their counts — and you drill in from there with Cypher
-and bounded neighbourhood expansion. The bound is enforced by the server, in
-core: a slice cannot grow past it on the way to the renderer.
+## Take the tour
 
-![The entry screen: sodir's 98 node types, drawn in proportion](_static/sodir-meta-graph.png)
+The [first exploration](first-exploration.md) uses a 17-node team graph and
+finishes one complete job: open, browse, inspect, query, filter, calculate,
+save, restore and export. The sample is small enough to understand by eye and
+every count in the guide is checked against the real app.
 
-Rendering is [cosmos.gl](https://cosmosgl.dev) (MIT, OpenJS Foundation) — a
-WebGL GPU force layout fed over a binary protocol. The engine is
-[kglite](https://kglite.readthedocs.io), embedded, so there is no database
-service in the picture.
+Select a screenshot to open it at its full 1440 × 900 resolution.
 
-## Start here
+**[Set up the preview](getting-started.md)** ·
+**[Download `team.kgl`](_static/team.kgl)** ·
+**[Start the walkthrough](first-exploration.md)**
 
-1. `pip install kglite-visual`. One abi3 wheel per platform, no required Python
-   runtime dependencies — the engine, the server and the frontend bundle all
-   live inside one compiled extension.
-2. `kglite-visual graph.kgl` and read the meta-graph: which types the graph has,
-   how many of each, what connects to what.
-3. Click a type to see what expanding it would cost, then expand it — or write
-   Cypher in the panel and put the answer on screen.
-4. From Python or a notebook, `kglite_visual.show(path_or_graph)` does the same
-   thing in-process and hands you back the URL.
-5. Point an agent at the `mcp` URL the launch line printed, and it drives the
-   same view you are looking at.
+## What the workspace does
 
-**[Getting started](getting-started.md)** ·
-**[The viewer](viewer/index.md)** ·
-**[Agents and MCP](agents.md)** ·
-**[Python API](python.md)** ·
-**[CLI reference](cli.md)**
-
-```{rubric} What it is
-```
-
-| | |
+| Destination | Use it for |
 |---|---|
-| Progressive disclosure | The type-level meta-graph first, drill-down after — the only entry screen that works at 100M nodes |
-| Bounds in core | The response bound lives in `kglite-visual-core`, not in the UI; every bounded answer carries `{returned, total, truncated}` |
-| Truncation drawn in | A clipped picture says so *in the picture*, because an image travels without its response |
-| Agent-native | MCP at `/mcp` on the running server: twenty-seven tools over one ordered shared view |
-| Structure-chosen layouts | Hop rings, packed islands, a seeded force pass — and a real-coastline map for graphs whose nodes have coordinates |
-| One binary | The frontend bundle is compiled into the executable; `pip install` and `cargo install` are the same program |
+| **Explore** | Read the type-level schema, browse instances and inspect connections |
+| **Data** | Inspect source records and frozen calculations as tables |
+| **Query** | Run bounded, read-only Cypher and put its answer in Data or Explore |
 
-```{rubric} Pick your track
-```
+Filters and Appearance narrow and style the shared view. Saved views preserve
+an exploration, while Export previews the exact scope before writing a graph or
+image.
 
-- **[Getting started](getting-started.md)** — install, first launch, the entry
-  screen, the first drill-in, `show()` in a notebook.
-- **[The viewer](viewer/index.md)** — everything the app does: expansion,
-  search, filtering, appearance, the [honesty model](viewer/honesty.md), the
-  [layouts](viewer/layouts.md), and the
-  [query surfaces](viewer/queries.md) — saved queries, generated tables, the
-  path builder, `PROFILE` and `EXPLAIN`.
-- **[Agents and MCP](agents.md)** — the flagship track. The launch contract,
-  the JSON twin, the twenty-seven MCP tools, `window.__kglv`, and the rules about
-  what an agent may and may not claim about a screen it cannot see.
-- **[Render](render.md)** and **[Export](export.md)** — an image, or a file for
-  somebody else's tool, with no browser in the loop.
-- **[Python API](python.md)** — `show()`, `launch_info`, `close()`, Jupyter,
-  and honest memory numbers.
-- **[CLI reference](cli.md)** — every flag of `serve`, `render`, `export` and
-  `queries`.
-- **[Concepts](concepts/index.md)** — why the bound lives in core, what the
-  protocol version means, where saved queries are kept, what the process costs.
+Large `.kgl` files can contain far more than a browser can draw. The opening
+picture is therefore a **type-level meta-graph**: one node per type and one link
+per relationship type, with counts. The server decides what crosses the wire,
+and a clipped result says what was omitted. Read [the viewer](viewer/index.md)
+for the full interface and [the honesty model](viewer/honesty.md) for the bounds
+and truncation contract.
+
+## Other ways in
+
+- [Python and notebooks](python.md) start the same server with `show()`.
+- [Agents and MCP](agents.md) let an agent drive the workspace a person sees.
+- [Render](render.md) creates an SVG or PNG without opening a browser.
+- [Export](export.md) writes GraphML, GEXF, CSV or D3 JSON.
+- [CLI reference](cli.md) lists every command and limit.
+
+Rendering uses [cosmos.gl](https://cosmosgl.dev) (MIT, OpenJS Foundation), fed
+by the embedded [kglite](https://kglite.readthedocs.io) engine. The frontend,
+server and engine ship together; there is no database service to configure.
 
 ```{toctree}
 :maxdepth: 1
 :hidden:
 
 getting-started
+first-exploration
 ```
 
 ```{toctree}

@@ -28,6 +28,21 @@ make py-develop     # build the extension into the project venv
 make wheel          # a wheel into target/wheels
 ```
 
+## Documentation sample
+
+`docs/_static/team.kgl` is generated from a readable, deterministic graph
+definition and drives the first-exploration guide. Regenerate it with:
+
+```bash
+make docs-sample
+```
+
+The target writes the sample twice and compares the bytes. If its digest or
+documented counts change, explain the data-contract change in the same commit;
+never regenerate it merely to silence a red baseline. The walkthrough and its
+browser test own the user-visible contract: 17 nodes, 34 relationships, five
+engineers, and Ada's total degree of six.
+
 ## The gate
 
 ```bash

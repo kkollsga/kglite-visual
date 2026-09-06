@@ -90,10 +90,12 @@ const QUERY_STORE = mkdtempSync(path.join(os.tmpdir(), 'kglv-e2e-queries-'))
 process.on('exit', () => rmSync(QUERY_STORE, { recursive: true, force: true }))
 
 export async function launch(fixture = FIXTURE): Promise<Launched> {
-  if (!existsSync(path.join(REPO, fixture))) {
-    throw new Error(`fixture ${fixture} not found under ${REPO}`)
+  const absolute = path.isAbsolute(fixture)
+  const fixturePath = absolute ? fixture : path.join(REPO, fixture)
+  if (!existsSync(fixturePath)) {
+    throw new Error(`fixture ${fixturePath} not found`)
   }
-  const child = spawn(resolveBinary(), [fixture, '--no-open', '--port', '0'], {
+  const child = spawn(resolveBinary(), [absolute ? fixturePath : fixture, '--no-open', '--port', '0'], {
     cwd: REPO,
     env: { ...process.env, KGLITE_VISUAL_CONFIG_DIR: QUERY_STORE },
   })

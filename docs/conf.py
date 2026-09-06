@@ -1,5 +1,8 @@
 # Configuration file for the Sphinx documentation builder.
 
+import os
+import re
+
 project = "kglite-visual"
 copyright = "2026, Kristian dF Kollsgård"
 author = "Kristian dF Kollsgård"
@@ -53,8 +56,30 @@ suppress_warnings = ["misc.highlighting_failure"]
 html_theme = "furo"
 html_title = "kglite-visual"
 html_static_path = ["_static"]
+
+
+def source_revision(environ):
+    """Use the immutable revision RTD built; reject unsafe/malformed values."""
+    revision = environ.get("READTHEDOCS_GIT_COMMIT_HASH", "")
+    return revision if re.fullmatch(r"[0-9a-fA-F]{7,40}", revision) else "main"
+
+
+def preview_announcement(environ):
+    """Mark pull-request documentation as unreleased on every rendered page."""
+    if environ.get("READTHEDOCS_VERSION_TYPE") != "external":
+        return None
+    return (
+        "Preview documentation for unreleased changes. "
+        '<a href="https://kglite-visual.readthedocs.io/en/stable/">'
+        "Use the stable documentation for the published package.</a>"
+    )
+
+
 html_theme_options = {
     "source_repository": "https://github.com/kkollsga/kglite-visual",
-    "source_branch": "main",
+    "source_branch": source_revision(os.environ),
     "source_directory": "docs/",
 }
+announcement = preview_announcement(os.environ)
+if announcement is not None:
+    html_theme_options["announcement"] = announcement
