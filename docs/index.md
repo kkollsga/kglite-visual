@@ -51,7 +51,7 @@ service in the picture.
 | Progressive disclosure | The type-level meta-graph first, drill-down after — the only entry screen that works at 100M nodes |
 | Bounds in core | The response bound lives in `kglite-visual-core`, not in the UI; every bounded answer carries `{returned, total, truncated}` |
 | Truncation drawn in | A clipped picture says so *in the picture*, because an image travels without its response |
-| Agent-native | MCP at `/mcp` on the running server: twenty tools over one ordered shared view |
+| Agent-native | MCP at `/mcp` on the running server: twenty-six tools over one ordered shared view |
 | Structure-chosen layouts | Hop rings, packed islands, a seeded force pass — and a real-coastline map for graphs whose nodes have coordinates |
 | One binary | The frontend bundle is compiled into the executable; `pip install` and `cargo install` are the same program |
 
@@ -66,7 +66,7 @@ service in the picture.
   [query surfaces](viewer/queries.md) — saved queries, generated tables, the
   path builder, `PROFILE` and `EXPLAIN`.
 - **[Agents and MCP](agents.md)** — the flagship track. The launch contract,
-  the JSON twin, the twenty MCP tools, `window.__kglv`, and the rules about
+  the JSON twin, the twenty-six MCP tools, `window.__kglv`, and the rules about
   what an agent may and may not claim about a screen it cannot see.
 - **[Render](render.md)** and **[Export](export.md)** — an image, or a file for
   somebody else's tool, with no browser in the loop.

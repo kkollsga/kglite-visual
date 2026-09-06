@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use kglite_visual_core::{
-    load_graph_with, GraphSource, LoadLimits, QueryConfig, Session, QUERY_THREAD_STACK_BYTES,
+    load_session_with, GraphSource, LoadLimits, QueryConfig, QUERY_THREAD_STACK_BYTES,
 };
 
 use crate::export_cmd::{self, ExportArgs};
@@ -248,19 +248,16 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("no .kgl file was given; run `kglite-visual --help`")?;
     // Load before binding: a LaunchInfo for a graph that turned out to be
     // unreadable would be a URL nothing serves.
-    let graph = load_graph_with(
+    let session = load_session_with(
         GraphSource::Path(file),
+        file.display().to_string(),
         LoadLimits {
             max_load_mb: cli.max_load_mb,
         },
-    )?;
-    let session = Session::open_with(
-        graph,
-        file.display().to_string(),
         QueryConfig {
             timeout: Duration::from_secs(cli.query_timeout_secs),
         },
-    );
+    )?;
     let info = session.info();
     eprintln!(
         "kglite-visual: {} node types, {} nodes, {} edges; detail tier {}",

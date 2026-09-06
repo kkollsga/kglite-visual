@@ -148,6 +148,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true }
+# Streamed bookmark fingerprints; already resolved by the pinned engine.
+# sha2 0.11 requires Rust 1.85, below this workspace's 1.88 floor.
+sha2 = "0.11"
 
 [dev-dependencies]
 tempfile = "3.27.0"

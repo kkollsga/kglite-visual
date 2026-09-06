@@ -26,12 +26,18 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
   sorting, with graph-linked row selection. Long values open bounded detail
   pages, and query rows can load the actual entities they contain. A bounded
   exploration trail records this browser’s acknowledged actions and omissions.
+- Named saved views preserve exact loaded membership, filters, appearance,
+  selection and static layout positions. File-backed captures verify their
+  source before restoration; ambiguous identities and in-memory inputs use
+  explicitly labelled session-only storage.
+- Shared history provides bounded checkpoints and revision-checked recovery.
+  The active saved-view marker distinguishes saved content from later changes.
 
 ### Changed
 
 - Shared HTTP, WebSocket and MCP mutations commit and publish in one order.
   Optional expected revisions reject stale actions without changing the view;
-  reconnects receive an atomic snapshot. Protocol 7 carries these snapshots
+  reconnects receive an atomic snapshot. Protocol 8 carries these snapshots
   alongside typed-array topology, positions, typed query cells and field detail.
 - Cumulative explorations refuse additions above 5,000 instance nodes, 20,000
   relationships or 2 MiB of membership/topology, without partially applying them.

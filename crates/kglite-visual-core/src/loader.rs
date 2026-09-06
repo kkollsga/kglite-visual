@@ -8,6 +8,34 @@ use kglite::api::DirGraph;
 
 use crate::error::CoreError;
 
+/// Load and bind provenance to the exact source, preserving both caller budgets.
+pub fn load_session_with(
+    source: GraphSource<'_>,
+    display_label: impl Into<String>,
+    limits: LoadLimits,
+    config: crate::QueryConfig,
+) -> Result<crate::Session, CoreError> {
+    match source {
+        GraphSource::Path(path) => {
+            let identity = crate::source_identity::SourceIdentity::capture(path)?;
+            // Load the captured canonical target, never a retargetable alias.
+            let graph = load_graph_with(GraphSource::Path(identity.canonical_path()), limits)?;
+            identity.verify_loaded()?;
+            Ok(crate::Session::open_with_provenance(
+                graph,
+                display_label,
+                config,
+                Arc::new(identity),
+            ))
+        }
+        GraphSource::Bytes(bytes) => Ok(crate::Session::open_with(
+            load_graph_with(GraphSource::Bytes(bytes), limits)?,
+            display_label,
+            config,
+        )),
+    }
+}
+
 /// What a caller is willing to spend on a load.
 ///
 /// **One of kglite 0.16.15's three `LoadOptions` levers is here, and the
@@ -74,10 +102,10 @@ pub enum GraphSource<'a> {
 
 /// Read a graph into the shared, immutable handle every consumer holds.
 ///
-/// `Arc<DirGraph>` — never `Session`. A viewer performs no writes, and
-/// `Arc<DirGraph>` is the handle kglite has verified `Send + Sync` for
-/// concurrent readers; `Session` carries the copy-on-write mutation state a
-/// read-only consumer must not own.
+/// `Arc<DirGraph>` is kglite's immutable, `Send + Sync` reader handle. The
+/// viewer's [`crate::Session`] adds bounded exploration state through
+/// [`load_session_with`]; it never owns an engine write session or a mutable
+/// source graph handle.
 pub fn load_graph(source: GraphSource<'_>) -> Result<Arc<DirGraph>, CoreError> {
     load_graph_with(source, LoadLimits::default())
 }

@@ -20,6 +20,7 @@ import { Filters } from './filters'
 import { DataWorkspace, handleKey } from './data'
 import { FieldDetails } from './field-detail'
 import { ExplorationTrail } from './trail'
+import { SavedViews } from './views'
 import type { NodeHandle } from './generated/NodeHandle'
 import type { QueryRowReferences } from './generated/QueryRowReferences'
 import type { SharedWireMeta } from './generated/SharedWireMeta'
@@ -123,6 +124,9 @@ root.className = 'kglv-root'
 mount.appendChild(root)
 
 let dataWorkspace: DataWorkspace | null = null
+let savedViews: SavedViews | null = null
+let localSelectionEpoch = 0
+const pendingRestores = new Map<string, number>()
 const localHandles = new Map<string, NodeHandle>()
 let remoteInspectorSlot: number | null = null
 let graphScope: GraphScope = 'schema'
@@ -141,7 +145,10 @@ const workspace = new Workspace(root, {
   },
   focusSelection: () => focusSelection(),
   showSelectionRows: () => dataWorkspace?.showSelection(),
-  clearSelection: () => clearSelection(),
+  clearSelection: () => {
+    if ((shared.snapshot?.selected.length ?? 0) > 0) send({type: 'highlight', concept: 'selected', slots: []})
+    clearSelection()
+  },
   inspectType: (slot) => selectSlot(slot),
 })
 const canvasHost = workspace.canvasHost
@@ -243,7 +250,7 @@ const schema = new SchemaCache()
 
 const fieldDetails = new FieldDetails(root, () => shared.generation)
 dataWorkspace = new DataWorkspace(workspace.panelHosts.data, {
-  select: handles => setLocalHandles(handles),
+  select: handles => setTableSelection(handles),
   showGraph: handles => showEntities({nodes: handles, relationships: [], truncated: false}),
   inspectValue: (handle, field) => fieldDetails.open(handle, field),
   reveal: () => workspace.navigate('data'),
@@ -285,7 +292,7 @@ const panels = new Panels(workspace.panelHosts.inspector, {
   },
   loadHits: handles => send({type: 'load-nodes', handles}),
   focusHandle: handle => showEntities({nodes: [handle], relationships: [], truncated: false}),
-  selectHandles: handles => setLocalHandles(handles),
+  selectHandles: handles => setTableSelection(handles),
   showEntities: references => showEntities(references),
   setColorBy: (property) => send({type: 'appearance', color_by: property, size_by: shared.snapshot?.appearance.size_by ?? null}),
   setSizeBy: (property) => send({type: 'appearance', color_by: shared.snapshot?.appearance.color_by ?? null, size_by: property}),
@@ -299,6 +306,12 @@ const panels = new Panels(workspace.panelHosts.inspector, {
   showTypeTable: (nodeType) => showTypeTable(nodeType),
 }, schema, {...workspace.panelHosts, data: dataWorkspace.queryHost, revealData: () => { dataWorkspace?.showQuery(); workspace.navigate('data') }})
 const trail = new ExplorationTrail(workspace.panelHosts.inspector)
+savedViews = new SavedViews(workspace.savedViewsHost, {
+  selection: selectionReferences,
+  selectionEpoch: () => localSelectionEpoch,
+  restoreRequested: (id, epoch) => pendingRestores.set(id, epoch),
+  restoreRefused: id => pendingRestores.delete(id),
+})
 
 /**
  * The path builder (plan E9), under its own heading in Query.
@@ -336,6 +349,7 @@ const pathBuilder = new PathBuilder(document.createElement('div'), schema, {
 panels.addSection('Path', pathBuilder.root)
 
 function selectSlot(slot: number): void {
+  localSelectionEpoch += 1
   remoteInspectorSlot = null
   localHandles.clear()
   const handle = view.label(slot)?.handle
@@ -351,6 +365,7 @@ function selectSlot(slot: number): void {
 }
 
 function clearSelection(): void {
+  localSelectionEpoch += 1
   remoteInspectorSlot = null
   localHandles.clear()
   workspace.setInspectedType(null)
@@ -359,6 +374,39 @@ function clearSelection(): void {
   lastDetail = null
   panels.clearSelection()
   applyInteraction()
+}
+
+function selectionReferences(): ViewReference[] {
+  const refs: ViewReference[] = [...localHandles.values()].map(handle => ({kind: 'node', handle}))
+  for (const slot of interaction.allSelectedSlots()) {
+    const label = view.label(slot)
+    if (label?.isType) refs.push({kind: 'type', name: label.text})
+  }
+  refs.push(...shared.snapshot?.selected ?? [])
+  const keyed = new Map(refs.map(ref => [ref.kind === 'type' ? `type:${ref.name}` : handleKey(ref.handle), ref]))
+  return [...keyed.values()]
+}
+
+function applyRestoredSelection(id: string | null, snapshot: SharedSnapshotMeta): void {
+  if (id === null) return
+  const epoch = pendingRestores.get(id)
+  pendingRestores.delete(id)
+  if (epoch === undefined || epoch !== localSelectionEpoch) return
+  localHandles.clear()
+  for (const ref of snapshot.selected) if (ref.kind === 'node') localHandles.set(handleKey(ref.handle), ref.handle)
+  interaction.setSelected(resolveReferences(snapshot.selected))
+  remoteInspectorSlot = null; lastPreview = null; lastDetail = null; panels.clearSelection()
+  const slots = interaction.allSelectedSlots()
+  if (slots.length === 1) { send({type: 'preview', slot: slots[0] as number}); workspace.openInspector() }
+}
+
+function setTableSelection(handles: NodeHandle[]): void {
+  const requested = new Set(handles.map(handleKey))
+  const sharedRefs = shared.snapshot?.selected ?? []
+  const remoteNodes = new Set(sharedRefs.flatMap(ref => ref.kind === 'node' ? [handleKey(ref.handle)] : []))
+  const remaining = sharedRefs.filter(ref => ref.kind === 'type' || requested.has(handleKey(ref.handle)))
+  if (remaining.length !== sharedRefs.length) send({type: 'highlight', concept: 'selected', slots: resolveReferences(remaining)})
+  setLocalHandles(handles.filter(handle => !remoteNodes.has(handleKey(handle)) || localHandles.has(handleKey(handle))))
 }
 
 function presentationSlots(): number[] {
@@ -384,7 +432,7 @@ function fitVisible(): void {
 }
 
 function focusSelection(): void {
-  const slots = interaction.selectedSlots()
+  const slots = outlinedSlots()
   if (slots.length === 0) return
   workspace.navigate('explore')
   surface?.graph.fitViewByPointIndices(slots, 0)
@@ -409,6 +457,7 @@ function showTypeTable(nodeType: string): void {
 }
 
 function setLocalHandles(handles: NodeHandle[]): void {
+  localSelectionEpoch += 1
   remoteInspectorSlot = null
   localHandles.clear()
   for (const handle of handles) if (handle.generation === shared.generation) localHandles.set(handleKey(handle), handle)
@@ -659,6 +708,7 @@ async function handle(completed: Completed): Promise<void> {
   if (lane !== undefined && completed.request_id !== undefined && privateRequests.get(lane) !== completed.request_id) return
   switch (completed.kind) {
     case 'session':
+      pendingRestores.clear()
       shared.begin(completed.value.generation)
       trail.begin(completed.value.generation)
       resyncing = false
@@ -881,6 +931,11 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
   applySnapshotMembership(change, message, lastMeta)
   const encodingChanged = applySnapshotEncoding(change)
   applySnapshotLayout(snapshot)
+  const emptiedByCollapse = message.meta.mutation_kind === 'collapse' && snapshot.slice.nodes.length === 0
+  if (message.meta.restored || emptiedByCollapse) {
+    graphScope = snapshot.slice.nodes.length > 0 ? 'instances' : 'schema'
+    workspace.showGraphScope(graphScope)
+  }
   if (initialShared && instancesOnScreen() > 0) { graphScope = 'instances'; workspace.showInstances() }
   if (message.meta.mutation_kind !== null) {
     debugState.lastSliceKind = message.meta.mutation_kind
@@ -891,8 +946,9 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
   noteTruncation(bound.truncated, bound.returned, bound.total, 'nodes', snapshot.last_slice?.link_bound ?? snapshot.slice.link_bound)
   filters.update(snapshot.subset)
   dataWorkspace?.update(snapshot)
+  savedViews?.update(snapshot)
   redraw(layoutChanged || (topology && layoutKernel !== 'simulation') ? 'server' : undefined, topology)
-  if (firstAdmission || (initialShared && instancesOnScreen() > 0) || (layoutChanged && snapshot.layout !== null)) fitVisible()
+  if (firstAdmission || emptiedByCollapse || (initialShared && instancesOnScreen() > 0) || (layoutChanged && snapshot.layout !== null)) fitVisible()
   if (message.meta.focus !== null) applyFocus(message.meta.focus)
   if (pendingGraphFocus !== null && message.meta.request_id === pendingGraphFocus) { pendingGraphFocus = null; focusSelection() }
   if (topology && layoutKernel === 'simulation') { fitOnSettle = firstAdmission; surface?.reheat() }
@@ -908,7 +964,7 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
 
 type SnapshotChange = {snapshot: SharedSnapshotMeta; previous: SharedSnapshotMeta | null; topology: boolean; layoutChanged: boolean}
 
-function applySnapshotMembership(change: SnapshotChange, message: {points: Float32Array; links: Float32Array}, meta: MetaGraphMeta): void {
+function applySnapshotMembership(change: SnapshotChange, message: {meta: SharedWireMeta; points: Float32Array; links: Float32Array}, meta: MetaGraphMeta): void {
   const {snapshot, previous, topology, layoutChanged} = change
   const localSelection = interaction.allSelectedSlots().flatMap(slot => { const reference = referenceForSlot(slot); return reference === null ? [] : [reference] })
   if (topology) {
@@ -931,6 +987,7 @@ function applySnapshotMembership(change: SnapshotChange, message: {points: Float
   const visibleEdges = new Set(snapshot.subset.visible_edge_ids)
   sharedHiddenEdges = new Set(view.edges.flatMap((edge, index) => !edge.meta && (edge.edge_id === null || !visibleEdges.has(edge.edge_id)) ? [index] : []))
   sharedSelected = resolveReferences(snapshot.selected)
+  if (message.meta.restored) applyRestoredSelection(message.meta.request_id, snapshot)
   const remoteSelectionChanged = JSON.stringify(previous?.selected) !== JSON.stringify(snapshot.selected)
   if (remoteSelectionChanged && interaction.allSelectedSlots().length === 0 && localHandles.size === 0) {
     remoteInspectorSlot = sharedSelected.length === 1 ? sharedSelected[0] as number : null
@@ -1563,7 +1620,8 @@ function syncCounts(): void {
   debugState.highlightedCount = interaction.highlightedSlots().length
   debugState.selectedCount = outlinedSlots().length
   const instances = view.liveSlots().filter((slot) => view.label(slot)?.isType === false)
-  const selected = [...localHandles.values()]
+  const references = selectionReferences()
+  const selected = references.flatMap(ref => ref.kind === 'node' ? [ref.handle] : [])
   dataWorkspace?.setSelection(selected)
   panels.setRecordSelection(selected)
   workspace.setCounts({
@@ -1572,9 +1630,11 @@ function syncCounts(): void {
     selected: selected.length,
     hiddenSelected: selected.filter(handle => { const slot = view.slotForHandle(handle); return slot === undefined || hiddenSlots.has(slot) }).length,
     types: view.liveCount - instances.length,
-    hasSelection: interaction.allSelectedSlots().length > 0 || localHandles.size > 0,
-    canFocus: surface !== null && interaction.selectedSlots().length > 0,
+    hasSelection: references.length > 0,
+    canFocus: surface !== null && outlinedSlots().length > 0,
+    sharedSelection: (shared.snapshot?.selected.length ?? 0) > 0,
   })
+  savedViews?.updateSelection()
   debugState.truncation =
     truncation === null
       ? null

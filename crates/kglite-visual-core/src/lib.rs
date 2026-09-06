@@ -6,22 +6,31 @@
 //! the seam between them. A `use axum::…` reaching this crate is the boundary
 //! being crossed, not a convenience.
 
+pub mod bookmark;
+mod bookmark_capture;
+mod bookmark_members;
+mod bookmark_restore;
 pub mod bound;
 pub mod control;
 pub mod error;
 pub mod expand;
 pub mod export;
+pub mod history;
+mod history_actions;
 pub mod launch;
 pub mod layout;
 pub mod loader;
 pub mod meta_graph;
+pub mod presentation;
 pub mod protocol;
 pub mod query;
 pub mod records;
+mod recovery;
 pub mod render;
 pub mod request;
 pub mod session;
 pub mod slots;
+pub mod source_identity;
 pub mod stats;
 pub mod validate;
 pub mod values;
@@ -33,7 +42,9 @@ pub use error::CoreError;
 pub use expand::{ExpansionPreview, MAX_EXPANSION_NODES};
 pub use export::{ExportFormat, ExportedView};
 pub use launch::LaunchInfo;
-pub use loader::{load_graph, load_graph_with, node_counts_by_type, GraphSource, LoadLimits};
+pub use loader::{
+    load_graph, load_graph_with, load_session_with, node_counts_by_type, GraphSource, LoadLimits,
+};
 pub use meta_graph::{DetailTier, MetaGraphResponse};
 pub use protocol::{
     decode_frame, DecodedFrame, MessageType, ProtocolError, ResponseEncoder, PROTOCOL_VERSION,

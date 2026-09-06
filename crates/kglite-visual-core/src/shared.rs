@@ -64,6 +64,10 @@ pub struct SharedSnapshotMeta {
     pub stamp: RevisionStamp,
     pub topology_revision: String,
     pub subset_revision: String,
+    pub content_revision: String,
+    pub saved_view: Option<crate::bookmark::SavedViewMarker>,
+    pub history: crate::history::HistorySnapshot,
+    pub presentation: crate::presentation::PresentationSettings,
     pub slice: GraphSliceMeta,
     pub subset: SubsetSnapshot,
     pub appearance: Appearance,
@@ -85,6 +89,7 @@ pub struct SharedSnapshot {
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct SharedWireMeta {
+    pub restored: bool,
     pub compacted: bool,
     pub snapshot: SharedSnapshotMeta,
     pub request_id: Option<String>,
@@ -108,6 +113,10 @@ pub(crate) struct SharedViewState {
     pub revision: u64,
     pub topology_revision: u64,
     pub subset_revision: u64,
+    pub content_revision: u64,
+    pub saved_view: Option<crate::bookmark::SavedViewMarker>,
+    pub history: crate::history::RecoveryHistory,
+    pub presentation: crate::presentation::PresentationSettings,
     pub predicates: Vec<SubsetFilter>,
     pub subset: SubsetSnapshot,
     pub appearance: Appearance,
@@ -126,6 +135,10 @@ impl SharedViewState {
             revision: 0,
             topology_revision: 0,
             subset_revision: 0,
+            content_revision: 0,
+            saved_view: None,
+            history: Default::default(),
+            presentation: Default::default(),
             predicates: Vec::new(),
             subset: SubsetSnapshot::default(),
             appearance: Appearance::new(None, None),
@@ -158,6 +171,7 @@ impl DerefMut for SharedViewState {
 }
 
 pub struct PreparedShared {
+    restored: bool,
     base: RevisionStamp,
     state: SharedViewState,
     snapshot: SharedSnapshot,
@@ -165,8 +179,18 @@ pub struct PreparedShared {
     focus: Option<Focus>,
     request_id: Option<String>,
 }
+
+#[derive(Default)]
+pub(crate) struct ReplacementContext {
+    pub restored: bool,
+    pub action: Option<crate::history::HistoryAction>,
+    pub focus: Option<Focus>,
+    pub request_id: Option<String>,
+    pub mark_saved: Option<crate::bookmark::BookmarkName>,
+}
 #[derive(Debug, Clone)]
 pub struct CommittedEvent {
+    pub restored: bool,
     pub snapshot: SharedSnapshot,
     pub response: Response,
     pub focus: Option<Focus>,
@@ -175,6 +199,7 @@ pub struct CommittedEvent {
 impl CommittedEvent {
     pub fn wire_meta(&self) -> SharedWireMeta {
         SharedWireMeta {
+            restored: self.restored,
             compacted: matches!(&self.response,Response::Slice(slice) if slice.compaction.is_some()),
             snapshot: self.snapshot.meta.clone(),
             request_id: self.request_id.clone(),
@@ -211,7 +236,52 @@ impl Session {
             Request::Focus(request) => Some(Focus::new(request.slots.clone())),
             _ => None,
         };
-        candidate.finish_preparation(&before)?;
+        let action = crate::history::HistoryAction::for_request(
+            &request.request,
+            &before,
+            self.generation(),
+            &response,
+        );
+        self.prepared_candidate(
+            before,
+            candidate,
+            response,
+            ReplacementContext {
+                restored: false,
+                action,
+                focus,
+                request_id: request.request_id.clone(),
+                mark_saved: None,
+            },
+            false,
+        )
+    }
+
+    pub(crate) fn prepare_replacement(
+        &self,
+        before: SharedViewState,
+        replacement: SharedViewState,
+        context: ReplacementContext,
+    ) -> Result<PreparedShared, CoreError> {
+        let candidate = self.fork_state(replacement);
+        let response = Response::Shared(Box::new(candidate.snapshot_direct()));
+        self.prepared_candidate(before, candidate, response, context, true)
+    }
+
+    fn prepared_candidate(
+        &self,
+        before: SharedViewState,
+        candidate: Session,
+        response: Response,
+        context: ReplacementContext,
+        preserve_layout: bool,
+    ) -> Result<PreparedShared, CoreError> {
+        if context.request_id.as_ref().is_some_and(|id| id.len() > 128) {
+            return Err(CoreError::Request("request_id exceeds 128 bytes".into()));
+        }
+        let base = before.stamp(self.generation());
+        candidate.finish_preparation(&before, preserve_layout)?;
+        candidate.finish_recovery(&before, &context)?;
         let snapshot = candidate.snapshot_direct();
         let response = if matches!(response, Response::Shared(_)) {
             Response::Shared(Box::new(snapshot.clone()))
@@ -219,10 +289,11 @@ impl Session {
             response
         };
         let wire = SharedWireMeta {
+            restored: context.restored,
             compacted: matches!(&response,Response::Slice(slice) if slice.compaction.is_some()),
             snapshot: snapshot.meta.clone(),
-            request_id: request.request_id.clone(),
-            focus: focus.clone(),
+            request_id: context.request_id.clone(),
+            focus: context.focus.clone(),
             mutation_kind: match &response {
                 Response::Slice(slice) => Some(slice.meta.kind),
                 _ => None,
@@ -232,12 +303,13 @@ impl Session {
         records::serialized_bytes(&wire, MAX_SHARED_EVENT_BYTES.saturating_sub(arrays + 1024))?;
         let state = candidate.state_read().clone();
         Ok(PreparedShared {
+            restored: context.restored,
             base,
             state,
             snapshot,
             response,
-            focus,
-            request_id: request.request_id.clone(),
+            focus: context.focus,
+            request_id: context.request_id,
         })
     }
     pub fn commit_shared(&self, prepared: PreparedShared) -> Result<CommittedEvent, CoreError> {
@@ -245,6 +317,7 @@ impl Session {
         check_stamp(&prepared.base, &state.stamp(self.generation()))?;
         *state = prepared.state;
         Ok(CommittedEvent {
+            restored: prepared.restored,
             snapshot: prepared.snapshot,
             response: prepared.response,
             focus: prepared.focus,
@@ -271,6 +344,10 @@ impl Session {
                 stamp: state.stamp(self.generation()),
                 topology_revision: state.topology_revision.to_string(),
                 subset_revision: state.subset_revision.to_string(),
+                content_revision: state.content_revision.to_string(),
+                saved_view: state.saved_view.clone(),
+                history: state.history.snapshot(),
+                presentation: state.presentation.clone(),
                 slice: slice.meta,
                 subset: state.subset.clone(),
                 appearance: state.appearance.clone(),
@@ -285,7 +362,11 @@ impl Session {
             links: slice.links,
         }
     }
-    fn finish_preparation(&self, before: &SharedViewState) -> Result<(), CoreError> {
+    fn finish_preparation(
+        &self,
+        before: &SharedViewState,
+        preserve_layout: bool,
+    ) -> Result<(), CoreError> {
         let mut state = self.state_write();
         let topology_changed = !state.view.same_topology(&before.view);
         if topology_changed
@@ -315,12 +396,21 @@ impl Session {
         } else {
             before.subset_revision
         };
-        if topology_changed {
+        if topology_changed && !preserve_layout {
             state.layout_kernel = LayoutKernel::Simulation;
             state.last_layout = None;
         }
         state.highlighted = retained_references(&state.highlighted, &state.view);
         state.selected = retained_references(&state.selected, &state.view);
+        state.content_revision = if crate::recovery::same_content(&state, before) {
+            before.content_revision
+        } else {
+            next(before.content_revision)?
+        };
+        let content_revision = state.content_revision.to_string();
+        if let Some(marker) = &mut state.saved_view {
+            marker.dirty = marker.content_revision != content_revision;
+        }
         Ok(())
     }
     pub(crate) fn settings_uncommitted(&self, request: &Request) -> Result<Response, CoreError> {
@@ -363,7 +453,7 @@ fn next(value: u64) -> Result<u64, CoreError> {
         .checked_add(1)
         .ok_or_else(|| CoreError::Request("shared revision exhausted".into()))
 }
-fn check_stamp(expected: &RevisionStamp, actual: &RevisionStamp) -> Result<(), CoreError> {
+pub fn check_stamp(expected: &RevisionStamp, actual: &RevisionStamp) -> Result<(), CoreError> {
     if expected != actual {
         return Err(CoreError::Conflict(Box::new(RevisionConflict {
             code: "revision-conflict".into(),
@@ -376,7 +466,7 @@ fn check_stamp(expected: &RevisionStamp, actual: &RevisionStamp) -> Result<(), C
     }
     Ok(())
 }
-fn check_name(name: &Option<String>) -> Result<(), CoreError> {
+pub(crate) fn check_name(name: &Option<String>) -> Result<(), CoreError> {
     if name
         .as_ref()
         .is_some_and(|name| name.is_empty() || name.len() > 256)

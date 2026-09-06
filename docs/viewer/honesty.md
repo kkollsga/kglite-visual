@@ -107,10 +107,10 @@ that is present always carries a number.
 
 ## The filter says how much it is hiding
 
-The client-side {ref}`filter <filter>` hides what is already loaded. It
-never fetches, and it never pretends to: the panel carries an **n of m drawn**
-line, and a term it cannot answer without a fetch — a property no slice in the
-view has ever carried — is refused by name and points at Search.
+The shared {ref}`filter <filter>` narrows loaded instances. Core evaluates its
+predicates and sends one acknowledged visible subset to every client. Applying
+a filter does not load more nodes; the scope line keeps loaded and visible
+counts separate. Search can find source nodes outside that loaded set.
 
 The same pair shows up in the debug hook: `window.__kglv.pointCount` is *live
 points excluding whatever the filter is hiding*, and `filteredOut` is that

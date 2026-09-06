@@ -285,6 +285,7 @@ pub struct Session {
     graph: Arc<DirGraph>,
     source: String,
     generation: String,
+    source_identity: Option<Arc<crate::source_identity::SourceIdentity>>,
     state: RwLock<SharedViewState>,
     meta_graph: MetaGraphResponse,
     config: QueryConfig,
@@ -307,6 +308,7 @@ impl Session {
             graph,
             source: source.into(),
             generation: new_generation(),
+            source_identity: None,
             state: RwLock::new(SharedViewState::new(view)),
             meta_graph,
             config,
@@ -315,6 +317,21 @@ impl Session {
 
     pub fn generation(&self) -> &str {
         &self.generation
+    }
+
+    pub(crate) fn open_with_provenance(
+        graph: Arc<DirGraph>,
+        source: impl Into<String>,
+        config: QueryConfig,
+        identity: Arc<crate::source_identity::SourceIdentity>,
+    ) -> Self {
+        let mut session = Self::open_with(graph, source, config);
+        session.source_identity = Some(identity);
+        session
+    }
+
+    pub(crate) fn source_identity(&self) -> Option<&crate::source_identity::SourceIdentity> {
+        self.source_identity.as_deref()
     }
 
     pub fn node_handle(&self, node_id: u32) -> NodeHandle {
@@ -572,6 +589,7 @@ impl Session {
             source: self.source.clone(),
             generation: self.generation.clone(),
             state: RwLock::new(state),
+            source_identity: self.source_identity.clone(),
             meta_graph: self.meta_graph.clone(),
             config: self.config,
         }
@@ -1431,6 +1449,7 @@ pub fn response_frames(response: &Response) -> Vec<Vec<u8>> {
     if let Response::Shared(snapshot) = response {
         return crate::shared::shared_frames(
             &crate::shared::SharedWireMeta {
+                restored: false,
                 snapshot: snapshot.meta.clone(),
                 request_id: None,
                 focus: None,

@@ -17,7 +17,7 @@ import { appUrl, FIXTURE, launch } from './harness'
 
 /** The meta-graph of `meta.kgl`, asserted exactly (see the core L1 tests). */
 const EXPECTED = {
-  protocolVersion: 7,
+  protocolVersion: 8,
   tier: 'full',
   pointCount: 5,
   linkCount: 7,

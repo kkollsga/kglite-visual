@@ -23,14 +23,14 @@ localhost CLI and a Python wheel.
 > drawn at whichever of three scales the frame can resolve — the simulation
 > stops, dragging goes off, and the server then knows where the points
 > are), and the D2 deterministic mode behind an explicit
-> `?deterministic=1` switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v7)
+> `?deterministic=1` switch the e2e/bench suites pass — and drills into it, a versioned binary protocol (v8)
 > with an exact framing baseline, an axum server on localhost with the
 > frontend embedded, **a Python wheel whose `show()` runs that same server
 > lib-linked into the extension**, **`kglite-visual render` /
 > `POST /api/render`** — the meta-graph, a Cypher result or a bounded
 > expansion drawn as a deterministic SVG or PNG with the app's own visual
 > encoding and the truncation banner in the picture — **an MCP server at
-> `/mcp` on the running instance** — twenty tools an agent uses to show,
+> `/mcp` on the running instance** — twenty-six tools an agent uses to show,
 > expand, collapse, highlight, focus, re-arrange, re-colour and **export**
 > the live view, with every change broadcast to every attached browser, so the
 > user's screen follows the agent in real time — a source distribution
@@ -713,9 +713,10 @@ rewrites every site and verifies with a **resolving** `cargo metadata`
 above and run the resolving `cargo metadata` by hand.)*
 
 **The `kglite` floor is a second version surface, enumerated separately**
-(`R16`). It has **four declarations, counted by grepping on 2026-08-31 (re-verified
+(`R16`). It has **five declarations, counted by grepping on 2026-08-31 (re-verified
 at the 0.16.18 move the same day, at the 0.16.19 move on 2026-09-01, at the
-0.16.20 move on 2026-09-02 and at the 0.16.22 move on 2026-09-03), not
+0.16.20 move on 2026-09-02, at the 0.16.22 move on 2026-09-03, and when
+bookmark source verification added the fifth site on 2026-09-06), not
 assumed**:
 
 1. `crates/kglite-visual-core/Cargo.toml` — the `kglite = "=X.Y.Z"` line,
@@ -729,6 +730,9 @@ assumed**:
 3. `README.md` — the Requirements section's "this version pins
    `kglite X.Y.Z`" sentence.
 4. `docs/getting-started.md` — the same sentence on the install page.
+5. `crates/kglite-visual-core/src/source_identity.rs` — `ENGINE_VERSION` in
+   saved source fingerprints. The pinned library exports no version constant;
+   a parity test checks this declaration against the manifest requirement.
 
 Sites 3 and 4 arrived with the 0.1.2 docs release and were **missing from
 this enumeration for two floor moves** — KGLite's ecosystem notifier caught

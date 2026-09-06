@@ -34,6 +34,7 @@ export type ScopeCounts = {
   types: number
   hasSelection: boolean
   canFocus: boolean
+  sharedSelection?: boolean
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -60,6 +61,7 @@ export class Workspace {
   readonly graphHost = element('div', 'kglv-graph-host')
   readonly canvasHost = element('div', 'kglv-canvas')
   readonly status = element('div', 'kglv-status')
+  readonly savedViewsHost = element('div', '')
   readonly panelHosts: PanelHosts
 
   private readonly explore = element('section', 'kglv-explore')
@@ -227,7 +229,7 @@ export class Workspace {
     this.graphName.dataset['testid'] = 'graph-name'
     const details = element('details', 'kglv-session-details')
     details.append(element('summary', '', 'Details'), this.status)
-    header.append(identity, this.connection, details)
+    header.append(identity, this.savedViewsHost, this.connection, details)
     this.root.appendChild(header)
   }
 
@@ -302,7 +304,11 @@ export class Workspace {
   }
 
   showInstances(): void {
-    this.scope = 'instances'
+    this.showGraphScope('instances')
+  }
+
+  showGraphScope(scope: GraphScope): void {
+    this.scope = scope
     this.updateScopeButtons()
     this.navigate('explore')
     this.inspector.classList.remove('kglv-inspector-open')
@@ -355,6 +361,7 @@ export class Workspace {
     this.counts.title = `Instance counts; ${counts.types} schema types are counted separately` +
       (counts.hiddenSelected > 0 ? `; ${counts.hiddenSelected} selected instances are hidden` : '')
     this.focusButton.disabled = !counts.canFocus
+    this.clearButton.textContent = counts.sharedSelection ? 'Clear selection (shared)' : 'Clear selection'
     this.rowsButton.disabled = counts.selected === 0
     this.clearButton.disabled = !counts.hasSelection
     this.empty.hidden = this.scope !== 'instances' || counts.loaded > 0 || this.schemaContext.checked

@@ -8,7 +8,7 @@ The renderer, selection and editor draft survive destination changes.
 Filters and Appearance open drawers. The scope line separates source totals
 from loaded, visible and selected instances; schema types are counted separately.
 On a narrow screen, **Inspect** opens the selection sheet and Escape returns
-focus to its trigger. Four subjects have their own guides:
+focus to its trigger. These subjects have their own guides:
 
 - **[The honesty model](honesty.md)** — bounds, truncation, and every place the
   app tells you what it is *not* showing. This is the product philosophy, not a
@@ -19,6 +19,8 @@ focus to its trigger. Four subjects have their own guides:
   linked records, the path builder, `PROFILE` and `EXPLAIN`.
 - **[Appearance](appearance.md)** — colour, size, captions, the legend and the
   shared visual filters.
+- **[Saved views and history](saved-views.md)** — named explorations, source
+  verification and shared recovery.
 
 ```{toctree}
 :maxdepth: 1
@@ -28,6 +30,7 @@ honesty
 layouts
 queries
 appearance
+saved-views
 ```
 
 ## The entry screen is the meta-graph
@@ -55,7 +58,7 @@ The server asks kglite for a schema sized for the graph it has, and reports
 which tier it used on stderr and in `GET /api/session`:
 
 ```json
-{"protocol_version":7,"tier":"compact","slot_count":98,
+{"protocol_version":8,"tier":"compact","slot_count":98,
  "stats":{"node_count":546850,"edge_count":765373,"node_type_count":98,
           "relationship_type_count":54,"core_type_count":35}}
 ```
@@ -73,7 +76,7 @@ each direction, with a count:
 
 ```console
 $ curl -s -XPOST $B/api/preview -H 'content-type: application/json' -d '{"slot":0}'
-{"protocol_version":7,"slot":0,"scope":"type","node_type":"Person","title":"",
+{"protocol_version":8,"slot":0,"scope":"type","node_type":"Person","title":"",
  "relationships":[
    {"name":"HAS_SKILL","direction":"out","other_type":"Skill","count":180},
    {"name":"KNOWS","direction":"out","other_type":"Person","count":180},
@@ -97,11 +100,11 @@ relationship a type has is the expensive one. `max nodes` in the panel is a
 *request* — the ceiling is enforced in
 [core](../concepts/bounds-in-core.md), and the answer reports what it cut.
 
-**Collapse** removes an expansion again. Collapsing a selection also clears it,
-so the counts the viewer reports never describe nodes that have left the
-screen. Slot numbers are not reissued, so anything holding a slot stays valid
-unless the answer carries a compaction — which renumbers everything, and says
-so.
+**Collapse** removes an expansion again. A selected source record can remain
+selected while unloaded; **Show rows** can inspect it and **Show in Explore**
+can load it again. The selection notice distinguishes hidden or unloaded
+records. Compaction can renumber slots, but source handles and type names keep
+selection attached to the same identities.
 
 ## Search
 

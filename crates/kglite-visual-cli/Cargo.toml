@@ -67,6 +67,9 @@ base64 = "0.22"
 # security boundary, and SHA-256 already present beats a new dependency for it.
 dirs = "6"
 sha2 = "0.11"
+# Saved views require one cross-process catalog transaction. fs2 0.4.3 is
+# already locked and supports the Rust 1.88 floor; std file-lock APIs do not.
+fs2 = "=0.4.3"
 
 [dev-dependencies]
 # The render subcommand's tests drive the real binary and need somewhere to

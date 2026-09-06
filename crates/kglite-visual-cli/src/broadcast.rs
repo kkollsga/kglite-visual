@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use kglite_visual_core::shared::{
-    shared_frames, CommittedEvent, RevisionStamp, SharedRequest, SharedWireMeta,
+    shared_frames, CommittedEvent, PreparedShared, RevisionStamp, SharedRequest, SharedWireMeta,
 };
 use kglite_visual_core::CoreError;
 use kglite_visual_core::Response;
@@ -89,6 +89,8 @@ pub struct AppState {
     /// same reason the bus is: two of them holding two stores is two answers to
     /// "what have I saved".
     pub queries: Arc<QueryStore>,
+    pub views: Arc<crate::views::ViewStore>,
+    pub session_views: Arc<crate::views::SessionViewStore>,
     publication_gate: Arc<Mutex<()>>,
     #[cfg(test)]
     commit_hook: Arc<Mutex<Option<CommitHook>>>,
@@ -102,6 +104,8 @@ impl AppState {
             session,
             bus: Bus::new(),
             queries: Arc::new(QueryStore::open(graph_label)),
+            views: Arc::new(crate::views::ViewStore::open()),
+            session_views: Arc::new(crate::views::SessionViewStore::default()),
             publication_gate: Arc::new(Mutex::new(())),
             #[cfg(test)]
             commit_hook: Arc::new(Mutex::new(None)),
@@ -157,27 +161,82 @@ impl AppState {
         let prepared = tokio::task::spawn_blocking(move || session.prepare_shared(&request))
             .await
             .map_err(|error| DispatchError::Task(error.to_string()))??;
-        let state = self.clone();
-        // The closure owns the guard and publication. Cancelling its caller
-        // cannot detach a mutation from the broadcast that acknowledges it.
-        tokio::task::spawn_blocking(move || {
-            let _ordered = state
-                .publication_gate
-                .lock()
-                .map_err(|_| DispatchError::Task("shared publication lock is poisoned".into()))?;
-            let event = state.session.commit_shared(prepared)?;
-            #[cfg(test)]
-            state.after_commit(&event.snapshot.meta.stamp);
-            state.bus.publish(frame_event(&event));
-            Ok(Execution {
-                stamp: Some(event.snapshot.meta.stamp.clone()),
-                request_id: event.request_id,
-                response: event.response,
-                published: true,
-            })
+        self.commit_prepared(prepared).await
+    }
+
+    pub async fn commit_prepared(
+        &self,
+        prepared: PreparedShared,
+    ) -> Result<Execution, DispatchError> {
+        self.commit_ordered(move |_| Ok(prepared)).await
+    }
+
+    pub(crate) fn mark_bookmark_saved_blocking(
+        &self,
+        name: kglite_visual_core::bookmark::BookmarkName,
+        capture: kglite_visual_core::bookmark::BookmarkCapture,
+        request_id: Option<String>,
+    ) -> Result<Execution, DispatchError> {
+        let mut content_conflict = None;
+        let execution = self.commit_ordered_blocking(|session| {
+            match session.prepare_bookmark_saved(&name, &capture, None, request_id.clone()) {
+                Err(error @ CoreError::Conflict(_)) => {
+                    // An older replacement can overwrite the payload underlying
+                    // a newer clean marker. Clear only that named association;
+                    // reporting dirty to the waiter alone would leave peers lied to.
+                    content_conflict = Some(error);
+                    session.prepare_bookmark_deleted(&name, None, request_id)
+                }
+                result => result,
+            }
+        })?;
+        match content_conflict {
+            Some(error) => Err(error.into()),
+            None => Ok(execution),
+        }
+    }
+
+    pub(crate) fn clear_deleted_marker_blocking(
+        &self,
+        name: kglite_visual_core::bookmark::BookmarkName,
+        request_id: Option<String>,
+    ) -> Result<Execution, DispatchError> {
+        self.commit_ordered_blocking(move |session| {
+            session.prepare_bookmark_deleted(&name, None, request_id)
         })
-        .await
-        .map_err(|error| DispatchError::Task(error.to_string()))?
+    }
+
+    async fn commit_ordered(
+        &self,
+        prepare: impl FnOnce(&Session) -> Result<PreparedShared, CoreError> + Send + 'static,
+    ) -> Result<Execution, DispatchError> {
+        let state = self.clone();
+        tokio::task::spawn_blocking(move || state.commit_ordered_blocking(prepare))
+            .await
+            .map_err(|error| DispatchError::Task(error.to_string()))?
+    }
+
+    // IO jobs call this synchronously for their metadata tail, so cancellation
+    // cannot detach a successful catalog write from its shared acknowledgment.
+    fn commit_ordered_blocking(
+        &self,
+        prepare: impl FnOnce(&Session) -> Result<PreparedShared, CoreError>,
+    ) -> Result<Execution, DispatchError> {
+        let _ordered = self
+            .publication_gate
+            .lock()
+            .map_err(|_| DispatchError::Task("shared publication lock is poisoned".into()))?;
+        let prepared = prepare(&self.session)?;
+        let event = self.session.commit_shared(prepared)?;
+        #[cfg(test)]
+        self.after_commit(&event.snapshot.meta.stamp);
+        self.bus.publish(frame_event(&event));
+        Ok(Execution {
+            stamp: Some(event.snapshot.meta.stamp.clone()),
+            request_id: event.request_id,
+            response: event.response,
+            published: true,
+        })
     }
 
     #[cfg(test)]
@@ -202,6 +261,7 @@ impl AppState {
             let mut frames = state.session.session_info_frames();
             frames.extend(state.session.meta_graph_frames());
             let meta = SharedWireMeta {
+                restored: false,
                 compacted: false,
                 snapshot: snapshot.meta,
                 request_id: None,

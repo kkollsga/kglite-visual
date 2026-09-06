@@ -207,6 +207,15 @@ fn router(state: AppState) -> Router {
         // bodies. There is deliberately NO `/api/queries/run`: a saved query is
         // run by putting its text into the ordinary Cypher path, so there stays
         // exactly one place a query executes.
+        .route("/api/views", get(crate::views_api::list))
+        .route("/api/views/save", post(crate::views_api::save))
+        .route("/api/views/restore", post(crate::views_api::restore))
+        .route("/api/views/delete", post(crate::views_api::delete))
+        .route("/api/history", get(crate::views_api::history))
+        .route(
+            "/api/history/restore",
+            post(crate::views_api::history_restore),
+        )
         .route("/api/queries", get(api::saved_queries))
         .route("/api/queries/save", post(api::save_query))
         .route("/api/queries/delete", post(api::delete_query))

@@ -65,17 +65,18 @@ x-kglv-note: …
 The filename is derived from the graph, in UTF-8, so a Norwegian graph keeps
 its letters.
 
-**The scope is the view.** Exactly the instance nodes on screen, never the
-whole graph: this is a viewer built around a response bound, and an export that
-answered "everything" would walk straight around it. An export over the entry
+**The default scope is loaded instances and their source-induced relationships.**
+It includes loaded nodes hidden by a visual filter and every source edge between
+those nodes, which can include relationships absent from the retained view.
+It does not export the whole source graph. An export over the entry
 screen is a `400` naming what to load first:
 
 ```json
 {"error":"there is nothing to export: no instance nodes are loaded. Expand a type or run a query with 'show in graph' first."}
 ```
 
-The filter does not change what is written: the server's export walks the slot
-space, not the client's appearance arrays, so `window.__kglv.exportNodes` is
+The filter does not change this legacy export scope: it uses loaded membership,
+so `window.__kglv.exportNodes` is
 the honest count of what the card would write — filter or no filter.
 
 ## From an agent

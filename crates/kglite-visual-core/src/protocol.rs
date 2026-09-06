@@ -78,7 +78,9 @@ use std::fmt;
 /// into one revisioned update. Clients apply it atomically after its arrays.
 /// **v7** adds bounded field-detail paging. Query rows and search results also
 /// carry explicit source references; scalar values never imply graph identity.
-pub const PROTOCOL_VERSION: u32 = 7;
+/// **v8** carries saved-view association, bounded recovery history and shared
+/// presentation settings in the atomic snapshot, with a separate content revision.
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Header size in bytes (6 × `u32`).
 pub const HEADER_BYTES: usize = 24;

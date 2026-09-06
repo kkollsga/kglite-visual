@@ -13,14 +13,17 @@ headless renderer are three consumers of it.
 
 ## The version number
 
-Every response carries `protocol_version`. It currently reads **7**.
+Every response carries `protocol_version`. It currently reads **8**.
 
 ```json
-{"protocol_version":7,"core_version":"0.1.1","tier":"compact","slot_count":98,…}
+{"protocol_version":8,"core_version":"<package version>","tier":"compact","slot_count":98,…}
 ```
 
 Version 7 adds paged field detail, exact query-row entity references, typed query
-cells, handle-based source search and an explicit compaction event flag.
+cells, handle-based source search and an explicit compaction event flag. Version 8 adds content revisions, saved-view
+markers, bounded history summaries and presentation settings to shared snapshots.
+An event-only `restored` flag tells attached clients to display the restored
+instance or schema view; later focus events do not replay that navigation.
 
 Version 6 adds one atomic shared snapshot envelope with generation/global,
 topology and subset revisions. Metadata is followed by typed point and link

@@ -22,6 +22,8 @@ pub mod mcp;
 pub mod queries;
 pub mod render_cmd;
 pub mod server;
+pub mod views;
+pub mod views_api;
 pub mod ws;
 
 pub use broadcast::{AppState, Bus};

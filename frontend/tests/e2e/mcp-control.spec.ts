@@ -17,7 +17,7 @@ import { keepSchemaContext } from './navigation'
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { appUrl, launch, type Launched } from './harness'
+import { appUrl, launch, Listener, type Launched } from './harness'
 import { McpClient } from './mcp'
 
 const PERSON_SLOT = 0
@@ -67,23 +67,29 @@ test('MCP protocol: initialize, list_tools, call_tool over streamable HTTP', asy
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       'browse_type',
       'collapse',
+      'delete_view',
       'expand',
       'export_view',
       'field_detail',
       'focus',
       'highlight',
       'list_saved_queries',
+      'list_views',
       'load_entities',
       'load_nodes',
       'records',
       'render',
       'reset_view',
+      'restore_history',
+      'restore_view',
       'run_saved_query',
+      'save_view',
       'set_appearance',
       'set_caption',
       'set_layout',
       'set_subset',
       'show_cypher',
+      'view_history',
       'view_state',
     ])
     for (const tool of tools) {
@@ -303,4 +309,58 @@ test('guided navigation: an agent shows the user a slice, points at it, and puts
   } finally {
     server?.process.kill()
   }
+})
+
+test('saved views and recovery share the HTTP/MCP catalog and revision contract', async ({ page }) => {
+  const server = await launch()
+  try {
+    const mcp = new McpClient(server.info.mcp)
+    await mcp.initialize()
+    const post = (route: string, data: unknown) => fetch(`${server.info.url}api/${route}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data),
+    })
+    await page.goto(appUrl(server.info))
+    await ready(page)
+    expect((await mcp.call('browse_type', {node_type: 'Person', limit: 100})).isError).toBe(false)
+    await expect(page.getByTestId('count-loaded')).toHaveText('60')
+    const name = `mcp-view-${Date.now()}`
+    const captureStamp = (await (await fetch(`${server.info.url}api/view-state`)).json()).stamp
+    const saved = await mcp.call('save_view', {name, expected: captureStamp, request_id: 'save-mcp'})
+    expect(saved.isError).toBe(false)
+    const savedValue = saved.json<{saved: {storage: string; name: string}; marker_applied: boolean; dirty: boolean}>()
+    expect(savedValue.saved).toMatchObject({storage: 'durable', name})
+    expect(savedValue.marker_applied).toBe(true)
+    expect(savedValue.dirty).toBe(false)
+    const catalog = await (await fetch(`${server.info.url}api/views`)).json()
+    expect(catalog.views).toContainEqual(expect.objectContaining(savedValue.saved))
+    expect(catalog.views.every((entry: object) => !('bookmark' in entry))).toBe(true)
+    expect((await mcp.call('save_view', {name})).isError).toBe(true)
+    expect((await mcp.call('reset_view')).isError).toBe(false)
+    await expect(page.getByTestId('count-loaded')).toHaveText('0')
+    await expect(page.getByTestId('scope-schema')).toHaveAttribute('aria-pressed', 'true')
+    expect((await post('caption', {caption_by: 'id'})).ok).toBe(true)
+    const changedStamp = (await (await fetch(`${server.info.url}api/view-state`)).json()).stamp
+    const refused = await post('views/restore', {...savedValue.saved, expected: captureStamp})
+    expect(refused.status).toBe(409)
+    expect((await refused.json()).code).toBe('revision-conflict')
+    const restored = await mcp.call('restore_view', {...savedValue.saved, expected: changedStamp})
+    expect(restored.isError).toBe(false)
+    await expect(page.getByTestId('count-loaded')).toHaveText('60')
+    await expect(page.getByTestId('scope-instances')).toHaveAttribute('aria-pressed', 'true')
+    await expect.poll(async () => (await state(page)).pointCount).toBe(60)
+    const history = (await mcp.call('view_history')).json<{history: {entries: {id: string}[]}}>()
+    const checkpoint = history.history.entries.at(-1)!
+    const current = (await (await fetch(`${server.info.url}api/view-state`)).json()).stamp
+    expect((await mcp.call('restore_history', {id: checkpoint.id, expected: current})).isError).toBe(false)
+    const restoredState = new Listener(`${server.info.url.replace(/^http/, 'ws')}ws`)
+    try {
+      await restoredState.open()
+      const snapshot = await restoredState.waitFor(done => done.kind === 'shared-update')
+      if (snapshot.kind !== 'shared-update') throw new Error('expected shared snapshot')
+      expect(snapshot.value.meta.snapshot.caption_by).toBe('id')
+    } finally { restoredState.close() }
+    expect((await mcp.call('delete_view', savedValue.saved)).isError).toBe(false)
+    const listed = (await mcp.call('list_views')).json<{views: {name: string}[]}>()
+    expect(listed.views.some(entry => entry.name === name)).toBe(false)
+  } finally { server.process.kill() }
 })

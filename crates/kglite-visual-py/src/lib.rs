@@ -23,7 +23,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
 use kglite_visual_core::{
-    load_graph_with, CoreError, GraphSource, LaunchInfo, LoadLimits, QueryConfig, Session,
+    load_session_with, CoreError, GraphSource, LaunchInfo, LoadLimits, QueryConfig, Session,
     QUERY_THREAD_STACK_BYTES,
 };
 
@@ -296,14 +296,14 @@ fn open_session(
     timeout: u64,
     max_load_mb: Option<u64>,
 ) -> Result<Session, CoreError> {
-    let graph = load_graph_with(source, LoadLimits { max_load_mb })?;
-    Ok(Session::open_with(
-        graph,
-        name.to_string(),
+    load_session_with(
+        source,
+        name,
+        LoadLimits { max_load_mb },
         QueryConfig {
             timeout: Duration::from_secs(timeout),
         },
-    ))
+    )
 }
 
 #[pyfunction]

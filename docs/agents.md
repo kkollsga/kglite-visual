@@ -164,7 +164,7 @@ mcp set_layout '{"kernel":"geo"}'
 Errors an agent can act on come back as `isError: true` with kglite's own
 message. Quote it; do not summarise it.
 
-## The twenty tools
+## The twenty-six tools
 
 The shared-view tools load, inspect, arrange and export a bounded exploration.
 `records` reads typed fields without changing that view. Saved-query tools use
@@ -192,8 +192,22 @@ the visualizer's own query store.
 | `list_saved_queries` | The Cypher this user saved for this graph, plus recently run queries. **Read it before writing a query of your own** |
 | `run_saved_query` | Run one by name, into the shared view. Same path, same bound; added to the user's recent list, because they are watching it happen |
 | `export_view` | Write the nodes currently in the view out as GraphML / GEXF / CSV / D3 JSON and hand back the text |
+| `list_views` | List bounded durable and session-only saved-view summaries and storage eligibility |
+| `save_view` | Capture the acknowledged view, verify durable identities where possible, and save under a name; replacement is explicit |
+| `restore_view` | Verify a named view's source and atomically restore its exact membership and settings against the expected revision |
+| `delete_view` | Delete a named entry from its explicit durable or session catalog and clear a matching active association |
+| `view_history` | Read bounded shared action summaries and the oldest available checkpoint |
+| `restore_history` | Restore an available checkpoint as a new acknowledged shared action; stale revisions are refused |
 
 ### The shared-view model
+
+Saved-view names are scoped by `storage: "durable" | "session"`; always carry
+both fields when restoring or deleting. A successful save can report
+`marker_applied: false, dirty: true` when another client changed the content
+while the captured version was being saved. That means the named capture was
+saved, while the current view still differs from it. See
+[saved views and history](viewer/saved-views.md) for source verification,
+selection, framing and quota semantics.
 
 **One shared view with ordered, acknowledged changes.** Membership, filters,
 appearance, captions and explicit agent steering use one revision stream. Pass

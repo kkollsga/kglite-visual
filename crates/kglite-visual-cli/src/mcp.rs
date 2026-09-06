@@ -264,7 +264,7 @@ impl SharedOptions {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
 struct SharedArgs<T> {
     #[serde(flatten)]
     args: T,
@@ -272,7 +272,7 @@ struct SharedArgs<T> {
     options: SharedOptions,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
 struct HandleArg {
     generation: String,
     node_id: u32,
@@ -285,6 +285,45 @@ impl From<HandleArg> for NodeHandle {
             node_id: value.node_id,
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum ViewReferenceArg {
+    Node { handle: HandleArg },
+    Type { name: String },
+}
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum BookmarkFocusArg {
+    Fit,
+    References { references: Vec<ViewReferenceArg> },
+}
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct SaveViewArgs {
+    name: String,
+    #[serde(default)]
+    replace: bool,
+    #[serde(default)]
+    selected: Option<Vec<ViewReferenceArg>>,
+    #[serde(default)]
+    focus: Option<BookmarkFocusArg>,
+}
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum StorageArg {
+    #[default]
+    Durable,
+    Session,
+}
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct NamedViewArgs {
+    storage: StorageArg,
+    name: String,
+}
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+struct HistoryRestoreArgs {
+    id: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
@@ -1337,6 +1376,61 @@ impl ViewControl {
         .await
     }
 
+    #[tool(
+        description = "List bounded saved-view names in the global durable catalog and this session's temporary catalog, their separate quotas, and current save eligibility. Durable eligibility is verified on save."
+    )]
+    async fn list_views(&self) -> Result<CallToolResult, McpError> {
+        catalog_result(crate::views_api::list_value(self.state.clone()).await)
+    }
+    #[tool(
+        description = "Save this exact exploration without replaying Cypher. Source identity decides durable or session-only storage. Names have explicit replace intent; no quota evicts another view. A peer change during IO can save the captured revision while leaving the live view dirty."
+    )]
+    async fn save_view(
+        &self,
+        Parameters(args): Parameters<SharedArgs<SaveViewArgs>>,
+    ) -> Result<CallToolResult, McpError> {
+        catalog_result(crate::views_api::save_value(self.state.clone(), catalog_args(args)?).await)
+    }
+    #[tool(
+        description = "Restore an exact named exploration from durable or session storage after source identity and bounds validation. Pass expected to refuse newer shared revisions. Unsupported or changed sources leave the current view intact."
+    )]
+    async fn restore_view(
+        &self,
+        Parameters(args): Parameters<SharedArgs<NamedViewArgs>>,
+    ) -> Result<CallToolResult, McpError> {
+        catalog_result(
+            crate::views_api::restore_value(self.state.clone(), catalog_args(args)?).await,
+        )
+    }
+    #[tool(
+        description = "Delete one explicitly named saved view from durable or session storage. Other names and the current graph contents are preserved; the matching saved marker is cleared."
+    )]
+    async fn delete_view(
+        &self,
+        Parameters(args): Parameters<SharedArgs<NamedViewArgs>>,
+    ) -> Result<CallToolResult, McpError> {
+        catalog_result(
+            crate::views_api::delete_value(self.state.clone(), catalog_args(args)?).await,
+        )
+    }
+    #[tool(
+        description = "Read bounded recovery checkpoints for this shared session, including the oldest available checkpoint and eviction count. Recovery history is separate from named saved views."
+    )]
+    async fn view_history(&self) -> Result<CallToolResult, McpError> {
+        catalog_result(crate::views_api::history_value(self.state.clone()).await)
+    }
+    #[tool(
+        description = "Restore a recovery checkpoint as a new shared change, without rerunning its query. Pass expected from view_state; stale or evicted checkpoints refuse without changing the current view."
+    )]
+    async fn restore_history(
+        &self,
+        Parameters(args): Parameters<SharedArgs<HistoryRestoreArgs>>,
+    ) -> Result<CallToolResult, McpError> {
+        catalog_result(
+            crate::views_api::history_restore_value(self.state.clone(), catalog_args(args)?).await,
+        )
+    }
+
     async fn settings(
         &self,
         request: Request,
@@ -1503,6 +1597,21 @@ fn refused_text(message: &str) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(message.to_string())])
 }
 
+fn catalog_args<T: Serialize, U: serde::de::DeserializeOwned>(args: T) -> Result<U, McpError> {
+    serde_json::to_value(args)
+        .and_then(serde_json::from_value)
+        .map_err(|error| McpError::internal_error(error.to_string(), None))
+}
+fn catalog_result(
+    result: Result<serde_json::Value, DispatchError>,
+) -> Result<CallToolResult, McpError> {
+    match result {
+        Ok(value) => ok_json(&value),
+        Err(DispatchError::Core(error)) => Ok(refused(&error)),
+        Err(DispatchError::Task(message)) => Err(McpError::internal_error(message, None)),
+    }
+}
+
 fn ok_json(value: &serde_json::Value) -> Result<CallToolResult, McpError> {
     Ok(CallToolResult::success(vec![ContentBlock::text(
         value.to_string(),
@@ -1521,26 +1630,32 @@ mod tests {
     use kglite_visual_core::{GEOMETRY_CAVEAT, GEOMETRY_STATIC_CAVEAT};
 
     /// Names are the API: a count alone cannot detect a rename.
-    const EXPECTED: [&str; 20] = [
+    const EXPECTED: [&str; 26] = [
         "browse_type",
         "collapse",
+        "delete_view",
         "expand",
         "export_view",
         "field_detail",
         "focus",
         "highlight",
         "list_saved_queries",
+        "list_views",
         "load_entities",
         "load_nodes",
         "records",
         "render",
         "reset_view",
+        "restore_history",
+        "restore_view",
         "run_saved_query",
+        "save_view",
         "set_appearance",
         "set_caption",
         "set_layout",
         "set_subset",
         "show_cypher",
+        "view_history",
         "view_state",
     ];
 

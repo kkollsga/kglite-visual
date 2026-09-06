@@ -104,7 +104,7 @@ what it wrote, `x-kglv-format` which one, and **`x-kglv-note` carries the one
 caveat the file itself cannot**: the edge set is every edge between the
 exported nodes and so can exceed what the canvas drew. Report that, don't
 discover it in Gephi. (GraphML carries proper `label` keys as of kglite
-0.16.16 — nodes get the title, edges the connection type.) The scope is **the view** — an export
+0.16.16 — nodes get the title, edges the connection type.) The scope is **loaded instances** (including hidden ones) — an export
 over the entry screen is a **400** naming what to load first, never a
 whole-graph dump. `kglite-visual export <file>` is the CLI half and the only
 place a whole graph is on offer.
@@ -214,16 +214,16 @@ neither.
 ## 3c. Drive the live view over MCP
 
 The running server speaks MCP at the `mcp` URL its stdout line printed —
-streamable HTTP, no second process, no discovery file. Twenty tools:
+streamable HTTP, no second process, no discovery file. Twenty-six tools:
 `view_state`, `show_cypher`, `browse_type`, `load_nodes`, `load_entities`,
 `records`, `field_detail`, `expand`,
 `collapse`, `highlight`, `focus`, `set_appearance`, `set_subset`, `set_caption`,
 `set_layout`, `reset_view`, `render`, `list_saved_queries`, `run_saved_query`,
-`export_view`.
+`export_view`, `list_views`, `save_view`, `restore_view`, `delete_view`,
+`view_history`, `restore_history`.
 
-`export_view` is the one that hands something back rather than moving the
-screen: it writes the nodes currently in the view as GraphML / GEXF / CSV /
-D3 JSON and returns the text. Its scope is the VIEW, so load what you want
+`export_view` returns the loaded nodes and their source-induced relationships
+as GraphML / GEXF / CSV / D3 JSON text without moving the screen. Its scope is the VIEW, so load what you want
 first — on an empty view it refuses by name rather than dumping the graph —
 and read the `notes` in the reply before telling the user what they have.
 

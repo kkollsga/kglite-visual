@@ -51,7 +51,7 @@ pub const COMPACTION_TOMBSTONE_RATIO: f32 = 0.30;
 pub const COMPACTION_MIN_SLOTS: usize = 64;
 
 /// What one slot holds.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum SlotEntry {
     /// A meta-graph type node.
     Type { name: String },

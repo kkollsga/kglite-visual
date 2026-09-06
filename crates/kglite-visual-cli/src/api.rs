@@ -641,7 +641,7 @@ fn execution_json(execution: Execution) -> Response {
     Json(value).into_response()
 }
 
-fn dispatch_error(error: DispatchError, request_id: Option<String>) -> Response {
+pub(crate) fn dispatch_error(error: DispatchError, request_id: Option<String>) -> Response {
     let (status, mut body) = match error {
         DispatchError::Core(CoreError::Conflict(conflict)) => {
             (StatusCode::CONFLICT, serde_json::json!(conflict))
