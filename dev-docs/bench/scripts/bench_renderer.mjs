@@ -17,7 +17,11 @@
  * constructs a renderer of its own; it reaches the app's own instance through
  * `window.__kglvBench.graph`.
  *
- * ## Simulation ON — the one place fixture mode is the wrong tool
+ * `--simulation stopped` holds the deterministic layout for renderer A/B
+ * comparisons. The default `running` mode retains the historical GPU-layout
+ * stop-rule measurement described below; output records the chosen mode.
+ *
+ * ## Simulation ON — the GPU layout stop-rule measurement
  *
  * The app renders with `enableSimulation: false` because the *tests* need
  * determinism and the server supplies positions (plan D2). The question here is
@@ -71,7 +75,8 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -98,6 +103,9 @@ function parseArgs() {
     loads: 5,
     out: null,
     run: '1',
+    reference: null,
+    referenceVersion: null,
+    simulation: 'running',
   }
   const raw = process.argv.slice(2)
   for (let i = 0; i < raw.length; i += 2) {
@@ -108,6 +116,7 @@ function parseArgs() {
     else if (key === 'loads') args.loads = Number(value)
     else args[key] = value
   }
+  if (!['running', 'stopped'].includes(args.simulation)) throw new Error('--simulation must be running or stopped')
   return args
 }
 
@@ -139,9 +148,21 @@ function resolveBinary() {
   return bin
 }
 
-async function launchServer(graph) {
-  const bin = resolveBinary()
-  const child = spawn(bin, [graph, '--no-open', '--port', '0'], { cwd: REPO })
+async function launchServer(graph, reference, referenceVersion) {
+  const bin = reference ? path.resolve(REPO, reference) : resolveBinary()
+  if (reference) {
+    if (!referenceVersion) throw new Error('--reference requires --referenceVersion')
+    const actual = execFileSync(bin, ['--version'], { cwd: os.tmpdir(), encoding: 'utf8' }).trim()
+    if (actual !== `kglite-visual ${referenceVersion}`) {
+      throw new Error(`reference version mismatch: expected ${referenceVersion}, got ${actual}`)
+    }
+  }
+  const workdir = mkdtempSync(path.join(os.tmpdir(), 'kglv-bench-'))
+  const child = spawn(bin, [path.resolve(REPO, graph), '--no-open', '--port', '0'], {
+    cwd: workdir,
+    env: { ...process.env, KGLITE_VISUAL_CONFIG_DIR: path.join(workdir, 'config') },
+  })
+  child.once('exit', () => rmSync(workdir, { recursive: true, force: true }))
   const stderr = []
   createInterface({ input: child.stderr }).on('line', (l) => stderr.push(l))
   const info = await new Promise((resolve, reject) => {
@@ -440,24 +461,25 @@ async function interactionCosts(context, url, out, repeats) {
   const queryMs = []
   const compactionMs = []
   let queryRows = 0
+  let tableDomNodes = 0
   let reclaimed = 0
 
   for (let i = 0; i < repeats; i += 1) {
     const { page } = await readyPage(context, url)
-    // A table at the row bound: the graph has 20 000 Persons and the bound
-    // clamps to MAX_QUERY_ROWS, so this is the largest table the panel can be
-    // asked to build.
-    await page.getByTestId('query-input').fill('MATCH (n:Person) RETURN id(n) AS id, n.title AS title')
+    // Wait for the asynchronous editor upgrade before entering the query.
+    await page.locator('[data-testid="query-editor"] .cm-content, [data-testid="editor-note"].kglv-warn').first().waitFor({ state: 'attached' })
+    await page.locator('[data-testid="query-editor"] .cm-content, [data-testid="query-editor"] textarea').first().fill('MATCH (n:Person) RETURN id(n) AS id, n.title AS title')
     const t0 = Date.now()
     await page.getByTestId('query-run').click()
     await page.waitForFunction(() => window.__kglv.queryRows > 0, undefined, { timeout: 120_000 })
     queryMs.push(Date.now() - t0)
     queryRows = await page.evaluate(() => window.__kglv.queryRows)
+    tableDomNodes = await page.locator('[data-testid="query-table"]').evaluate((root) => root.querySelectorAll('*').length)
 
     // Expand to the node bound, then collapse it: 5 005 slots with 5 000
     // tombstoned is far past the 30% ratio and past the 64-slot floor, so the
     // collapse is answered with a compaction and the client applies the remap.
-    await page.locator('.kglv-label:has-text("Person")').click()
+    await page.locator('.kglv-label-name').filter({ hasText: /^Person$/ }).click()
     await page.getByTestId('expand-limit').fill('5000')
     await page.getByTestId('expand-KNOWS-out').click()
     await page.waitForFunction(
@@ -481,6 +503,7 @@ async function interactionCosts(context, url, out, repeats) {
     n: queryMs.length,
   }
   out.query_table_rows = { statistic: 'exact', value: queryRows }
+  out.query_table_dom_nodes = { statistic: 'exact', value: tableDomNodes }
   out.collapse_with_compaction_ms = {
     statistic: 'mean of first events',
     value: mean(compactionMs),
@@ -505,6 +528,9 @@ function appUrl(info) {
 }
 
 async function readyPage(context, url) {
+  // Every client attaches to the same session; a new page is not a fresh view.
+  const reset = await fetch(new URL('/api/reset', url), { method: 'POST' })
+  if (!reset.ok) throw new Error(`baseline reset failed: ${reset.status} ${await reset.text()}`)
   const page = await context.newPage()
   const errors = []
   page.on('console', (m) => {
@@ -519,22 +545,26 @@ async function main() {
   const args = parseArgs()
   // The production-bundle precondition, read as an exit code rather than
   // assumed: a dev-server number is measuring the dev server (R11).
-  execFileSync('python3', [path.join(REPO, 'scripts/check_bundle.py'), '--freshness'], {
-    cwd: REPO,
-    stdio: 'inherit',
-  })
+  if (!args.reference) {
+    execFileSync('python3', [path.join(REPO, 'scripts/check_bundle.py'), '--freshness'], {
+      cwd: REPO,
+      stdio: 'inherit',
+    })
+  }
 
   const out = {
     backend: { statistic: 'exact', value: args.backend },
     graph: { statistic: 'exact', value: args.graph },
     run: { statistic: 'exact', value: args.run },
+    simulation_mode: { statistic: 'exact', value: args.simulation },
     captured_at: { statistic: 'exact', value: new Date().toISOString() },
     loadavg: { statistic: 'exact', value: (await import('node:os')).loadavg().map((v) => +v.toFixed(2)) },
   }
 
-  const server = await launchServer(args.graph)
+  const server = await launchServer(args.graph, args.reference, args.referenceVersion)
   out.binary = { statistic: 'exact', value: server.bin }
-  out.profile = { statistic: 'exact', value: server.bin.includes('/release/') ? 'release' : 'debug' }
+  out.profile = { statistic: 'exact', value: args.reference ? 'published artifact' : 'release' }
+  out.reference_version = { statistic: 'exact', value: args.referenceVersion }
 
   const browser = await chromium.launch(launchOptions(args.backend))
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
@@ -572,7 +602,7 @@ async function main() {
     // ── the real path: a slice the server actually produced ────────────
     for (const size of args.sizes) {
       const { page, errors } = await readyPage(context, appUrl(server.info))
-      await page.locator('.kglv-label:has-text("Person")').click()
+      await page.locator('.kglv-label-name').filter({ hasText: /^Person$/ }).click()
       await page.getByTestId('expand-limit').fill(String(size))
       await page.getByTestId('expand-KNOWS-out').click()
       // Both conditions: `lastSliceKind` alone is set before the upload, so
@@ -601,7 +631,7 @@ async function main() {
       }
       out[`${label}_sim_running`] = {
         statistic: 'exact',
-        value: await page.evaluate(() => window.__bench.simulation(true)),
+        value: await page.evaluate((running) => window.__bench.simulation(running), args.simulation === 'running'),
       }
       await capture(page, label, out)
 
@@ -626,7 +656,7 @@ async function main() {
       out[`${label}_above_bound`] = { statistic: 'exact', value: size > 5000 }
       out[`${label}_sim_running`] = {
         statistic: 'exact',
-        value: await page.evaluate(() => window.__bench.simulation(true)),
+        value: await page.evaluate((running) => window.__bench.simulation(running), args.simulation === 'running'),
       }
       await capture(page, label, out)
       out[`${label}_console_errors`] = { statistic: 'exact', value: errors }
