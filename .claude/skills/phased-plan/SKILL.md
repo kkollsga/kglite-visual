@@ -10,6 +10,21 @@ the user's chosen workflow and existing scope approval; a small fix or review
 alone does not require this process. This skill builds its own phased plan.
 Use available harness tools; named agent roles are not required API names.
 
+## Agent model allocation
+
+GPT-6 Astra (`gpt-6-astra`) is for coordination only: scope, phase sequencing,
+work allocation, integration decisions and final synthesis. Delegate research,
+implementation, tests and independent code review to GPT-5.6 Sol
+(`gpt-5.6-sol`) workhorse agents. Select Sol explicitly; never let workers
+inherit the coordinator's Astra model. This applies to workers they delegate to
+as well. A later explicit user model choice overrides this allocation.
+
+Give workers bounded tasks and concise handoffs to existing evidence; avoid
+repeating completed research or reviews. If the harness cannot override a model
+while copying full history, use a fresh Sol worker with a focused handoff. If Sol
+is unavailable or usage-limited, preserve progress and report the limitation;
+do not silently fall back to Astra for worker tasks.
+
 ## Working dir: `dev-docs/` (gitignored)
 
 All plans, scratch and intermediates live under **`dev-docs/`**. **The
