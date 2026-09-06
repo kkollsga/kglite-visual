@@ -217,7 +217,7 @@ pub(crate) fn legacy_cell_json(value: &Value) -> serde_json::Value {
     }
 }
 
-fn preserve_integers(value: &mut serde_json::Value) {
+pub(crate) fn preserve_integers(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Number(number)
             if number

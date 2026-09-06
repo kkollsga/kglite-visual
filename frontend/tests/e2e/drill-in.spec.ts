@@ -65,7 +65,7 @@ test('the drill-in: preview, bounded expand, hover, query, collapse', async ({
 
     // ── the entry screen ────────────────────────────────────────────────
     const entry = await state(page)
-    expect(entry.protocolVersion).toBe(6)
+    expect(entry.protocolVersion).toBe(7)
     expect(entry.tier).toBe('full')
     expect(entry.pointCount).toBe(META_POINTS)
     expect(entry.linkCount).toBe(META_LINKS)
@@ -282,9 +282,9 @@ test('a full expansion compacts on collapse and the client applies the remap', a
     expect(compacted.pointCount).toBe(META_POINTS)
     expect(compacted.tombstoneCount).toBe(0)
     expect(compacted.linkCount).toBe(META_LINKS)
-    // A compaction renumbers everything, so the selection it invalidated is
-    // dropped rather than carried across onto whatever moved into those slots.
-    expect(compacted.selectedCount).toBe(0)
+    // The selected type reference survives compaction by name, not an old row/slot index.
+    expect(compacted.selectedCount).toBe(1)
+    await expect(page.getByTestId('selection-title')).toHaveText('Person (type)')
     // The five type nodes kept slots 0..4, so their labels are still theirs.
     await expect(page.locator('.kglv-label:has-text("Person")')).toHaveCount(1)
     await expect(page.locator('.kglv-label:has-text("Company")')).toHaveCount(1)
@@ -324,7 +324,7 @@ test('server-side search highlights what is loaded and offers to load the rest',
       { timeout: 15_000 },
     )
     const loaded = await state(page)
-    expect(loaded.lastSliceKind).toBe('query')
+    expect(loaded.lastSliceKind).toBe('search')
     expect(loaded.pointCount).toBe(META_POINTS + cold)
 
     // Search again: the same hits are now on screen, so they come back with

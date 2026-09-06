@@ -112,6 +112,14 @@ pub async fn records(
     dispatch(state, body.request(Request::Records)).await
 }
 
+/// `POST /api/field-detail` — bounded source-value pages and nested paths.
+pub async fn field_detail(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<kglite_visual_core::field_detail::FieldDetailRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::FieldDetail)).await
+}
+
 /// `POST /api/browse-type` — bounded type loading, including disconnected nodes.
 pub async fn browse_type(
     state: State<AppState>,
@@ -126,6 +134,14 @@ pub async fn load_nodes(
     Json(body): Json<RequestBody<LoadNodesRequest>>,
 ) -> Response {
     dispatch(state, body.request(Request::LoadNodes)).await
+}
+
+/// `POST /api/load-entities` — exact node and relationship source handles.
+pub async fn load_entities(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<kglite_visual_core::query_provenance::LoadEntitiesRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::LoadEntities)).await
 }
 
 /// `POST /api/search` — `{"query": "...", "node_type": "...",

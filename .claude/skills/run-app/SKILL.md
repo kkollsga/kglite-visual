@@ -214,8 +214,9 @@ neither.
 ## 3c. Drive the live view over MCP
 
 The running server speaks MCP at the `mcp` URL its stdout line printed —
-streamable HTTP, no second process, no discovery file. Eighteen tools:
-`view_state`, `show_cypher`, `browse_type`, `load_nodes`, `records`, `expand`,
+streamable HTTP, no second process, no discovery file. Twenty tools:
+`view_state`, `show_cypher`, `browse_type`, `load_nodes`, `load_entities`,
+`records`, `field_detail`, `expand`,
 `collapse`, `highlight`, `focus`, `set_appearance`, `set_subset`, `set_caption`,
 `set_layout`, `reset_view`, `render`, `list_saved_queries`, `run_saved_query`,
 `export_view`.
@@ -271,20 +272,14 @@ broadcast without an MCP client. The steering endpoints answer with
 `{"clients":n}`: a command that reached nobody is otherwise indistinguishable
 from one that reached the user.
 
-## 3d. The two surfaces that write Cypher for you
+## 3d. Records and generated paths
 
-Both generate a query, **show it**, and run it down the ordinary bounded
-`cypher` path — no new endpoint, no request variant, no second bound. The
-generated text is the contract: what is on screen is what runs.
+A type's table opens Data's bounded Records lane using source handles. It does
+not generate an identity query or overwrite the editor draft. The Query results
+lane stays separate, and only engine-provided entity references enable graph
+actions. `data-testid`s include `type-table`, `data-records`, `records-scope`,
+`records-field`, `records-add-field`, `records-show-selected` and `query-table`.
 
-- **A type's table.** Select a type node (click it, or
-  `POST /api/highlight {"slots":[n],"concept":"selected"}`), then the type
-  panel offers `table of N on screen`. It generates
-  `MATCH (n:Type) WHERE id(n) IN $ids RETURN id(n) AS …, n.p AS p, …` over
-  the twelve best-covered properties and puts it in the Cypher box. Columns
-  sort by clicking a header — typed, so a numeric column compares as
-  numbers. `data-testid`s: `type-table`, `query-table`, `sort-<column>`,
-  `table-note`.
 - **The path builder.** `path-start`, `path-add`, `path-hop-<i>`,
   `path-filter-<i>` / `path-op-<i>` / `path-value-<i>`, `path-count-<i>`,
   `path-query`, `path-note`, `path-run`, `path-copy`. A hop's value is

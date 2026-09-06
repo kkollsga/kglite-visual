@@ -24,6 +24,7 @@ import type { MetaGraphMeta } from './generated/MetaGraphMeta'
 import type { NodeDetail } from './generated/NodeDetail'
 import type { PropertyStatsResponse } from './generated/PropertyStatsResponse'
 import type { RecordTable } from './generated/RecordTable'
+import type { FieldDetailResponse } from './generated/FieldDetailResponse'
 import type { QueryTable } from './generated/QueryTable'
 import type { SearchResponse } from './generated/SearchResponse'
 import type { SessionInfo } from './generated/SessionInfo'
@@ -161,6 +162,7 @@ export type Completed = (
   | { kind: 'slice'; value: GraphSliceMessage }
   | { kind: 'query-table'; value: QueryTable }
   | { kind: 'records'; value: RecordTable }
+  | { kind: 'field-detail'; value: FieldDetailResponse }
   | { kind: 'preview'; value: ExpansionPreview }
   | { kind: 'node-detail'; value: NodeDetail }
   | { kind: 'search'; value: SearchResponse }
@@ -196,6 +198,7 @@ export class ResponseAssembler {
   private compaction: Compaction | null = null
   private table: QueryTable | null = null
   private records: RecordTable | null = null
+  private fieldDetail: FieldDetailResponse | null = null
   private preview: ExpansionPreview | null = null
   private detail: NodeDetail | null = null
   private search: SearchResponse | null = null
@@ -243,6 +246,9 @@ export class ResponseAssembler {
         break
       case MessageType.COMPACTION:
         this.compaction = readJson<Compaction>()
+        break
+      case MessageType.FIELD_DETAIL:
+        this.fieldDetail = readJson<FieldDetailResponse>()
         break
       case MessageType.RECORDS:
         this.records = readJson<RecordTable>()
@@ -306,6 +312,7 @@ export class ResponseAssembler {
     this.compaction = null
     this.table = null
     this.records = null
+    this.fieldDetail = null
     this.preview = null
     this.detail = null
     this.search = null
@@ -357,6 +364,7 @@ export class ResponseAssembler {
       }
     }
     if (this.records !== null) return { kind: 'records', value: this.records }
+    if (this.fieldDetail !== null) return { kind: 'field-detail', value: this.fieldDetail }
     if (this.table !== null) return { kind: 'query-table', value: this.table }
     if (this.preview !== null) return { kind: 'preview', value: this.preview }
     if (this.detail !== null) return { kind: 'node-detail', value: this.detail }

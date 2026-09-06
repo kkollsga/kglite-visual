@@ -2,6 +2,7 @@ import type { SubsetFilter } from './generated/SubsetFilter'
 import type { SubsetPredicate } from './generated/SubsetPredicate'
 import type { SubsetSnapshot } from './generated/SubsetSnapshot'
 import type { TypedValue } from './generated/TypedValue'
+import { typedText } from './cells'
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, text = ''): HTMLElementTagNameMap[K] {
   const result = document.createElement(tag)
@@ -86,8 +87,8 @@ export class Filters {
     this.detail.replaceChildren()
     for (const distribution of snapshot.distributions) {
       this.detail.append(node('p', `${distribution.scope}: ${distribution.matching_nodes} / ${distribution.input_nodes} match · ${distribution.null} null · ${distribution.missing} missing · ${distribution.unavailable} unavailable`))
-      if (distribution.categories.length > 0) this.detail.append(node('p', distribution.categories.map(item => `${JSON.stringify(item.value)}: ${item.count}`).join(' · ')))
-      if (distribution.min !== null || distribution.max !== null) this.detail.append(node('p', `Range ${JSON.stringify(distribution.min)} to ${JSON.stringify(distribution.max)}`))
+      if (distribution.categories.length > 0) this.detail.append(node('p', distribution.categories.map(item => `${typedText(item.value)}: ${item.count}`).join(' · ')))
+      if (distribution.min !== null || distribution.max !== null) this.detail.append(node('p', `Range ${distribution.min === null ? 'no minimum' : typedText(distribution.min)} to ${distribution.max === null ? 'no maximum' : typedText(distribution.max)}`))
       if (distribution.other_values > 0) this.detail.append(node('p', `${distribution.other_values} other values`))
     }
   }

@@ -3,4 +3,4 @@ import type { Focus } from "./Focus";
 import type { SharedSnapshotMeta } from "./SharedSnapshotMeta";
 import type { SliceKind } from "./SliceKind";
 
-export type SharedWireMeta = { snapshot: SharedSnapshotMeta, request_id: string | null, focus: Focus | null, mutation_kind: SliceKind | null, };
+export type SharedWireMeta = { compacted: boolean, snapshot: SharedSnapshotMeta, request_id: string | null, focus: Focus | null, mutation_kind: SliceKind | null, };

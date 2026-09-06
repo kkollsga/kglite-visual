@@ -67,8 +67,11 @@ use ts_rs::TS;
 use crate::bound::{Bound, BoundInfo};
 use crate::error::CoreError;
 use crate::protocol::PROTOCOL_VERSION;
+use crate::query_provenance::{QueryRowReferences, RawReferences};
+use crate::records::{NodeHandle, MAX_LOADED_EDGES, MAX_LOADED_NODES};
 use crate::request::{CypherRequest, SearchMode, SearchRequest};
-use crate::values::{value_to_display, value_to_json};
+use crate::shared::RevisionStamp;
+use crate::values::value_to_display;
 
 /// Stack size a Cypher-executing thread needs, taken from the engine rather
 /// than restated. kglite ships the number as `QUERY_THREAD_STACK_SIZE` and
@@ -205,12 +208,17 @@ pub struct QueryRelationship {
 /// kglite returns `Vec<Vec<Value>>` — row-major, one `Vec` per row — and there
 /// is no columnar accessor to ask for instead (plan D11's filed wish). The
 /// transpose therefore happens exactly once, here, rather than on every
-/// consumer: a results table reads columns, a typed-array appearance getter
-/// reads columns, and a client transposing per render would pay O(rows × cols)
+/// consumer: the results table renders and sorts columns, and a client
+/// transposing per render would pay O(rows × cols)
 /// for a shape the server already had to walk.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct QueryTable {
+    /// Typed companion to `data`: `cells[c][r]` preserves the source scalar type.
+    pub cells: Vec<Vec<crate::records::RecordCell>>,
+    pub stamp: Option<RevisionStamp>,
+    pub row_references: Vec<QueryRowReferences>,
+    pub graph_references_truncated: bool,
     pub protocol_version: u32,
     pub columns: Vec<String>,
     /// One array per column, in `columns` order. `data[c][r]` is row `r` of
@@ -295,6 +303,24 @@ pub fn run_cypher(
     request: &CypherRequest,
     config: QueryConfig,
 ) -> Result<QueryTable, CoreError> {
+    run_cypher_context(graph, request, config, None)
+}
+
+pub(crate) fn run_cypher_stamped(
+    graph: &DirGraph,
+    request: &CypherRequest,
+    config: QueryConfig,
+    stamp: RevisionStamp,
+) -> Result<QueryTable, CoreError> {
+    run_cypher_context(graph, request, config, Some(stamp))
+}
+
+fn run_cypher_context(
+    graph: &DirGraph,
+    request: &CypherRequest,
+    config: QueryConfig,
+    stamp: Option<RevisionStamp>,
+) -> Result<QueryTable, CoreError> {
     let params = bind_params(&request.params);
     let bound = Bound {
         max_items: request
@@ -347,16 +373,39 @@ pub fn run_cypher(
             .collect()
     });
 
-    let mut table = to_table(
-        outcome.result.columns,
-        outcome.result.rows,
-        bound,
-        total_rows,
-    );
+    if outcome.result.columns.len() > 256
+        || outcome
+            .result
+            .columns
+            .iter()
+            .map(String::len)
+            .sum::<usize>()
+            > 64 * 1024
+    {
+        return Err(CoreError::Request(
+            "query columns exceed the 256 column / 64 KiB name limit".into(),
+        ));
+    }
+    let mut table = match stamp {
+        Some(stamp) => to_table_context(
+            outcome.result.columns,
+            outcome.result.rows,
+            bound,
+            total_rows,
+            Some(stamp),
+        ),
+        None => to_table(
+            outcome.result.columns,
+            outcome.result.rows,
+            bound,
+            total_rows,
+        ),
+    };
     table.elapsed_ms = elapsed_ms;
     table.explain = outcome.explain;
     table.warnings = warnings;
     table.profile = profile;
+    crate::records::serialized_bytes(&table, MAX_QUERY_BYTES)?;
     Ok(table)
 }
 
@@ -440,155 +489,91 @@ fn to_table(
     bound: Bound,
     engine_total: Option<u64>,
 ) -> QueryTable {
-    // Saturating, not `as`: `total_rows` is a `u64` and `BoundInfo.total` is a
-    // `u32` on the wire, and a wrapping cast is the one failure mode that would
-    // make a truncated answer report a *smaller* total than it returned — which
-    // reads as complete. A saturated total is still visibly truncated.
-    let total = match engine_total {
-        Some(exact) => exact.min(u64::from(u32::MAX)) as usize,
-        None => rows.len(),
-    };
+    to_table_context(columns, rows, bound, engine_total, None)
+}
+fn to_table_context(
+    columns: Vec<String>,
+    rows: Vec<Vec<Value>>,
+    bound: Bound,
+    engine_total: Option<u64>,
+    stamp: Option<RevisionStamp>,
+) -> QueryTable {
+    let total = engine_total
+        .map(|count| count.min(u64::from(u32::MAX)) as usize)
+        .unwrap_or(rows.len());
     let kept = rows.len().min(bound.max_items);
-
-    let mut node_ids: Vec<u32> = Vec::new();
-    let mut seen_nodes: HashSet<u32> = HashSet::new();
-    let mut relationships: Vec<QueryRelationship> = Vec::new();
-    let mut seen_rels: HashSet<u32> = HashSet::new();
-
-    let mut data: Vec<Vec<serde_json::Value>> = vec![Vec::with_capacity(kept); columns.len()];
-    let mut bytes = 0usize;
-    let mut returned = 0usize;
+    let mut table = QueryTable {
+        stamp,
+        protocol_version: PROTOCOL_VERSION,
+        cells: vec![Vec::with_capacity(kept); columns.len()],
+        data: vec![Vec::with_capacity(kept); columns.len()],
+        columns,
+        bound: BoundInfo::new(0, total),
+        elapsed_ms: 0,
+        node_ids: Vec::new(),
+        relationships: Vec::new(),
+        row_references: Vec::new(),
+        graph_references_truncated: false,
+        explain: false,
+        warnings: Vec::new(),
+        profile: None,
+    };
+    let mut seen_nodes = HashSet::new();
+    let mut seen_relations = HashSet::new();
+    let mut bytes = bound.max_bytes.min(512 * 1024) / 8;
     for row in rows.into_iter().take(kept) {
-        let row_bytes: usize = row.iter().map(estimate_bytes).sum();
-        // One row always crosses the wire, however large: answering a
-        // legitimate query with an empty table and no way to make progress is
-        // worse than answering it with one row and `truncated`.
-        if returned > 0 && bytes + row_bytes > bound.max_bytes {
+        let raw = RawReferences::row(&row);
+        let references = raw.scoped(table.stamp.as_ref().map(|stamp| stamp.generation.as_str()));
+        let (cells, typed): (Vec<_>, Vec<_>) = row.iter().map(crate::query_cells::preview).unzip();
+        let row_bytes = serde_json::to_vec(&(&cells, &typed, &references, &raw.relationships))
+            .expect("query cells serialize")
+            .len()
+            + raw.nodes.len() * 12;
+        if row_bytes > bound.max_bytes.saturating_sub(bytes) {
             break;
         }
         bytes += row_bytes;
-        for (index, cell) in row.iter().enumerate() {
-            collect_graph_refs(
-                cell,
-                &mut node_ids,
-                &mut seen_nodes,
-                &mut relationships,
-                &mut seen_rels,
-            );
-            if let Some(column) = data.get_mut(index) {
-                column.push(value_to_json(cell));
-            }
-        }
-        returned += 1;
-    }
-
-    QueryTable {
-        protocol_version: PROTOCOL_VERSION,
-        columns,
-        data,
-        bound: BoundInfo::new(returned, total),
-        elapsed_ms: 0,
-        node_ids,
-        relationships,
-        explain: false,
-        warnings: Vec::new(),
-        // G6 sends `PROFILE` and fills this; nothing on this path asks for it.
-        profile: None,
-    }
-}
-
-/// Rough serialized size of one cell, for the byte half of the bound.
-fn estimate_bytes(value: &Value) -> usize {
-    match value {
-        Value::String(s) => s.len() + 3,
-        Value::Node(node) => {
-            64 + node.labels.iter().map(|l| l.len() + 4).sum::<usize>() + 48 * node.properties.len()
-        }
-        Value::Relationship(rel) => 96 + rel.rel_type.len(),
-        Value::Path(path) => 64 * (path.nodes.len() + path.rels.len()),
-        Value::List(items) => 2 + items.iter().map(estimate_bytes).sum::<usize>(),
-        Value::Map(map) => {
-            2 + map
-                .iter()
-                .map(|(k, v)| k.len() + estimate_bytes(v) + 4)
-                .sum::<usize>()
-        }
-        _ => 24,
-    }
-}
-
-/// Pull node and relationship identities out of a result cell.
-///
-/// Recursive because a `RETURN collect(n)` or a path buries them one and two
-/// levels down, and "show in graph" going blank for the aggregate form of the
-/// same query would read as a bug in the query.
-fn collect_graph_refs(
-    value: &Value,
-    node_ids: &mut Vec<u32>,
-    seen_nodes: &mut HashSet<u32>,
-    relationships: &mut Vec<QueryRelationship>,
-    seen_rels: &mut HashSet<u32>,
-) {
-    match value {
-        Value::Node(node) => {
-            if seen_nodes.insert(node.id) {
-                node_ids.push(node.id);
-            }
-        }
-        Value::Relationship(rel) => {
-            for endpoint in [rel.start_id, rel.end_id] {
-                if seen_nodes.insert(endpoint) {
-                    node_ids.push(endpoint);
+        table.graph_references_truncated |= raw.incomplete;
+        for id in raw.nodes {
+            if seen_nodes.insert(id) {
+                if table.node_ids.len() > MAX_LOADED_NODES {
+                    table.graph_references_truncated = true;
+                    break;
                 }
-            }
-            if seen_rels.insert(rel.id) {
-                relationships.push(QueryRelationship {
-                    edge_id: rel.id,
-                    source_id: rel.start_id,
-                    target_id: rel.end_id,
-                    name: rel.rel_type.clone(),
-                });
+                table.node_ids.push(id);
             }
         }
-        Value::Path(path) => {
-            for node in &path.nodes {
-                if seen_nodes.insert(node.id) {
-                    node_ids.push(node.id);
+        for relationship in raw.relationships {
+            if seen_relations.insert(relationship.edge_id) {
+                if table.relationships.len() > MAX_LOADED_EDGES {
+                    table.graph_references_truncated = true;
+                    break;
                 }
-            }
-            for rel in &path.rels {
-                if seen_rels.insert(rel.id) {
-                    relationships.push(QueryRelationship {
-                        edge_id: rel.id,
-                        source_id: rel.start_id,
-                        target_id: rel.end_id,
-                        name: rel.rel_type.clone(),
-                    });
-                }
+                table.relationships.push(relationship);
             }
         }
-        Value::List(items) => {
-            for item in items {
-                collect_graph_refs(item, node_ids, seen_nodes, relationships, seen_rels);
-            }
+        for (column, cell) in table.data.iter_mut().zip(cells) {
+            column.push(cell);
         }
-        Value::Map(map) => {
-            for (_, item) in map.iter() {
-                collect_graph_refs(item, node_ids, seen_nodes, relationships, seen_rels);
-            }
+        for (column, cell) in table.cells.iter_mut().zip(typed) {
+            column.push(cell);
         }
-        _ => {}
+        table.row_references.push(references);
     }
+    table.bound = BoundInfo::new(table.row_references.len(), total);
+    table
 }
 
 /// One search hit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct SearchHit {
+    pub handle: Option<NodeHandle>,
     pub node_id: u32,
     pub node_type: String,
     /// The matched value, as displayed.
     pub label: String,
+    pub label_truncated: bool,
     /// The slot this node already occupies, if it is on screen. `null` means
     /// the hit exists but is not loaded — the "load into view" case, and the
     /// reason the two are one response rather than two endpoints.
@@ -599,6 +584,7 @@ pub struct SearchHit {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct SearchResponse {
+    pub stamp: Option<RevisionStamp>,
     pub protocol_version: u32,
     pub query: String,
     /// The property actually searched — echoed because it defaults, and a
@@ -625,6 +611,9 @@ pub fn search(
     request: &SearchRequest,
     config: QueryConfig,
 ) -> Result<SearchResponse, CoreError> {
+    if request.query.len() > 4096 {
+        return Err(CoreError::Request("search text exceeds 4096 bytes".into()));
+    }
     let property = request
         .property
         .clone()
@@ -683,17 +672,25 @@ pub fn search(
         let Some(Value::Node(node)) = row.first() else {
             continue;
         };
-        let matched = row.get(1).map(value_to_display).unwrap_or_default();
+        if node.labels.first().is_some_and(|label| label.len() > 256) {
+            return Err(CoreError::Request(
+                "search hit type exceeds 256 byte bound".into(),
+            ));
+        }
+        let (matched, label_truncated) = search_label(row.get(1));
         hits.push(SearchHit {
+            handle: None,
             node_id: node.id,
             node_type: node.labels.first().cloned().unwrap_or_default(),
             label: matched,
+            label_truncated,
             slot: None,
         });
     }
 
     let returned = hits.len();
     Ok(SearchResponse {
+        stamp: None,
         protocol_version: PROTOCOL_VERSION,
         query: request.query.clone(),
         property,
@@ -709,6 +706,25 @@ pub fn search(
     })
 }
 
+fn search_label(value: Option<&Value>) -> (String, bool) {
+    let text = match value {
+        Some(Value::String(text)) => return clipped_label(text),
+        Some(value) => match crate::records::cell(value) {
+            crate::records::RecordCell::Value { .. } => value_to_display(value),
+            crate::records::RecordCell::Null => String::new(),
+            crate::records::RecordCell::Truncated { preview, .. } => return (preview, true),
+            _ => return ("value unavailable".into(), true),
+        },
+        None => String::new(),
+    };
+    clipped_label(&text)
+}
+fn clipped_label(text: &str) -> (String, bool) {
+    let label: String = text.chars().take(256).collect();
+    let truncated = label.len() < text.len();
+    (label, truncated)
+}
+
 /// Refuse anything that is not a bare identifier.
 ///
 /// The only place in this crate where caller text reaches a query as *syntax*
@@ -718,6 +734,7 @@ pub fn search(
 /// injection point. A backtick-quoted identifier would still admit a backtick.
 fn validate_identifier(name: &str, what: &str) -> Result<(), CoreError> {
     let ok = !name.is_empty()
+        && name.len() <= 256
         && name
             .chars()
             .next()
@@ -852,15 +869,15 @@ mod tests {
             rows,
             Bound {
                 max_items: 1000,
-                max_bytes: 500,
+                max_bytes: 1000,
             },
             None,
         );
         assert!(
             table.bound.truncated,
-            "10 rows of 200 bytes against a 500-byte ceiling"
+            "10 rows of 200 bytes plus typed cells against a 1000-byte ceiling"
         );
-        assert!(table.bound.returned >= 1, "one row always crosses the wire");
+        assert!(table.bound.returned >= 1, "a fitting row crosses the wire");
         assert!(table.bound.returned < 10);
         assert_eq!(table.bound.total, 10);
     }

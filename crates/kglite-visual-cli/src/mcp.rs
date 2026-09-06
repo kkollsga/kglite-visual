@@ -299,6 +299,25 @@ struct RecordsArgs {
     limit: Option<u32>,
 }
 
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum FieldPathArg {
+    Index { index: u32 },
+    Key { key: String },
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+struct FieldDetailArgs {
+    handle: HandleArg,
+    field: String,
+    #[serde(default)]
+    path: Vec<FieldPathArg>,
+    #[serde(default)]
+    offset: u32,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
 struct BrowseTypeArgs {
     #[serde(default)]
@@ -311,6 +330,22 @@ struct BrowseTypeArgs {
 struct LoadNodesArgs {
     #[serde(default)]
     handles: Vec<HandleArg>,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+struct RelationArg {
+    generation: String,
+    edge_id: u32,
+    source: HandleArg,
+    target: HandleArg,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+struct LoadEntitiesArgs {
+    #[serde(default)]
+    nodes: Vec<HandleArg>,
+    #[serde(default)]
+    relationships: Vec<RelationArg>,
 }
 
 /// Which way an expansion walks. A local mirror of core's
@@ -685,6 +720,41 @@ impl ViewControl {
     }
 
     #[tool(
+        description = "Read a bounded source field or nested value by node handle. Text pages use UTF-8 byte offsets; list/map pages use item offsets. The response preserves typed cells and explicit null, missing and unavailable states. At most 256 KiB per answer, 32 KiB text per page, 128 collection items and path depth 8. This is a private read and changes no shared state."
+    )]
+    async fn field_detail(
+        &self,
+        Parameters(args): Parameters<FieldDetailArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        use kglite_visual_core::field_detail::{FieldDetailRequest, FieldPathSegment};
+        let path = args
+            .path
+            .into_iter()
+            .map(|segment| match segment {
+                FieldPathArg::Index { index } => FieldPathSegment::Index { index },
+                FieldPathArg::Key { key } => FieldPathSegment::Key { key },
+            })
+            .collect();
+        match self
+            .run(Request::FieldDetail(FieldDetailRequest {
+                handle: args.handle.into(),
+                field: args.field,
+                path,
+                offset: args.offset,
+                limit: args.limit,
+            }))
+            .await?
+        {
+            Ok(Response::FieldDetail(detail)) => ok_json(&serde_json::json!(detail)),
+            Ok(_) => Err(McpError::internal_error(
+                "field detail returned an unexpected response",
+                None,
+            )),
+            Err(error) => Ok(refused(&error)),
+        }
+    }
+
+    #[tool(
         description = "Load a bounded set of source nodes of one type into the shared view, \
                        including disconnected nodes. Does not require choosing a relationship. \
                        Returns exact session handles for record inspection and loading; reports \
@@ -719,6 +789,34 @@ impl ViewControl {
         self.mutate(
             Request::LoadNodes(LoadNodesRequest {
                 handles: args.handles.into_iter().map(Into::into).collect(),
+            }),
+            options,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Load exact source node and relationship references returned by a query row. Relationships retain their source edge IDs, including parallel relations and self-loops; scalar values are never interpreted as identities. Stale handles or mismatched edge endpoints refuse without changing the view. This shared mutation accepts expected revision stamps and broadcasts one bounded update."
+    )]
+    async fn load_entities(
+        &self,
+        Parameters(shared): Parameters<SharedArgs<LoadEntitiesArgs>>,
+    ) -> Result<CallToolResult, McpError> {
+        use kglite_visual_core::query_provenance::{LoadEntitiesRequest, RelationHandle};
+        let SharedArgs { args, options } = shared;
+        self.mutate(
+            Request::LoadEntities(LoadEntitiesRequest {
+                nodes: args.nodes.into_iter().map(Into::into).collect(),
+                relationships: args
+                    .relationships
+                    .into_iter()
+                    .map(|relation| RelationHandle {
+                        generation: relation.generation,
+                        edge_id: relation.edge_id,
+                        source: relation.source.into(),
+                        target: relation.target.into(),
+                    })
+                    .collect(),
             }),
             options,
         )
@@ -1423,14 +1521,16 @@ mod tests {
     use kglite_visual_core::{GEOMETRY_CAVEAT, GEOMETRY_STATIC_CAVEAT};
 
     /// Names are the API: a count alone cannot detect a rename.
-    const EXPECTED: [&str; 18] = [
+    const EXPECTED: [&str; 20] = [
         "browse_type",
         "collapse",
         "expand",
         "export_view",
+        "field_detail",
         "focus",
         "highlight",
         "list_saved_queries",
+        "load_entities",
         "load_nodes",
         "records",
         "render",

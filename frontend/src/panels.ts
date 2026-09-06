@@ -15,6 +15,10 @@
  */
 
 import { statLabel } from './appearance'
+import { compareCells, recordCell } from './cells'
+import { handleKey } from './data'
+import type { NodeHandle } from './generated/NodeHandle'
+import type { QueryRowReferences } from './generated/QueryRowReferences'
 import type { PanelHosts } from './workspace'
 import type { Diagnostic } from './generated/Diagnostic'
 import type { QueryEditor, SchemaSource } from './editor/contract'
@@ -40,8 +44,10 @@ export type PanelHandlers = {
   collapse(slot: number): void
   browseType(nodeType: string, limit: number | null): void
   search(query: string, nodeType: string | null): void
-  loadHits(nodeIds: number[], nodeType: string | null): void
-  focusSlot(slot: number): void
+  loadHits(handles: NodeHandle[]): void
+  focusHandle(handle: NodeHandle): void
+  selectHandles(handles: NodeHandle[]): void
+  showEntities(references: QueryRowReferences): void
   setColorBy(property: string | null): void
   setSizeBy(property: string | null): void
   /**
@@ -54,23 +60,13 @@ export type PanelHandlers = {
    * layout back to the viewer's GPU (plan E5).
    */
   setLayoutKernel(kernel: LayoutKernel): void
-  /**
-   * Hide everything on screen that does not match (plan E7). Client-only —
-   * a term that would need a fetch is refused, not fetched.
-   */
-  setFilter(query: string): void
   /** Keep this query under this name. The store's ceilings answer as refusals. */
   saveQuery(name: string, query: string): void
   /** Forget a saved query. */
   deleteQuery(name: string): void
   /** Ask the server what is wrong with this query, without running it. */
   validateQuery(query: string): Promise<Diagnostic[]>
-  /**
-   * Show this type's on-screen nodes as a table of their properties (plan E9).
-   *
-   * The panel asks; the app generates the Cypher, puts it in the editor where
-   * the user can read and edit it, and runs it down the ordinary bounded path.
-   */
+  /** Show loaded records of this type through generation-scoped handles. */
   showTypeTable(nodeType: string): void
 }
 
@@ -129,17 +125,6 @@ const GEO_CHOICE: readonly [LayoutKernel, string] = ['geo', 'map — where they 
  */
 const GEO_HINT = 'positions only — render for the map picture'
 
-/**
- * What the filter box is for, said where the two boxes sit together.
- *
- * One constant because it is written twice — once at construction and once
- * when a filter is cleared — and two copies of the sentence that keeps Search
- * and Filter apart is one copy that stops saying it.
- */
-const FILTER_HINT =
-  'hides what is already loaded — nothing is fetched. Try "type:Wellbore", or a property ' +
-  'you are colouring or sizing by. Use Search source in Explore to bring nodes in.'
-
 export class Panels {
   readonly root: HTMLDivElement
   private readonly queryInput: HTMLTextAreaElement
@@ -162,8 +147,6 @@ export class Panels {
   private readonly searchInput: HTMLInputElement
   private readonly searchType: HTMLSelectElement
   private readonly searchResults: HTMLDivElement
-  private readonly filterInput: HTMLInputElement
-  private readonly filterNote: HTMLDivElement
   private readonly colorBy: HTMLSelectElement
   private readonly sizeBy: HTMLSelectElement
   private readonly captionBy: HTMLSelectElement
@@ -191,6 +174,10 @@ export class Panels {
    * whole by the next one.
    */
   private lastTable: QueryTable | null = null
+  private queryPage = 0
+  private queryPageSize = 100
+  private selectedRecords = new Map<string, NodeHandle>()
+  private selectedRecordsKey = ''
   /** The column the grid is sorted by, or null for the engine's own order. */
   private sortBy: { column: number; descending: boolean } | null = null
 
@@ -239,32 +226,6 @@ export class Panels {
     this.searchResults = element('div', 'kglv-results')
     searchBox.append(searchRow, this.searchResults)
     this.root.appendChild(this.section('Search source', searchBox))
-
-    // ── filter ────────────────────────────────────────────────────────────
-    // Its own card, directly under Search, and the hint under the box exists
-    // to keep them apart: they are the two boxes you type a name into, and one
-    // brings nodes IN while the other takes them off the screen. A user who
-    // confuses them either loses their view or wonders why nothing arrived.
-    const filterBox = element('div', 'kglv-card')
-    const filterRow = element('div', 'kglv-row')
-    this.filterInput = element('input', 'kglv-input')
-    this.filterInput.placeholder = 'hide all but…'
-    this.filterInput.setAttribute('data-testid', 'filter-input')
-    this.filterInput.addEventListener('input', () =>
-      this.handlers.setFilter(this.filterInput.value),
-    )
-    const clear = element('button', 'kglv-button kglv-button-small', 'clear')
-    clear.setAttribute('data-testid', 'filter-clear')
-    clear.addEventListener('click', () => {
-      this.filterInput.value = ''
-      this.handlers.setFilter('')
-    })
-    filterRow.append(this.filterInput, clear)
-    this.filterNote = element('div', 'kglv-hint')
-    this.filterNote.setAttribute('data-testid', 'filter-note')
-    this.filterNote.textContent = FILTER_HINT
-    filterBox.append(filterRow, this.filterNote)
-    // Shared Filters owns the drawer; this compatibility field is not mounted.
 
     // ── appearance ────────────────────────────────────────────────────────
     const appearance = element('div', 'kglv-card')
@@ -432,7 +393,7 @@ export class Panels {
     )
     this.hosts.query.appendChild(this.section('Cypher', query))
     this.hosts.data.appendChild(results)
-    this.queryStatus.textContent = 'No query result yet. Run a query, or inspect a loaded type as a table.'
+    this.queryStatus.textContent = 'No source query result yet. Run a query in Query; loaded properties are in Records.'
 
     void this.upgradeEditor()
   }
@@ -584,7 +545,7 @@ export class Panels {
    * Offer the table exactly while there is something to put in it.
    *
    * A type with no instances loaded has no rows — the query would be
-   * `id(n) IN []` — so the action is hidden rather than left to produce an
+   * an empty record handle set — so the action is hidden rather than left to produce an
    * empty grid the user would read as "this type has no properties".
    */
   private refreshTableAction(): void {
@@ -650,32 +611,6 @@ export class Panels {
       row.addEventListener('click', () => this.setQueryText(entry.query))
       this.historyList.appendChild(row)
     }
-  }
-
-  /**
-   * What the filter is doing, in the truncation banner's voice.
-   *
-   * `refused` is the honest half: a term naming a property this client has not
-   * loaded cannot be answered without a fetch, and a filter that quietly
-   * dropped the term would be filtering on less than the user typed while
-   * looking like it worked.
-   */
-  showFilterState(line: string | null, refused: string[]): void {
-    if (refused.length > 0) {
-      this.filterNote.className = 'kglv-hint kglv-error'
-      this.filterNote.textContent =
-        `nothing loaded carries ${refused.map((key) => `"${key}"`).join(', ')} — this box only ` +
-        'reads values already on screen. Colour or size by it first, or use Search source in Explore to ' +
-        'ask the server for it.'
-      return
-    }
-    if (line === null) {
-      this.filterNote.className = 'kglv-hint'
-      this.filterNote.textContent = FILTER_HINT
-      return
-    }
-    this.filterNote.className = 'kglv-hint kglv-warn'
-    this.filterNote.textContent = line
   }
 
   /** A store refusal, in the store's own words. */
@@ -938,104 +873,102 @@ export class Panels {
     this.queryStatus.textContent = `${bound} in ${count(table.elapsed_ms)} ms`
 
     this.lastTable = table
+    this.queryPage = 0
     this.sortBy = null
     this.drawGrid()
     return rows
   }
 
-  /**
-   * Draw the results grid, in whatever order {@link sortBy} says.
-   *
-   * Redrawn rather than re-fetched: sorting is a way of reading rows that have
-   * already arrived, and asking the server for an `ORDER BY` would turn a
-   * column click into a round trip that re-runs the query — against a graph
-   * that may have moved, under a bound that may cut a different subset. The
-   * rows on screen stay the rows the status line above them describes.
-   */
+  /** The bounded query result retains its own sort and page, independent of Records. */
   private drawGrid(): void {
     const table = this.lastTable
     if (table === null) return
     const rows = table.data[0]?.length ?? 0
     const order = this.rowOrder(table, rows)
-
-    const grid = element('table', 'kglv-table')
-    grid.setAttribute('data-testid', 'query-table')
+    const first = this.queryPage * this.queryPageSize
+    const linked = table.row_references.some(row => row.nodes.length > 0 || row.relationships.length > 0)
+    const grid = element('table', 'kglv-table'); grid.dataset['testid'] = 'query-table'
     const head = element('tr')
     table.columns.forEach((column, index) => {
-      const cell = element('th')
+      const cell = element('th'); const active = this.sortBy?.column === index
+      cell.setAttribute('aria-sort', active ? this.sortBy?.descending ? 'descending' : 'ascending' : 'none')
       const button = element('button', 'kglv-th-sort')
-      button.setAttribute('data-testid', `sort-${column}`)
-      const active = this.sortBy?.column === index
+      button.dataset['testid'] = `sort-${column}`
       button.textContent = active ? `${column} ${this.sortBy?.descending ? '▾' : '▴'}` : column
-      button.addEventListener('click', () => {
-        // First click on a new column sorts ascending; clicking the active one
-        // flips it. Never a third state that clears the sort — a user who
-        // wanted the original order clicked a column by mistake, and re-running
-        // the query is a worse answer than one more click.
-        this.sortBy =
-          active && this.sortBy !== null
-            ? { column: index, descending: !this.sortBy.descending }
-            : { column: index, descending: false }
-        this.drawGrid()
-      })
-      cell.appendChild(button)
-      head.appendChild(cell)
-    })
-    grid.appendChild(head)
-
-    for (const row of order) {
-      const tr = element('tr')
-      for (let column = 0; column < table.columns.length; column += 1) {
-        const cell = element('td')
-        cell.appendChild(cellValue(table.data[column]?.[row]))
-        tr.appendChild(cell)
+      button.onclick = () => {
+        this.sortBy = active && this.sortBy !== null ? {column: index, descending: !this.sortBy.descending} : {column: index, descending: false}
+        this.queryPage = 0; this.drawGrid()
       }
-      grid.appendChild(tr)
-    }
-    this.queryResults.replaceChildren(grid)
+      cell.append(button); head.append(cell)
+    })
+    if (linked) head.append(element('th', undefined, 'Graph entities'))
+    grid.append(head, ...order.slice(first, first + this.queryPageSize).map(row => this.queryRow(table, row, linked)))
+    const pager = this.queryPager(rows, first)
+    const notice = element('div', 'kglv-hint', table.graph_references_truncated ? 'Graph references are partial; actions use only the available entity references.' : '')
+    this.queryResults.replaceChildren(notice, grid, pager)
   }
-
-  /**
-   * Row indices in display order.
-   *
-   * **Stable, and typed per column.** Stable because two rows the sort cannot
-   * separate must keep the order the engine returned — an unstable sort makes a
-   * table shuffle under a second click on the same header, which reads as data
-   * changing. Typed because `10` and `9` compare one way as numbers and the
-   * other as strings, and a column of counts sorted lexically is a column
-   * sorted wrong; the type is read off the values rather than off the column
-   * name, since a `RETURN` can name anything. A column that mixes numbers and
-   * text is sorted as text, which is the only comparison both halves answer to.
-   *
-   * Empty cells sort last in both directions. They are not a value, so ranking
-   * them as one would put a block of blanks at the top of a descending sort.
-   */
+  private queryRow(table: QueryTable, row: number, linked: boolean): HTMLTableRowElement {
+    const tr = element('tr')
+    for (let column = 0; column < table.columns.length; column += 1) {
+      const cell = element('td')
+      cell.append(recordCell(table.cells[column]?.[row] ?? {state: 'unavailable', reason: 'typed query value not returned'}))
+      tr.append(cell)
+    }
+    if (linked) {
+      const cell = element('td'); const refs = table.row_references[row]
+      if (refs !== undefined && (refs.nodes.length > 0 || refs.relationships.length > 0)) {
+        if (refs.nodes.length > 0) cell.append(this.querySelection(refs.nodes))
+        const show = element('button', 'kglv-button kglv-button-small', refs.truncated ? 'Show available entities' : 'Show in Explore')
+        show.dataset['testid'] = 'query-show-graph'; show.onclick = () => this.handlers.showEntities(refs)
+        cell.append(show)
+        if (refs.truncated) cell.append(' · partial references')
+      } else cell.textContent = 'Scalar values · no graph reference'
+      tr.append(cell)
+    }
+    return tr
+  }
+  private querySelection(handles: NodeHandle[]): HTMLInputElement {
+    const checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', 'Select row nodes')
+    checkbox.dataset['queryHandles'] = JSON.stringify(handles.map(handleKey))
+    checkbox.checked = handles.every(handle => this.selectedRecords.has(handleKey(handle)))
+    checkbox.onchange = () => {
+      for (const handle of handles) {
+        if (checkbox.checked) this.selectedRecords.set(handleKey(handle), handle)
+        else this.selectedRecords.delete(handleKey(handle))
+      }
+      this.handlers.selectHandles([...this.selectedRecords.values()])
+    }
+    return checkbox
+  }
+  setRecordSelection(handles: NodeHandle[]): void {
+    const key = handles.map(handleKey).join(',')
+    if (key === this.selectedRecordsKey) return
+    this.selectedRecordsKey = key
+    this.selectedRecords = new Map(handles.map(handle => [handleKey(handle), handle]))
+    for (const checkbox of this.queryResults.querySelectorAll<HTMLInputElement>('input[data-query-handles]')) {
+      const keys = JSON.parse(checkbox.dataset['queryHandles'] ?? '[]') as string[]
+      checkbox.checked = keys.length > 0 && keys.every(key => this.selectedRecords.has(key))
+    }
+  }
+  private queryPager(rows: number, first: number): HTMLElement {
+    const pager = element('div', 'kglv-data-actions')
+    const previous = element('button', 'kglv-button', 'Previous'); previous.dataset['testid'] = 'query-previous'
+    previous.disabled = this.queryPage === 0; previous.onclick = () => { this.queryPage -= 1; this.drawGrid() }
+    const next = element('button', 'kglv-button', 'Next'); next.dataset['testid'] = 'query-next'
+    next.disabled = first + this.queryPageSize >= rows; next.onclick = () => { this.queryPage += 1; this.drawGrid() }
+    const count = element('span', undefined, `${rows === 0 ? 0 : first + 1}–${Math.min(first + this.queryPageSize, rows)} of ${rows}`)
+    count.dataset['testid'] = 'query-page'
+    const size = element('select', 'kglv-select'); size.dataset['testid'] = 'query-page-size'; size.setAttribute('aria-label', 'Query rows per page')
+    for (const value of [100, 250, 500]) size.append(new Option(`${value} per page`, String(value)))
+    size.value = String(this.queryPageSize); size.onchange = () => { this.queryPageSize = Number(size.value); this.queryPage = 0; this.drawGrid() }
+    pager.append(previous, count, next, size)
+    return pager
+  }
   private rowOrder(table: QueryTable, rows: number): number[] {
-    const order = [...Array(rows).keys()]
+    const order = Array.from({length: rows}, (_, index) => index)
     const sort = this.sortBy
     if (sort === null) return order
-    const values = table.data[sort.column] ?? []
-    const numeric = values.every((value) => value === null || typeof value === 'number')
-    const sign = sort.descending ? -1 : 1
-    return order.sort((a, b) => {
-      const left = values[a]
-      const right = values[b]
-      const leftEmpty = left === null || left === undefined
-      const rightEmpty = right === null || right === undefined
-      if (leftEmpty || rightEmpty) {
-        // Not multiplied by `sign`: blanks are last whichever way the column is
-        // pointing.
-        if (leftEmpty && rightEmpty) return a - b
-        return leftEmpty ? 1 : -1
-      }
-      const compared = numeric
-        ? (left as number) - (right as number)
-        : formatCell(left).localeCompare(formatCell(right))
-      // The index tiebreak is what makes this stable across engines: Array
-      // .prototype.sort is specified stable, but a comparator that returns 0
-      // for two rows still lets a *different* column's later sort reorder them.
-      return compared === 0 ? a - b : compared * sign
-    })
+    return order.sort((a, b) => compareCells(table.cells[sort.column]?.[a] ?? {state: 'missing'}, table.cells[sort.column]?.[b] ?? {state: 'missing'}, sort.descending) || a - b)
   }
 
   /**
@@ -1104,7 +1037,7 @@ export class Panels {
       : `${count(response.bound.returned)} hit${response.bound.returned === 1 ? '' : 's'} on ${response.property}`
     this.searchResults.appendChild(status)
 
-    const cold = response.hits.filter((hit) => hit.slot === null)
+    const cold = response.hits.filter((hit) => hit.slot === null && hit.handle !== null)
     if (cold.length > 0) {
       const load = element(
         'button',
@@ -1114,8 +1047,7 @@ export class Panels {
       load.setAttribute('data-testid', 'search-load')
       load.addEventListener('click', () =>
         this.handlers.loadHits(
-          cold.map((hit) => hit.node_id),
-          response.node_type,
+          cold.flatMap(hit => hit.handle === null ? [] : [hit.handle]),
         ),
       )
       this.searchResults.appendChild(load)
@@ -1126,9 +1058,9 @@ export class Panels {
     for (const hit of response.hits) {
       const row = element('button', 'kglv-hit')
       row.textContent = `${hit.label} · ${hit.node_type}${hit.slot === null ? ' (not loaded)' : ''}`
-      if (hit.slot !== null) {
-        const slot = hit.slot
-        row.addEventListener('click', () => this.handlers.focusSlot(slot))
+      if (hit.handle !== null) {
+        const handle = hit.handle
+        row.addEventListener('click', () => this.handlers.focusHandle(handle))
       } else {
         row.disabled = true
       }
@@ -1136,6 +1068,11 @@ export class Panels {
     }
     this.searchResults.appendChild(list)
     return response.hits.length
+  }
+
+  refreshSearch(resolve: (handle: NodeHandle) => number | null): void {
+    if (this.lastHits === null) return
+    this.showSearch({...this.lastHits, hits: this.lastHits.hits.map(hit => ({...hit, slot: hit.handle === null ? null : resolve(hit.handle)}))})
   }
 
   /** Slots the last search found that are already on screen. */

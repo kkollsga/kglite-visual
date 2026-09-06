@@ -190,8 +190,10 @@ fn router(state: AppState) -> Router {
         // be re-run by any cache or prefetcher in the path.
         .route("/api/cypher", post(api::cypher))
         .route("/api/records", post(api::records))
+        .route("/api/field-detail", post(api::field_detail))
         .route("/api/browse-type", post(api::browse_type))
         .route("/api/load-nodes", post(api::load_nodes))
+        .route("/api/load-entities", post(api::load_entities))
         .route("/api/search", post(api::search))
         .route("/api/preview", post(api::preview))
         .route("/api/expand", post(api::expand))
@@ -209,9 +211,7 @@ fn router(state: AppState) -> Router {
         .route("/api/queries/save", post(api::save_query))
         .route("/api/queries/delete", post(api::delete_query))
         .route("/api/queries/history", post(api::record_query))
-        // The three steering commands (D14). They mutate nothing and answer
-        // with the size of the audience that heard them, so a caller learns
-        // whether anybody is actually watching.
+        // Shared steering changes use the same ordered publication path.
         .route("/api/reset", post(api::reset))
         .route("/api/focus", post(api::focus))
         .route("/api/highlight", post(api::highlight))

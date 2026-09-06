@@ -85,6 +85,7 @@ pub struct SharedSnapshot {
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct SharedWireMeta {
+    pub compacted: bool,
     pub snapshot: SharedSnapshotMeta,
     pub request_id: Option<String>,
     pub focus: Option<Focus>,
@@ -174,6 +175,7 @@ pub struct CommittedEvent {
 impl CommittedEvent {
     pub fn wire_meta(&self) -> SharedWireMeta {
         SharedWireMeta {
+            compacted: matches!(&self.response,Response::Slice(slice) if slice.compaction.is_some()),
             snapshot: self.snapshot.meta.clone(),
             request_id: self.request_id.clone(),
             focus: self.focus.clone(),
@@ -217,6 +219,7 @@ impl Session {
             response
         };
         let wire = SharedWireMeta {
+            compacted: matches!(&response,Response::Slice(slice) if slice.compaction.is_some()),
             snapshot: snapshot.meta.clone(),
             request_id: request.request_id.clone(),
             focus: focus.clone(),

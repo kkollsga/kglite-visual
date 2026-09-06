@@ -5,10 +5,12 @@ export type GraphScope = 'schema' | 'instances'
 type Drawer = 'filters' | 'appearance'
 
 export type WorkspaceHandlers = {
+  destinationChanged?(destination: Destination): void
   setScope(scope: GraphScope, schemaContext: boolean): void
   fitVisible(): void
   zoom(factor: number): void
   focusSelection(): void
+  showSelectionRows(): void
   clearSelection(): void
   inspectType(slot: number): void
 }
@@ -83,6 +85,7 @@ export class Workspace {
   private readonly inspectButton = button('Inspect', 'inspector-open', () => this.openInspector(true))
   private readonly inspectorClose = button('Close', 'inspector-close', () => this.closeInspector())
   private readonly focusButton = button('Focus selection', 'focus-selection', () => this.handlers.focusSelection())
+  private readonly rowsButton = button('Show rows', 'show-selection-rows', () => this.handlers.showSelectionRows())
   private readonly clearButton = button('Clear selection', 'clear-selection', () => this.handlers.clearSelection())
   private readonly typePicker = element('select', 'kglv-select kglv-type-picker')
   private readonly drawerClose = button('×', 'drawer-close', () => this.closeDrawer())
@@ -147,7 +150,7 @@ export class Workspace {
     this.graphHost.appendChild(this.canvasHost)
     this.explore.append(this.graphHost, this.inspector)
     body.append(this.explore, this.data, this.query, this.drawer)
-    this.buildDestination(this.data, 'data', 'Data', 'Query results · source scope')
+    this.buildDestination(this.data, 'data', 'Data', 'Loaded records and source query results')
     this.buildDestination(this.query, 'query', 'Query', 'Read the source graph with bounded Cypher')
 
   }
@@ -160,6 +163,7 @@ export class Workspace {
       button('−', 'zoom-out', () => this.handlers.zoom(1 / 1.25)),
       button('+', 'zoom-in', () => this.handlers.zoom(1.25)),
       this.focusButton,
+      this.rowsButton,
       this.layoutHost,
     )
     controls.querySelector('[data-testid="zoom-out"]')?.setAttribute('aria-label', 'Zoom out')
@@ -288,6 +292,7 @@ export class Workspace {
     if (previous !== destination && !this.root.querySelector('[role="tab"]:focus')) {
       this.tabs.get(destination)?.focus()
     }
+    this.handlers.destinationChanged?.(destination)
   }
 
   setScope(scope: GraphScope): void {
@@ -342,9 +347,15 @@ export class Workspace {
       item.append(document.createTextNode(`${name} `), number)
       this.counts.appendChild(item)
     }
+    if (counts.hiddenSelected > 0) {
+      const hidden = element('span', '', `${counts.hiddenSelected} selected hidden or unloaded`)
+      hidden.dataset['testid'] = 'selection-hidden'
+      this.counts.append(hidden)
+    }
     this.counts.title = `Instance counts; ${counts.types} schema types are counted separately` +
       (counts.hiddenSelected > 0 ? `; ${counts.hiddenSelected} selected instances are hidden` : '')
     this.focusButton.disabled = !counts.canFocus
+    this.rowsButton.disabled = counts.selected === 0
     this.clearButton.disabled = !counts.hasSelection
     this.empty.hidden = this.scope !== 'instances' || counts.loaded > 0 || this.schemaContext.checked
   }

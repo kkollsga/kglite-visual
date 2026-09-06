@@ -52,7 +52,7 @@ test('destinations preserve renderer, selection and draft; query results reveal 
     await expect(page.getByTestId('destination-data')).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('query-table')).toBeInViewport()
     await expect(page.getByTestId('query-table').locator('tr')).toHaveCount(4)
-    await expect(page.locator('.kglv-data-destination')).toContainText('Query results · source scope')
+    await expect(page.locator('.kglv-data-destination')).toContainText('Query results · source')
     await openDestination(page, 'query')
     expect(await queryText(page)).toBe(draft)
     await openDestination(page, 'explore')

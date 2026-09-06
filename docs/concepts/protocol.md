@@ -13,11 +13,14 @@ headless renderer are three consumers of it.
 
 ## The version number
 
-Every response carries `protocol_version`. It currently reads **6**.
+Every response carries `protocol_version`. It currently reads **7**.
 
 ```json
-{"protocol_version":6,"core_version":"0.1.1","tier":"compact","slot_count":98,…}
+{"protocol_version":7,"core_version":"0.1.1","tier":"compact","slot_count":98,…}
 ```
+
+Version 7 adds paged field detail, exact query-row entity references, typed query
+cells, handle-based source search and an explicit compaction event flag.
 
 Version 6 adds one atomic shared snapshot envelope with generation/global,
 topology and subset revisions. Metadata is followed by typed point and link

@@ -76,7 +76,9 @@ use std::fmt;
 /// Older clients cannot decode Records; reject them before any view is drawn.
 /// **v6** groups a shared snapshot, acknowledged subset and steering state
 /// into one revisioned update. Clients apply it atomically after its arrays.
-pub const PROTOCOL_VERSION: u32 = 6;
+/// **v7** adds bounded field-detail paging. Query rows and search results also
+/// carry explicit source references; scalar values never imply graph identity.
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Header size in bytes (6 × `u32`).
 pub const HEADER_BYTES: usize = 24;
@@ -170,6 +172,8 @@ pub enum MessageType {
     Records = 17,
     /// UTF-8 JSON: coherent shared snapshot metadata, followed by Points/Links.
     SharedUpdate = 18,
+    /// UTF-8 JSON: bounded source field detail and collection/text paging.
+    FieldDetail = 19,
 }
 
 impl MessageType {
@@ -181,7 +185,7 @@ impl MessageType {
     /// Every variant, in wire order — the one list the TypeScript mirror and
     /// the decoder are both generated from, so a new variant cannot be added
     /// to one and forgotten in the other.
-    pub const ALL: [MessageType; 18] = [
+    pub const ALL: [MessageType; 19] = [
         MessageType::MetaGraphMeta,
         MessageType::Points,
         MessageType::Links,
@@ -200,6 +204,7 @@ impl MessageType {
         MessageType::Layout,
         MessageType::Records,
         MessageType::SharedUpdate,
+        MessageType::FieldDetail,
     ];
 
     /// The TypeScript constant name for this variant.
@@ -223,6 +228,7 @@ impl MessageType {
             MessageType::Layout => "LAYOUT",
             MessageType::Records => "RECORDS",
             MessageType::SharedUpdate => "SHARED_UPDATE",
+            MessageType::FieldDetail => "FIELD_DETAIL",
         }
     }
 
@@ -639,7 +645,8 @@ mod tests {
         assert_eq!(MessageType::Layout.code(), 16);
         assert_eq!(MessageType::Records.code(), 17);
         assert_eq!(MessageType::SharedUpdate.code(), 18);
-        assert_eq!(MessageType::ALL.len(), 18, "a new variant must join ALL");
+        assert_eq!(MessageType::FieldDetail.code(), 19);
+        assert_eq!(MessageType::ALL.len(), 19, "a new variant must join ALL");
     }
 
     #[test]

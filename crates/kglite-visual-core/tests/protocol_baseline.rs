@@ -37,6 +37,10 @@
 //! **v5 -> v6:** SharedUpdate adds an atomic snapshot/subset/steering envelope
 //! and generation-scoped revision acknowledgement. Canonical stamps are fixed.
 //!
+//! **v6 -> v7:** FieldDetail adds bounded source field paging with explicit
+//! identity. SharedUpdate also carries an actual-compaction flag; reconnect
+//! snapshots never count as compactions. Existing frame codes stay frozen.
+//!
 //! **Both are exact baselines, so both fail the moment "make it pass" is
 //! cheaper than "explain the diff"** (CLAUDE.md → "Gate honesty"). A red
 //! baseline after a deliberate protocol change is a conscious decision:
@@ -209,9 +213,14 @@ fn generate_framing_golden() {
             );
             enc.finish()
         }),
+        ("field-detail", {
+            let mut e = ResponseEncoder::new();
+            e.push_json(MessageType::FieldDetail, r#"{"handle":{"generation":"fixture-generation","node_id":7},"field":"title","path":[],"page":null}"#);
+            e.finish()
+        }),
         ("shared-update", {
             let mut enc = ResponseEncoder::new();
-            enc.push_json(MessageType::SharedUpdate, r#"{"snapshot":{"stamp":{"generation":"fixture-generation","revision":"1"}},"request_id":"fixture-request","focus":null,"mutation_kind":"query"}"#);
+            enc.push_json(MessageType::SharedUpdate, r#"{"snapshot":{"stamp":{"generation":"fixture-generation","revision":"1"}},"request_id":"fixture-request","focus":null,"mutation_kind":"query","compacted":false}"#);
             enc.push_f32(MessageType::Points, &[1.0, 2.0]);
             enc.push_f32(MessageType::Links, &[]);
             enc.finish()

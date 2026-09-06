@@ -153,3 +153,23 @@
 [data-testid=subset-active] .kglv-row { margin: 10px 0; align-items: center; }
 [data-testid=subset-active] span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 [data-testid=subset-distributions] { font-size: 12px; overflow-wrap: anywhere; }
+
+.kglv-data-lanes, .kglv-data-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0; }
+.kglv-data-lanes [aria-selected=true] { color:#e9faf4; border-color:#64c4a7; background:#173b34; }
+.kglv-field-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.kglv-field-chips button { padding:4px 8px; }
+.kglv-data-actions input { flex:1; min-width:180px; }
+.kglv-record-grid { overflow:auto; }
+.kglv-record-grid tr[aria-selected=true] { background:#173b34; }
+.kglv-record-cell { overflow-wrap:anywhere; }
+.kglv-cell-null, .kglv-cell-missing { color:#93a4b5; font-style:italic; }
+.kglv-cell-unavailable, .kglv-cell-truncated { color:#e6bd78; }
+.kglv-record-grid td { max-width:360px; }
+.kglv-field-detail { width:min(800px, calc(100vw - 32px)); max-height:90vh; background:#14202e; color:#e4edf6; border:1px solid #415269; border-radius:12px; padding:20px; }
+.kglv-field-detail::backdrop { background:#03080dc9; }
+.kglv-field-detail-content { max-height:50vh; overflow:auto; }
+.kglv-field-detail pre, .kglv-record-cell pre { white-space:pre-wrap; overflow-wrap:anywhere; margin:8px 0; }
+.kglv-field-entry { padding:8px 0; border-bottom:1px solid #263748; }
+[data-testid=exploration-trail] { margin:18px 0; font-size:12px; line-height:1.5; }
+[data-testid=exploration-trail] summary { cursor:pointer; font-weight:600; }
+[data-testid=exploration-trail] li { margin:8px 0; overflow-wrap:anywhere; }

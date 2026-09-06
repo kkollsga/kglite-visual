@@ -17,7 +17,13 @@ import './workspace.css'
 import { Workspace, type GraphScope } from './workspace'
 import { SharedState } from './shared'
 import { Filters } from './filters'
+import { DataWorkspace, handleKey } from './data'
+import { FieldDetails } from './field-detail'
+import { ExplorationTrail } from './trail'
+import type { NodeHandle } from './generated/NodeHandle'
+import type { QueryRowReferences } from './generated/QueryRowReferences'
 import type { SharedWireMeta } from './generated/SharedWireMeta'
+import type { SharedSnapshotMeta } from './generated/SharedSnapshotMeta'
 import type { ViewReference } from './generated/ViewReference'
 import type { RecordTable } from './generated/RecordTable'
 import type { RecordCell } from './generated/RecordCell'
@@ -51,7 +57,6 @@ import { InteractionState } from './interaction'
 import { filterLine } from './filter'
 import { LabelOverlay } from './labels'
 import { ExportCard } from './export'
-import { tableColumns, typeTableQuery } from './generate'
 import { PathBuilder } from './path'
 import { Legend, type LegendEntry, type LegendSection } from './legend'
 import { formatCell, Panels } from './panels'
@@ -117,9 +122,13 @@ const root = document.createElement('div')
 root.className = 'kglv-root'
 mount.appendChild(root)
 
+let dataWorkspace: DataWorkspace | null = null
+const localHandles = new Map<string, NodeHandle>()
+let remoteInspectorSlot: number | null = null
 let graphScope: GraphScope = 'schema'
 let schemaContext = false
 const workspace = new Workspace(root, {
+  destinationChanged: destination => dataWorkspace?.setPresented(destination === 'data'),
   setScope: (scope, context) => {
     graphScope = scope
     schemaContext = context
@@ -131,6 +140,7 @@ const workspace = new Workspace(root, {
     surface.graph.zoom(surface.graph.getZoomLevel() * factor, 0)
   },
   focusSelection: () => focusSelection(),
+  showSelectionRows: () => dataWorkspace?.showSelection(),
   clearSelection: () => clearSelection(),
   inspectType: (slot) => selectSlot(slot),
 })
@@ -176,6 +186,7 @@ let receivedShared = false
 let resyncing = false
 let sharedPositionHash: string | null = null
 let requestSerial = 0
+let pendingGraphFocus: string | null = null
 const privateRequests = new Map<string, string>()
 const pendingSharedRequests = new Map<string, string>()
 const filters = new Filters(workspace.panelHosts.filters, predicates => send({type: 'subset', predicates}))
@@ -230,6 +241,14 @@ const captionValues = new Map<number, string>()
  */
 const schema = new SchemaCache()
 
+const fieldDetails = new FieldDetails(root, () => shared.generation)
+dataWorkspace = new DataWorkspace(workspace.panelHosts.data, {
+  select: handles => setLocalHandles(handles),
+  showGraph: handles => showEntities({nodes: handles, relationships: [], truncated: false}),
+  inspectValue: (handle, field) => fieldDetails.open(handle, field),
+  reveal: () => workspace.navigate('data'),
+})
+
 const panels = new Panels(workspace.panelHosts.inspector, {
   runQuery: (query, asGraph) => {
     if (query.trim() === '') return
@@ -264,26 +283,13 @@ const panels = new Panels(workspace.panelHosts.inspector, {
       limit: null,
     })
   },
-  loadHits: (nodeIds, nodeType) => {
-    // Bounded by construction: the id list is whatever the search returned,
-    // and the search was itself bounded in core (D5). The query's own row
-    // bound clamps it again on the way back.
-    const label = nodeType === null ? '' : `:${nodeType}`
-    send({
-      type: 'cypher',
-      query: `MATCH (n${label}) WHERE id(n) IN $ids RETURN n`,
-      params: { ids: nodeIds },
-      limit: null,
-      as_graph: true,
-    })
-  },
-  focusSlot: (slot) => {
-    selectSlot(slot)
-  },
+  loadHits: handles => send({type: 'load-nodes', handles}),
+  focusHandle: handle => showEntities({nodes: [handle], relationships: [], truncated: false}),
+  selectHandles: handles => setLocalHandles(handles),
+  showEntities: references => showEntities(references),
   setColorBy: (property) => send({type: 'appearance', color_by: property, size_by: shared.snapshot?.appearance.size_by ?? null}),
   setSizeBy: (property) => send({type: 'appearance', color_by: shared.snapshot?.appearance.color_by ?? null, size_by: property}),
   setLayoutKernel: (kernel) => requestLayout(kernel),
-  setFilter: () => undefined,
   setCaptionBy: (_nodeType, property) => send({type: 'caption', caption_by: property}),
   saveQuery: (name, query) => void refreshQueries(store.saveQuery(name, query)),
   deleteQuery: (name) => void refreshQueries(store.deleteQuery(name)),
@@ -291,7 +297,8 @@ const panels = new Panels(workspace.panelHosts.inspector, {
   // query and never moves the view.
   validateQuery: (query) => validateQuery(query),
   showTypeTable: (nodeType) => showTypeTable(nodeType),
-}, schema, workspace.panelHosts)
+}, schema, {...workspace.panelHosts, data: dataWorkspace.queryHost, revealData: () => { dataWorkspace?.showQuery(); workspace.navigate('data') }})
+const trail = new ExplorationTrail(workspace.panelHosts.inspector)
 
 /**
  * The path builder (plan E9), under its own heading in Query.
@@ -329,6 +336,10 @@ const pathBuilder = new PathBuilder(document.createElement('div'), schema, {
 panels.addSection('Path', pathBuilder.root)
 
 function selectSlot(slot: number): void {
+  remoteInspectorSlot = null
+  localHandles.clear()
+  const handle = view.label(slot)?.handle
+  if (handle != null) localHandles.set(handleKey(handle), handle)
   interaction.setSelected([slot])
   lastPreview = null
   lastDetail = null
@@ -340,6 +351,8 @@ function selectSlot(slot: number): void {
 }
 
 function clearSelection(): void {
+  remoteInspectorSlot = null
+  localHandles.clear()
   workspace.setInspectedType(null)
   interaction.setSelected([])
   lastPreview = null
@@ -391,80 +404,34 @@ function samplesWithSelection(current: Surface): { indices: number[]; positions:
   return { indices, positions }
 }
 
-/**
- * A type's on-screen nodes, as a table of their properties (plan E9).
- *
- * Three decisions, all of them the teaching-tool rule in different clothes.
- * The query is **generated here and shown in the editor**, so the user reads
- * what ran and can edit it into the question they actually had. It is then run
- * down the **ordinary bounded path** — the same `cypher` request the Run button
- * sends — so a table of 40 000 nodes is truncated and says so, exactly like a
- * hand-typed query. And the rows are only the nodes **on screen**, which on a
- * 546 850-node graph is a different question from "every node of this type".
- *
- * The ids handed to the query are each node's `id` **field** (`nodeKey`), not
- * its slot-space index. Those are two different numbers and Cypher can only see
- * the first; sending the second is what made this table answer with no rows on
- * one sodir type and with the wrong rows on another. See `SliceNode.key`.
- */
 function showTypeTable(nodeType: string): void {
-  const ids: unknown[] = []
-  let unnameable = 0
-  for (const slot of view.liveSlots()) {
-    const label = view.label(slot)
-    if (label?.isType === false && label.nodeType === nodeType && label.nodeId !== null) {
-      // A node with no `id` field cannot be named by any generated query. It is
-      // counted and reported rather than dropped, because a table that quietly
-      // omits rows is a table that lies about being "of what is on screen".
-      if (label.nodeKey === null || label.nodeKey === undefined) unnameable += 1
-      else ids.push(label.nodeKey)
-    }
-  }
-  if (ids.length === 0) {
-    panels.showQueryError(
-      unnameable > 0
-        ? `none of the ${unnameable} ${nodeType} loaded nodes carry an id field, so no ` +
-            'query can name them — select them in the graph instead'
-        : `no ${nodeType} nodes are loaded`,
-    )
-    return
-  }
+  dataWorkspace?.showType(nodeType, [...lastStats.keys()])
+}
 
-  const columns = tableColumns([...lastStats.values()])
-  let generated
-  try {
-    generated = typeTableQuery(nodeType, columns, ids)
-  } catch (err) {
-    // `identifier` refuses a property name Cypher cannot carry unquoted. The
-    // panel says so in the place a query failure is normally reported, because
-    // from the user's side this IS a query that would not run.
-    panels.showQueryError(err instanceof Error ? err.message : String(err))
-    return
-  }
-  panels.loadGeneratedQuery(generated.query)
-  const notes: string[] = []
-  if (lastStats.size > columns.length) {
-    // The cap is a fact about the table, so it is said before the rows arrive
-    // rather than left for the user to notice a missing column.
-    notes.push(
-      `${columns.length} of ${lastStats.size} properties, the ones most ${nodeType} nodes ` +
-        'carry — edit the RETURN clause in Query for the rest',
-    )
-  }
-  if (unnameable > 0) {
-    notes.push(
-      `${unnameable} of ${ids.length + unnameable} loaded nodes have no id field and cannot be ` +
-        'named by a query — they are not in these rows',
-    )
-  }
-  panels.showTableNote(notes.length > 0 ? notes.join(' · ') : null)
-  send({
-    type: 'cypher',
-    query: generated.query,
-    params: generated.params as Record<string, unknown>,
-    limit: null,
-    as_graph: false,
-  })
+function setLocalHandles(handles: NodeHandle[]): void {
+  remoteInspectorSlot = null
+  localHandles.clear()
+  for (const handle of handles) if (handle.generation === shared.generation) localHandles.set(handleKey(handle), handle)
+  interaction.setSelected([...localHandles.values()].flatMap(handle => { const slot = view.slotForHandle(handle); return slot === undefined ? [] : [slot] }))
+  lastPreview = null; lastDetail = null; panels.clearSelection()
+  const selected = interaction.allSelectedSlots()
+  if (selected.length === 1) send({type: 'preview', slot: selected[0] as number})
+  applyInteraction()
+}
+
+function showEntities(references: QueryRowReferences): void {
+  const handles = [...new Map([...references.nodes, ...references.relationships.flatMap(edge => [edge.source, edge.target])].map(handle => [handleKey(handle), handle])).values()]
+  if (handles.some(handle => handle.generation !== shared.generation)) { panels.showQueryError('These graph references belong to an expired session. Run the source query again.'); return }
+  setLocalHandles(handles)
+  graphScope = 'instances'; workspace.showInstances(); workspace.navigate('explore'); workspace.openInspector()
+  redraw()
+  if (references.relationships.length > 0 || handles.some(handle => view.slotForHandle(handle) === undefined)) {
+    pendingGraphFocus = send({type: 'load-entities', nodes: handles, relationships: references.relationships})
+  } else focusSelection()
+}
+
+function outlinedSlots(): number[] {
+  return [...new Set([...interaction.selectedSlots(), ...sharedSelected.filter(slot => !hiddenSlots.has(slot))])]
 }
 
 /**
@@ -676,13 +643,15 @@ const transportHandlers: TransportHandlers = {
 }
 transport.connect(transportHandlers)
 
-const sharedMutations = new Set(['expand', 'collapse', 'browse-type', 'load-nodes', 'reset', 'layout', 'appearance', 'caption', 'subset', 'focus', 'highlight'])
-function send(request: Request): void {
+const sharedMutations = new Set(['expand', 'collapse', 'browse-type', 'load-nodes', 'load-entities', 'reset', 'layout', 'appearance', 'caption', 'subset', 'focus', 'highlight'])
+function send(request: Request): string {
   const request_id = `browser-${++requestSerial}`
   const mutation = sharedMutations.has(request.type) || (request.type === 'cypher' && request.as_graph)
   if (!mutation) privateRequests.set(request.type, request_id)
   else pendingSharedRequests.set(request_id, request.type)
+  trail.request(request_id, request, 'slot' in request ? view.label(request.slot)?.text ?? null : null)
   transport.send(JSON.stringify({...request, request_id, expected: mutation ? shared.stamp : null}))
+  return request_id
 }
 
 async function handle(completed: Completed): Promise<void> {
@@ -691,6 +660,7 @@ async function handle(completed: Completed): Promise<void> {
   switch (completed.kind) {
     case 'session':
       shared.begin(completed.value.generation)
+      trail.begin(completed.value.generation)
       resyncing = false
       debugState.protocolVersion = completed.value.protocol_version
       debugState.tier = completed.value.tier
@@ -772,7 +742,7 @@ async function handle(completed: Completed): Promise<void> {
       break
     }
     case 'preview':
-      if (!interaction.allSelectedSlots().includes(completed.value.slot)) break
+      if (!interaction.allSelectedSlots().includes(completed.value.slot) && remoteInspectorSlot !== completed.value.slot) break
       lastPreview = completed.value
       if (lastDetail?.slot !== completed.value.slot) lastDetail = null
       // A type node has no stored properties; an instance does, and the panel
@@ -795,13 +765,15 @@ async function handle(completed: Completed): Promise<void> {
       break
     case 'query-table': {
       const table = completed.value
+      if (table.stamp !== null && table.stamp.generation !== shared.generation) break
       debugState.queryRows = panels.showQueryTable(table)
       noteTruncation(table.bound.truncated, table.bound.returned, table.bound.total, 'rows')
       renderStatus()
       break
     }
     case 'search': {
-      debugState.searchHits = panels.showSearch(completed.value)
+      if (completed.value.stamp !== null && completed.value.stamp.generation !== shared.generation) break
+      debugState.searchHits = panels.showSearch({...completed.value, hits: completed.value.hits.map(hit => ({...hit, slot: hit.handle === null ? null : view.slotForHandle(hit.handle) ?? null}))})
       interaction.setHighlighted(panels.loadedHitSlots())
       redraw()
       break
@@ -836,6 +808,8 @@ async function handle(completed: Completed): Promise<void> {
       applyLayout(completed.value)
       break
     case 'error': {
+      trail.refuse(completed.request_id)
+      if (completed.request_id === pendingGraphFocus) pendingGraphFocus = null
       const requestKind = completed.request_id === undefined ? undefined : pendingSharedRequests.get(completed.request_id)
       if (completed.request_id !== undefined) {
         pendingSharedRequests.delete(completed.request_id)
@@ -884,6 +858,7 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
     }
     return
   }
+  if (message.meta.compacted) debugState.compactions += 1
   const initialShared = !receivedShared
   receivedShared = true
   if (message.meta.request_id !== null) pendingSharedRequests.delete(message.meta.request_id)
@@ -892,15 +867,54 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
   root.dataset['sharedRevision'] = snapshot.stamp.revision
   root.dataset['sharedGeneration'] = snapshot.stamp.generation
   root.dataset['subsetRevision'] = snapshot.subset_revision
+  const previousHandles = new Set(view.liveSlots().flatMap(slot => { const handle = view.label(slot)?.handle; return handle == null ? [] : [handleKey(handle)] }))
+  const nextHandles = new Set(snapshot.slice.nodes.map(node => handleKey(node.handle)))
+  const addedNodes = [...nextHandles].filter(handle => !previousHandles.has(handle)).length
+  const removedNodes = [...previousHandles].filter(handle => !nextHandles.has(handle)).length
+  trail.acknowledge(message.meta, addedNodes, removedNodes)
   const firstAdmission = instancesOnScreen() === 0 && snapshot.slice.nodes.length > 0
   const topology = previous === null || previous.topology_revision !== snapshot.topology_revision
   const positionHash = fnv1a(message.points)
   const layoutChanged = previous !== null && (JSON.stringify(previous.layout) !== JSON.stringify(snapshot.layout) || (!topology && sharedPositionHash !== positionHash))
   sharedPositionHash = positionHash
+  const change = {snapshot, previous, topology, layoutChanged}
+  applySnapshotMembership(change, message, lastMeta)
+  const encodingChanged = applySnapshotEncoding(change)
+  applySnapshotLayout(snapshot)
+  if (initialShared && instancesOnScreen() > 0) { graphScope = 'instances'; workspace.showInstances() }
+  if (message.meta.mutation_kind !== null) {
+    debugState.lastSliceKind = message.meta.mutation_kind
+    if (message.meta.mutation_kind !== 'collapse' && instancesOnScreen() > 0) { graphScope = 'instances'; workspace.showInstances() }
+    if (message.meta.mutation_kind === 'query') panels.showGraphResult(snapshot.last_slice?.bound.returned ?? snapshot.slice.bound.returned, addedNodes)
+  }
+  const bound = snapshot.last_slice?.bound ?? snapshot.slice.bound
+  noteTruncation(bound.truncated, bound.returned, bound.total, 'nodes', snapshot.last_slice?.link_bound ?? snapshot.slice.link_bound)
+  filters.update(snapshot.subset)
+  dataWorkspace?.update(snapshot)
+  redraw(layoutChanged || (topology && layoutKernel !== 'simulation') ? 'server' : undefined, topology)
+  if (firstAdmission || (initialShared && instancesOnScreen() > 0) || (layoutChanged && snapshot.layout !== null)) fitVisible()
+  if (message.meta.focus !== null) applyFocus(message.meta.focus)
+  if (pendingGraphFocus !== null && message.meta.request_id === pendingGraphFocus) { pendingGraphFocus = null; focusSelection() }
+  if (topology && layoutKernel === 'simulation') { fitOnSettle = firstAdmission; surface?.reheat() }
+  if (encodingChanged || previous?.stamp.revision !== snapshot.stamp.revision) {
+    if (snapshot.appearance.color_by !== null) {
+      requestValues(snapshot.appearance.color_by, 'color')
+      if (colorByStat === null) refreshSharedColorStat(snapshot.appearance.color_by)
+    }
+    if (sizeByName !== null) requestValues(sizeByName, 'size')
+    for (const [type, property] of captionByType) if (property !== null) requestValues(property, 'caption', type)
+  }
+}
+
+type SnapshotChange = {snapshot: SharedSnapshotMeta; previous: SharedSnapshotMeta | null; topology: boolean; layoutChanged: boolean}
+
+function applySnapshotMembership(change: SnapshotChange, message: {points: Float32Array; links: Float32Array}, meta: MetaGraphMeta): void {
+  const {snapshot, previous, topology, layoutChanged} = change
   const localSelection = interaction.allSelectedSlots().flatMap(slot => { const reference = referenceForSlot(slot); return reference === null ? [] : [reference] })
   if (topology) {
-    view.replaceSnapshot(lastMeta, snapshot.slice, message.points, message.links)
-    interaction.setSelected(resolveReferences(localSelection))
+    view.replaceSnapshot(meta, snapshot.slice, message.points, message.links)
+    interaction.setSelected([...new Set([...resolveReferences(localSelection.filter(reference => reference.kind === 'type')), ...[...localHandles.values()].flatMap(handle => { const slot = view.slotForHandle(handle); return slot === undefined ? [] : [slot] })])])
+    panels.refreshSearch(handle => view.slotForHandle(handle) ?? null)
     if (surface !== null) interaction.hover(surface.graph, null)
     lastPreview = null
     lastDetail = null
@@ -917,7 +931,16 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
   const visibleEdges = new Set(snapshot.subset.visible_edge_ids)
   sharedHiddenEdges = new Set(view.edges.flatMap((edge, index) => !edge.meta && (edge.edge_id === null || !visibleEdges.has(edge.edge_id)) ? [index] : []))
   sharedSelected = resolveReferences(snapshot.selected)
+  const remoteSelectionChanged = JSON.stringify(previous?.selected) !== JSON.stringify(snapshot.selected)
+  if (remoteSelectionChanged && interaction.allSelectedSlots().length === 0 && localHandles.size === 0) {
+    remoteInspectorSlot = sharedSelected.length === 1 ? sharedSelected[0] as number : null
+    if (remoteInspectorSlot !== null) { send({type: 'preview', slot: remoteInspectorSlot}); workspace.openInspector() }
+  }
   interaction.setHighlighted(resolveReferences(snapshot.highlighted))
+}
+
+function applySnapshotEncoding(change: SnapshotChange): boolean {
+  const {snapshot, previous, topology} = change
   const encodingChanged = topology || JSON.stringify(previous?.appearance) !== JSON.stringify(snapshot.appearance)
   if (encodingChanged) {
     colorByStat = snapshot.appearance.color_by === null ? null : lastStats.get(snapshot.appearance.color_by) ?? null
@@ -934,6 +957,10 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
       for (const type of instanceTypesOnScreen()) captionByType.set(type, snapshot.caption_by)
     }
   }
+  return encodingChanged
+}
+
+function applySnapshotLayout(snapshot: SharedSnapshotMeta): void {
   const previousKernel = layoutKernel
   layoutKernel = snapshot.layout_kernel
   debugState.layoutKernel = layoutKernel
@@ -944,27 +971,6 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
     surface.setAxes(axesFor(debugState.layoutMode))
   }
   panels.showLayoutKernel(layoutKernel, layoutKernel, view.liveCount)
-  if (initialShared && instancesOnScreen() > 0) { graphScope = 'instances'; workspace.showInstances() }
-  if (message.meta.mutation_kind !== null) {
-    debugState.lastSliceKind = message.meta.mutation_kind
-    if (message.meta.mutation_kind !== 'collapse' && instancesOnScreen() > 0) { graphScope = 'instances'; workspace.showInstances() }
-    if (message.meta.mutation_kind === 'query') panels.showGraphResult(snapshot.last_slice?.bound.returned ?? snapshot.slice.bound.returned, snapshot.slice.nodes.length)
-  }
-  const bound = snapshot.last_slice?.bound ?? snapshot.slice.bound
-  noteTruncation(bound.truncated, bound.returned, bound.total, 'nodes', snapshot.last_slice?.link_bound ?? snapshot.slice.link_bound)
-  filters.update(snapshot.subset)
-  redraw(layoutChanged || (topology && layoutKernel !== 'simulation') ? 'server' : undefined, topology)
-  if (firstAdmission || (initialShared && instancesOnScreen() > 0) || (layoutChanged && snapshot.layout !== null)) fitVisible()
-  if (message.meta.focus !== null) applyFocus(message.meta.focus)
-  if (topology && layoutKernel === 'simulation') { fitOnSettle = firstAdmission; surface?.reheat() }
-  if (encodingChanged || previous?.stamp.revision !== snapshot.stamp.revision) {
-    if (snapshot.appearance.color_by !== null) {
-      requestValues(snapshot.appearance.color_by, 'color')
-      if (colorByStat === null) refreshSharedColorStat(snapshot.appearance.color_by)
-    }
-    if (sizeByName !== null) requestValues(sizeByName, 'size')
-    for (const [type, property] of captionByType) if (property !== null) requestValues(property, 'caption', type)
-  }
 }
 
 function refreshSharedColorStat(property: string): void {
@@ -1045,7 +1051,7 @@ function redraw(authority?: SeedAuthority, topology = false): void {
   if (topology || authority !== undefined) surface.upload(view, appearance(), authority)
   else surface.updateAppearance(appearance())
   interaction.apply(surface.graph)
-  const outlined = [...new Set([...interaction.selectedSlots(), ...sharedSelected.filter(slot => !hiddenSlots.has(slot))])]
+  const outlined = outlinedSlots()
   surface.graph.setConfigPartial({outlinedPointIndices: outlined.length > 0 ? outlined : undefined})
   refreshLabelSpecs()
   surface.graph.render(undefined, 0)
@@ -1432,9 +1438,9 @@ function attachHandlers(current: Surface): void {
 function applyInteraction(): void {
   if (surface === null) return
   interaction.apply(surface.graph)
-  const outlined = [...new Set([...interaction.selectedSlots(), ...sharedSelected.filter(slot => !hiddenSlots.has(slot))])]
+  const outlined = outlinedSlots()
   surface.graph.setConfigPartial({outlinedPointIndices: outlined.length > 0 ? outlined : undefined})
-  labels.setPinned(interaction.selectedSlots())
+  labels.setPinned(outlinedSlots())
   updateTrackedPoints()
   surface.graph.render(undefined, 0)
   positionLabels(surface)
@@ -1449,7 +1455,7 @@ function applyInteraction(): void {
  * slice funnels through.
  */
 function refreshLabelSpecs(): void {
-  const selected = new Set(interaction.selectedSlots())
+  const selected = new Set(outlinedSlots())
   labels.setLabels(
     view.liveSlots().filter((slot) => !hiddenSlots.has(slot)).map((slot) => {
       const label = view.label(slot)
@@ -1529,7 +1535,7 @@ function everyPoint(current: Surface): { indices: number[]; positions: number[] 
 let trackedPointsKey = ''
 function updateTrackedPoints(): void {
   if (surface === null) return
-  const slots = isMetaGraphOnly() ? visibleSlots() : interaction.selectedSlots()
+  const slots = isMetaGraphOnly() ? visibleSlots() : outlinedSlots()
   const key = slots.join(',')
   if (key === trackedPointsKey) return
   trackedPointsKey = key
@@ -1555,16 +1561,18 @@ function syncCounts(): void {
   debugState.hoveredSlot = interaction.hoveredSlot()
   debugState.emphasizedCount = interaction.emphasizedSlots().length
   debugState.highlightedCount = interaction.highlightedSlots().length
-  debugState.selectedCount = interaction.selectedSlots().length
+  debugState.selectedCount = outlinedSlots().length
   const instances = view.liveSlots().filter((slot) => view.label(slot)?.isType === false)
-  const selected = interaction.allSelectedSlots().filter((slot) => view.label(slot)?.isType === false)
+  const selected = [...localHandles.values()]
+  dataWorkspace?.setSelection(selected)
+  panels.setRecordSelection(selected)
   workspace.setCounts({
     loaded: instances.length,
     visible: instances.filter((slot) => !filterHiddenSlots.has(slot)).length,
     selected: selected.length,
-    hiddenSelected: selected.filter((slot) => hiddenSlots.has(slot)).length,
+    hiddenSelected: selected.filter(handle => { const slot = view.slotForHandle(handle); return slot === undefined || hiddenSlots.has(slot) }).length,
     types: view.liveCount - instances.length,
-    hasSelection: interaction.allSelectedSlots().length > 0,
+    hasSelection: interaction.allSelectedSlots().length > 0 || localHandles.size > 0,
     canFocus: surface !== null && interaction.selectedSlots().length > 0,
   })
   debugState.truncation =

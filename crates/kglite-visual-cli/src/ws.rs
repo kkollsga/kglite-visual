@@ -157,6 +157,7 @@ fn private_frames(
     let message_type = match response {
         Response::Query(_) => MessageType::QueryTable,
         Response::Records(_) => MessageType::Records,
+        Response::FieldDetail(_) => MessageType::FieldDetail,
         Response::Preview(_) => MessageType::ExpansionPreview,
         Response::NodeDetail(_) => MessageType::NodeDetail,
         Response::Search(_) => MessageType::SearchResult,

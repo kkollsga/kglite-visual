@@ -68,10 +68,10 @@ listed under the editor in kglite's own words. It is a real endpoint, so a
 
 ```console
 $ curl -s -XPOST $B/api/validate -H "$C" -d '{"query":"MATCH (w:Wellbor) RETURN w"}'
-{"protocol_version":6,"diagnostics":[{"severity":"warning","message":"MATCH references unknown node label 'Wellbor' — the graph has no such type, so this pattern returns no rows. Did you mean 'Wellbore'?","line":null,"col":null}]}
+{"protocol_version":7,"diagnostics":[{"severity":"warning","message":"MATCH references unknown node label 'Wellbor' — the graph has no such type, so this pattern returns no rows. Did you mean 'Wellbore'?","line":null,"col":null}]}
 
 $ curl -s -XPOST $B/api/validate -H "$C" -d '{"query":"CREATE (n:Person) RETURN n"}'
-{"protocol_version":6,"diagnostics":[{"severity":"error","message":"this viewer runs queries read-only — the engine will refuse a statement that writes","line":null,"col":null}]}
+{"protocol_version":7,"diagnostics":[{"severity":"error","message":"this viewer runs queries read-only — the engine will refuse a statement that writes","line":null,"col":null}]}
 ```
 
 `severity` is `error` (it cannot run: a syntax error, or a write this read-only
@@ -127,27 +127,28 @@ your behalf. `kglite-visual queries {list,rm,prune}` is the store's owner, and
 `prune` only offers the stores whose graph is gone from disk. See
 [storage](../concepts/storage.md) and the {ref}`CLI reference <queries>`.
 
-## A generated table
+## Records in Data
 
-Select a type node and the type panel offers **table of the N on screen**. The
-app writes the query, puts it in the Cypher box **where you can read and edit
-it**, and runs it down the ordinary bounded path:
+Data keeps **Records** separate from **Query results · source**. Records reads
+exact source handles for the loaded or visible instances; choosing a type's
+table opens its loaded records without replacing your query draft. Null keys,
+duplicate keys and large integer keys remain distinct nodes.
 
-```cypher
-MATCH (n:Wellbore) WHERE id(n) IN $ids
-RETURN id(n) AS id, n.title AS title, n.wlbWell AS wlbWell, …
-```
+Add or remove source fields, click a header to sort, and choose a page size of
+100 or up to 500. Sorting uses typed cells and preserves the selected identities.
+Selection follows the same handles back into Explore. A hidden selection is
+reported as hidden; showing it does not silently clear your filters.
 
-The columns are the twelve properties most of that type's nodes carry. Click a
-header to sort — stably, and *by type*, so a numeric column compares as numbers
-and a column of ids does not put 100 before 58.
+Query rows offer graph actions only for actual node or relationship values
+returned by the engine. A scalar ID column remains a scalar. Adding a relationship
+row preserves the exact referenced relationship, including parallel edges and
+self-loops, instead of adding every edge between its endpoints.
 
-The panel says when the twelve-column cap dropped something, and when a node on
-screen carries no `id` field for a query to name it by. That last case is not
-hypothetical: **kglite's `id(n)` reads the node's `id` field** — whatever the
-source data called its key — not any engine-internal index. A slice therefore
-carries each node's `id` field beside its slot, and a node without one cannot
-be named in Cypher at all, so it is reported rather than silently missing.
+**Inspect value** opens bounded pages for long text and nested collections.
+Missing, null, unavailable and partial values are distinct. Copying a page copies
+only that displayed page. Record collection stops at 16 MiB and reports the
+fetched versus eligible counts; narrow the fields to inspect more records.
+Sorting a partial table covers those fetched records only.
 
 ## The path builder
 
@@ -232,3 +233,11 @@ It now gets its own monospace treatment: the step in the gutter, the operation
 indented, the estimate on the right where the planner produced one and blank
 where it did not. The status line says **not executed**, because the query was
 planned rather than run.
+
+## Exploration trail
+
+The inspector’s **This browser’s exploration trail** records its last 20
+acknowledged graph actions, including expansion direction and relationship,
+admitted/removed nodes and reported omissions. Refused requests and actions
+from other clients do not appear as successful local actions. This trail is
+provenance; it does not provide undo.

@@ -99,12 +99,8 @@ impl Appearance {
     }
 }
 
-/// Frame one steering command for the binary transport.
-///
-/// Beside [`crate::session::response_frames`] rather than inside it: those are
-/// *answers* to a request the caller made, keyed by the request's own type,
-/// while these are pushed to clients that asked for nothing. One encoder, two
-/// origins.
+/// Encode the retained legacy command vocabulary. Live session updates use
+/// the atomic `shared_frames` envelope.
 pub fn control_frames(command: &Command) -> Vec<Vec<u8>> {
     use crate::protocol::{MessageType, ResponseEncoder};
 

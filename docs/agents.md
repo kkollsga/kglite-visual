@@ -164,7 +164,7 @@ mcp set_layout '{"kernel":"geo"}'
 Errors an agent can act on come back as `isError: true` with kglite's own
 message. Quote it; do not summarise it.
 
-## The eighteen tools
+## The twenty tools
 
 The shared-view tools load, inspect, arrange and export a bounded exploration.
 `records` reads typed fields without changing that view. Saved-query tools use
@@ -176,6 +176,8 @@ the visualizer's own query store.
 | `show_cypher` | Run read-only Cypher and put the resulting nodes and relationships **into** the shared view. Bounded in core. A display verb — to read a table, ask the graph's own MCP server |
 | `browse_type` | Load bounded instances of a type, including disconnected nodes, without writing Cypher |
 | `load_nodes` | Load exact generation-scoped node handles; a handle from another session is refused |
+| `load_entities` | Load exact node and relationship handles from query rows, preserving the referenced relationship multiset |
+| `field_detail` | Inspect a source field in bounded text/list/map pages, with explicit partial results |
 | `records` | Read bounded typed fields by handles without changing membership; integer values are decimal strings and missing, null and truncated cells are explicit |
 | `expand` | Load a slot's neighbours. A type slot loads instances; an instance slot loads what it is connected to. `limit` is a request, not a guarantee |
 | `collapse` | Remove a slot's expansion. Slot numbers are not reissued unless the answer carries a compaction, which renumbers everything and says so |
@@ -217,7 +219,8 @@ The consequences for an agent are concrete:
 
 ### `export_view` takes the view, not the graph
 
-Its scope is the instance nodes on the human's screen. On an empty view it
+Its default scope is the loaded instance nodes, including instances hidden by
+filters, and every source relationship between those nodes. On an empty view it
 refuses by name rather than dumping the graph:
 
 ```json
@@ -309,7 +312,7 @@ Claude in Chrome, a console). Readiness is `window.__kglv.ready === true` —
 static.
 
 ```json
-{"protocolVersion":6,"tier":"compact","layoutMode":"force","layoutKernel":"simulation",
+{"protocolVersion":7,"tier":"compact","layoutMode":"force","layoutKernel":"simulation",
  "pointCount":98,"linkCount":124,"slotCount":98,"tombstoneCount":0,"namedSlots":98,
  "ready":true,"simRunning":true,"lastMessageSeq":2,"positionsHash":"80499c25",
  "deviceFeatures":{"webgl2":true,"float32Renderable":true,"textureBlendFloat":true},

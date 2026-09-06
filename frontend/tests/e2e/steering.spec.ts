@@ -44,12 +44,18 @@ test('focus moves the camera on a client that asked for nothing', async ({ page 
     expect(before.zoomLevel).not.toBeNull()
     expect(before.focusedSlots).toEqual([])
 
-    const response = await post(server.info.url, 'focus', { slots: [PERSON_SLOT, PROJECT_SLOT] })
+    const opening = await (await fetch(`${server.info.url}api/view-state`)).json() as { stamp: { generation: string; revision: string } }
+    const response = await post(server.info.url, 'focus', {
+      slots: [PERSON_SLOT, PROJECT_SLOT], expected: opening.stamp, request_id: 'focus-types',
+    })
     expect(response.status).toBe(200)
     // The audience size is the answer: a steering command that reached nobody
     // is indistinguishable from one that reached the user unless the server
     // says so.
-    expect(await response.json()).toEqual({ clients: 1 })
+    expect(await response.json()).toEqual({
+      clients: 1, request_id: 'focus-types',
+      stamp: { generation: opening.stamp.generation, revision: String(BigInt(opening.stamp.revision) + 1n) },
+    })
 
     // Wait on the ZOOM, not on `focusedSlots`: the command is recorded before
     // the fit is asked for, and cosmos.gl runs the fit through a d3 transition

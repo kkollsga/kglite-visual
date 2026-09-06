@@ -2,6 +2,9 @@
 import type { BoundInfo } from "./BoundInfo";
 import type { ClauseStat } from "./ClauseStat";
 import type { QueryRelationship } from "./QueryRelationship";
+import type { QueryRowReferences } from "./QueryRowReferences";
+import type { RecordCell } from "./RecordCell";
+import type { RevisionStamp } from "./RevisionStamp";
 
 /**
  * A Cypher result, columnar.
@@ -9,11 +12,15 @@ import type { QueryRelationship } from "./QueryRelationship";
  * kglite returns `Vec<Vec<Value>>` — row-major, one `Vec` per row — and there
  * is no columnar accessor to ask for instead (plan D11's filed wish). The
  * transpose therefore happens exactly once, here, rather than on every
- * consumer: a results table reads columns, a typed-array appearance getter
- * reads columns, and a client transposing per render would pay O(rows × cols)
+ * consumer: the results table renders and sorts columns, and a client
+ * transposing per render would pay O(rows × cols)
  * for a shape the server already had to walk.
  */
-export type QueryTable = { protocol_version: number, columns: Array<string>, 
+export type QueryTable = { 
+/**
+ * Typed companion to `data`: `cells[c][r]` preserves the source scalar type.
+ */
+cells: Array<Array<RecordCell>>, stamp: RevisionStamp | null, row_references: Array<QueryRowReferences>, graph_references_truncated: boolean, protocol_version: number, columns: Array<string>, 
 /**
  * One array per column, in `columns` order. `data[c][r]` is row `r` of
  * column `c`.

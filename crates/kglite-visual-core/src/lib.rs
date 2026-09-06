@@ -60,3 +60,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod shared;
 pub mod subset;
+
+pub mod field_detail;
+mod query_cells;
+pub mod query_provenance;

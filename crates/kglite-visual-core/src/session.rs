@@ -14,7 +14,7 @@ use std::sync::{
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kglite::api::introspection::{compute_schema, schema_overview_to_json};
-use kglite::api::{DirGraph, NodeIndex};
+use kglite::api::{DirGraph, EdgeIndex, GraphRead, NodeIndex};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -268,6 +268,7 @@ struct SliceBounds {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Response {
+    FieldDetail(Box<crate::field_detail::FieldDetailResponse>),
     Shared(Box<SharedSnapshot>),
     Query(QueryTable),
     Records(RecordTable),
@@ -397,6 +398,81 @@ impl Session {
             SliceKind::Search,
             &nodes,
             &[],
+            BoundInfo::new(nodes.len(), nodes.len()),
+            0,
+        )
+    }
+
+    fn load_entities_uncommitted(
+        &self,
+        request: &crate::query_provenance::LoadEntitiesRequest,
+    ) -> Result<GraphSlice, CoreError> {
+        self.check_handles(&request.nodes)?;
+        if request.relationships.len() > records::MAX_LOADED_EDGES {
+            return Err(CoreError::Request(
+                "at most 20000 relation handles are allowed".into(),
+            ));
+        }
+        let _guard = self.graph.begin_read_pass();
+        let mut nodes = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for handle in &request.nodes {
+            if seen.insert(handle.node_id) {
+                nodes.push(NodeIndex::new(handle.node_id as usize));
+            }
+        }
+        let mut edges = Vec::new();
+        for relation in &request.relationships {
+            self.check_handles(&[relation.source.clone(), relation.target.clone()])?;
+            if relation.generation != self.generation {
+                return Err(CoreError::Request(
+                    "relation handle belongs to a different session generation".into(),
+                ));
+            }
+            let id = EdgeIndex::new(relation.edge_id as usize);
+            let (source, target) = self.graph.graph.edge_endpoints(id).ok_or_else(|| {
+                CoreError::Request("relation is absent from this source snapshot".into())
+            })?;
+            if source.index() as u32 != relation.source.node_id
+                || target.index() as u32 != relation.target.node_id
+            {
+                return Err(CoreError::Request(
+                    "relation handle endpoints do not match the source edge".into(),
+                ));
+            }
+            let edge = self
+                .graph
+                .graph
+                .edge_weight(id)
+                .ok_or_else(|| CoreError::Request("relation record is unavailable".into()))?;
+            for endpoint in [source, target] {
+                if seen.insert(endpoint.index() as u32) {
+                    nodes.push(endpoint);
+                }
+            }
+            if nodes.len() > records::MAX_LOADED_NODES {
+                return Err(CoreError::Request(
+                    "entity request exceeds 5000 node limit".into(),
+                ));
+            }
+            edges.push((
+                relation.edge_id,
+                source,
+                target,
+                edge.connection_type_str(&self.graph.interner).to_owned(),
+            ));
+        }
+        for node in &nodes {
+            if self.graph.node_view(*node).is_none() {
+                return Err(CoreError::Request(
+                    "node is absent from this source snapshot".into(),
+                ));
+            }
+        }
+        self.absorb(
+            SliceKind::Query,
+            &nodes,
+            &edges,
             BoundInfo::new(nodes.len(), nodes.len()),
             0,
         )
@@ -562,6 +638,12 @@ impl Session {
     }
     pub(crate) fn handle_uncommitted(&self, request: &Request) -> Result<Response, CoreError> {
         match request {
+            Request::LoadEntities(request) => {
+                self.load_entities_uncommitted(request).map(Response::Slice)
+            }
+            Request::FieldDetail(request) => self
+                .field_detail(request)
+                .map(|detail| Response::FieldDetail(Box::new(detail))),
             Request::Reset => Ok(Response::Slice(self.reset_uncommitted())),
             Request::Subset(_)
             | Request::Appearance(_)
@@ -616,9 +698,13 @@ impl Session {
     }
 
     fn cypher(&self, request: &CypherRequest) -> Result<Response, CoreError> {
-        let table = query::run_cypher(&self.graph, request, self.config)?;
+        let table =
+            query::run_cypher_stamped(&self.graph, request, self.config, self.shared_stamp())?;
         if !request.as_graph {
             return Ok(Response::Query(table));
+        }
+        if table.graph_references_truncated {
+            return Err(CoreError::Request("query graph-reference traversal exceeded its bound; narrow the query before loading it".into()));
         }
         // "Show in graph" without a second round trip: the nodes the result
         // already named, mapped into the slot space.
@@ -1258,7 +1344,9 @@ impl Session {
         // into view". The client cannot tell them apart — only the session
         // knows the slot space — so the answer carries the distinction.
         let view = self.read();
+        response.stamp = Some(view.stamp(self.generation()));
         for hit in &mut response.hits {
+            hit.handle = Some(self.node_handle(hit.node_id));
             hit.slot = view.slot_of_node(hit.node_id);
         }
         Ok(response)
@@ -1347,6 +1435,7 @@ pub fn response_frames(response: &Response) -> Vec<Vec<u8>> {
                 request_id: None,
                 focus: None,
                 mutation_kind: None,
+                compacted: false,
             },
             &snapshot.points,
             &snapshot.links,
@@ -1355,6 +1444,7 @@ pub fn response_frames(response: &Response) -> Vec<Vec<u8>> {
     let mut enc = ResponseEncoder::new();
     match response {
         Response::Shared(_) => unreachable!(),
+        Response::FieldDetail(detail) => enc.push_json(MessageType::FieldDetail, &json_of(detail)),
         Response::Query(table) => enc.push_json(MessageType::QueryTable, &json_of(table)),
         Response::Records(table) => enc.push_json(MessageType::Records, &json_of(table)),
         Response::Preview(preview) => {

@@ -140,7 +140,7 @@ test('a shared update becomes visible only after its complete typed arrays arriv
   const assembler = new ResponseAssembler()
   const meta = {
     snapshot: { stamp: { generation: 'fixture-generation', revision: '9' }, topology_revision: '2' },
-    request_id: 'change-9', focus: null, mutation_kind: 'query',
+    request_id: 'change-9', focus: null, mutation_kind: 'query', compacted: false,
   }
   expect(assembler.push(decodeFrame(frame(MessageType.SHARED_UPDATE,
     new TextEncoder().encode(JSON.stringify(meta)), { terminal: false })))).toBeNull()
@@ -173,4 +173,33 @@ test('revision conflicts retain expected and actual stamps and request correlati
   expect(reply.request_id).toBe('stale-change')
   expect(reply.conflict?.expected.revision).toBe('2')
   expect(reply.conflict?.actual.revision).toBe('3')
+})
+
+
+test('field pages and query provenance retain source identity and independent correlation', () => {
+  const assembler = new ResponseAssembler()
+  const handle = { generation: 'fixture-generation', node_id: 7 }
+  const detail = {
+    stamp: { generation: handle.generation, revision: '4' }, subset_revision: '2',
+    handle, field: 'metadata', path: [{ kind: 'key', key: 'children' }],
+    cell: { state: 'value', value: { type: 'string', value: 'preview' } },
+    page: { kind: 'list', offset: 0, total_items: 2, items: [{ state: 'missing' }, { state: 'null' }], next_offset: null },
+    request_id: 'field-1',
+  }
+  const reply = assembler.push(decodeFrame(frame(MessageType.FIELD_DETAIL,
+    new TextEncoder().encode(JSON.stringify(detail)))))
+  expect(reply?.kind).toBe('field-detail')
+  expect(reply?.request_id).toBe('field-1')
+  if (reply?.kind !== 'field-detail') throw new Error('expected field detail')
+  expect(reply.value.handle).toEqual(handle)
+  expect(reply.value.page).toEqual(detail.page)
+
+  const table = { request_id: 'query-2', columns: ['n', 'literal_id'], rows: [[{}, 7]],
+    row_references: [{ nodes: [handle], relationships: [], truncated: false }] }
+  const query = assembler.push(decodeFrame(frame(MessageType.QUERY_TABLE,
+    new TextEncoder().encode(JSON.stringify(table)))))
+  expect(query?.kind).toBe('query-table')
+  expect(query?.request_id).toBe('query-2')
+  if (query?.kind !== 'query-table') throw new Error('expected query')
+  expect(query.value.row_references).toEqual(table.row_references)
 })

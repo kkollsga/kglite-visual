@@ -22,15 +22,26 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 - Shared visual filters narrow the loaded instances by type, category, numeric
   range, missing values, relationship type and isolation, with separate loaded
   and visible counts. Appearance and captions survive reconnects.
+- The Data workspace provides paged source records, field selection and typed
+  sorting, with graph-linked row selection. Long values open bounded detail
+  pages, and query rows can load the actual entities they contain. A bounded
+  exploration trail records this browser’s acknowledged actions and omissions.
 
 ### Changed
 
 - Shared HTTP, WebSocket and MCP mutations commit and publish in one order.
   Optional expected revisions reject stale actions without changing the view;
-  reconnects receive an atomic snapshot. Protocol 6 carries these snapshots
-  alongside typed-array topology and positions.
+  reconnects receive an atomic snapshot. Protocol 7 carries these snapshots
+  alongside typed-array topology, positions, typed query cells and field detail.
 - Cumulative explorations refuse additions above 5,000 instance nodes, 20,000
   relationships or 2 MiB of membership/topology, without partially applying them.
+
+### Fixed
+
+- Query tables preserve large integer values without confusing them with text,
+  and enforce their byte ceiling even when the first row is oversized.
+- Shared schema selections remain visible in the inspector, and atomic view
+  updates report compaction consistently.
 
 
 ## [0.1.7] - 2026-09-03

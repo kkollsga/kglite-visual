@@ -202,6 +202,7 @@ impl AppState {
             let mut frames = state.session.session_info_frames();
             frames.extend(state.session.meta_graph_frames());
             let meta = SharedWireMeta {
+                compacted: false,
                 snapshot: snapshot.meta,
                 request_id: None,
                 focus: None,
@@ -461,6 +462,15 @@ mod ordering_tests {
         let result = state.execute(read).await.unwrap();
         assert!(!result.published);
         assert_eq!(result.request_id.as_deref(), Some("private-1"));
+        let detail: SharedRequest = serde_json::from_value(serde_json::json!({
+            "type":"field-detail", "handle":{"generation":state.session.generation(),"node_id":0},
+            "field":"title", "request_id":"field-private-2"
+        }))
+        .unwrap();
+        let result = state.execute(detail).await.unwrap();
+        assert!(matches!(result.response, Response::FieldDetail(_)));
+        assert!(!result.published);
+        assert_eq!(result.request_id.as_deref(), Some("field-private-2"));
         assert_eq!(state.session.shared_stamp().revision, "1");
         assert!(matches!(
             viewer.try_recv(),

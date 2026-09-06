@@ -16,9 +16,9 @@ focus to its trigger. Four subjects have their own guides:
 - **[Layouts](layouts.md)** — the live GPU force simulation, the static kernels
   the server computes, and the geographic map.
 - **[Query surfaces](queries.md)** — the Cypher editor, saved queries, the
-  generated table, the path builder, `PROFILE` and `EXPLAIN`.
+  linked records, the path builder, `PROFILE` and `EXPLAIN`.
 - **[Appearance](appearance.md)** — colour, size, captions, the legend and the
-  client-side filter.
+  shared visual filters.
 
 ```{toctree}
 :maxdepth: 1
@@ -55,7 +55,7 @@ The server asks kglite for a schema sized for the graph it has, and reports
 which tier it used on stderr and in `GET /api/session`:
 
 ```json
-{"protocol_version":6,"tier":"compact","slot_count":98,
+{"protocol_version":7,"tier":"compact","slot_count":98,
  "stats":{"node_count":546850,"edge_count":765373,"node_type_count":98,
           "relationship_type_count":54,"core_type_count":35}}
 ```
@@ -73,7 +73,7 @@ each direction, with a count:
 
 ```console
 $ curl -s -XPOST $B/api/preview -H 'content-type: application/json' -d '{"slot":0}'
-{"protocol_version":6,"slot":0,"scope":"type","node_type":"Person","title":"",
+{"protocol_version":7,"slot":0,"scope":"type","node_type":"Person","title":"",
  "relationships":[
    {"name":"HAS_SKILL","direction":"out","other_type":"Skill","count":180},
    {"name":"KNOWS","direction":"out","other_type":"Person","count":180},
