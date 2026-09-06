@@ -333,6 +333,20 @@ fixture:  ## Regenerate crates/kglite-visual-core/tests/fixtures/ (seeded, byte-
 	@rm -f /tmp/kglv-fixture-once.kgl /tmp/kglv-spill-once.kgl /tmp/kglv-positions-once.json
 	@echo "fixture: OK — regenerated twice, byte-identical"
 
+docs-sample:  ## Regenerate the downloadable documentation walkthrough graph
+	@$(CARGO) run -q -p kglite-visual-core --example make_docs_sample
+
+# Generate elsewhere and compare: a drift check must never rewrite the artifact
+# whose provenance it is checking. mktemp also keeps concurrent runs isolated.
+check-docs-sample:  ## Verify docs/_static/team.kgl matches its generator
+	@set -e; \
+	  work=$$(mktemp -d "$${TMPDIR:-/tmp}/kglv-docs-sample.XXXXXX"); \
+	  trap 'rm -rf "$$work"' EXIT; \
+	  $(CARGO) run -q -p kglite-visual-core --example make_docs_sample -- --out "$$work/team.kgl"; \
+	  cmp "$$work/team.kgl" docs/_static/team.kgl \
+	    || { echo "check-docs-sample: FAIL — docs/_static/team.kgl has drifted; run 'make docs-sample' and explain the data-contract change" >&2; exit 1; }; \
+	  echo "check-docs-sample: OK — downloadable graph matches its generator"
+
 # ---- the Python wheel -------------------------------------------------
 #
 # One project-local venv, created once and reused. The stamp file has no
