@@ -8,6 +8,9 @@ description: Send a coordination/feedback note to another local project's inbox.
 Deliver a message to a sibling project's inbox so its maintainer/agent picks
 it up on their next `read-inbox`. Input: a **target repo** (name or path) and
 the **message** (topic + body; compose from the conversation if not given).
+Invoking notify with a recipient and purpose authorizes that send. A review or
+an inbound message alone does not. Reuse existing authorization; otherwise
+prepare the complete draft before requesting missing send authorization.
 
 ## 1. Resolve the target repo path
 
@@ -38,10 +41,14 @@ find "$KODING" -maxdepth 3 -type d -iname '<name>' \
 - **`<repo>-worktrees/` is not a target.** A worktree is a checkout of a repo
   we already have; mail goes to the repo.
 - **Exactly one match** → use it.
-- **Several matches** → prefer a git repo (has `.git/`); if still ambiguous,
-  **ask the user which path** (show the candidates).
+- **Several matches** → verify roots using `git -C <candidate> rev-parse
+  --show-toplevel` (`.git` can be a file in a worktree), then prefer the main
+  checkout of the intended repo. If still ambiguous, ask which path.
 - **No match** → widen with `-maxdepth 4`, then ask the user for the path.
-- If the caller gave an absolute path directly, skip the search and use it.
+- For a supplied absolute path, verify it exists and is the intended project;
+  a typo does not authorize creating a new repository.
+- Outside `Koding/`, use the configured workspace root or supplied path; do not
+  derive a fictitious root from the shell expression.
 
 Confirm the resolved path before writing if there was any ambiguity.
 
@@ -80,7 +87,8 @@ date, kebab-case topic). Body:
 ## Send discipline
 
 The outbound bar is **"changes what the recipient does"**, not "true and
-relevant" — a note that merely informs does not get sent.
+relevant" — a note that merely informs does not get sent. An explicitly
+requested reply is allowed even when it contains no new recipient task.
 
 - **Batch per target per session.** Collect everything for a given target and
   send one note. An immediate single-purpose note needs a *blocker*, an
@@ -121,8 +129,11 @@ never edits KGLite source, so a note is the only correct channel.
 
 ## 4. Write + report
 
-Write the file to `<target>/inbox/unread/<filename>` and report the full path.
-Don't move or touch anything in our own inbox — this skill only *sends*.
+Write to `<target>/inbox/unread/<filename>` with exclusive creation. Treat an
+identical previously delivered batch as already sent; otherwise use a unique
+suffix. Never overwrite another message. Read back before reporting delivery;
+after an uncertain write, inspect the destination before retrying. Report the
+full path and delivery state. Do not move our own inbox messages.
 
 ## Notes
 
@@ -134,4 +145,5 @@ Don't move or touch anything in our own inbox — this skill only *sends*.
   was ambiguous, confirm with the user before writing.
 - A local inbox note is a **local file, not a public post**. It does not need
   the verbatim-text approval that CLAUDE.md → "Public posts" requires; nothing
-  here leaves the machine.
+  here leaves the machine. Authorization for the recipient and purpose is
+  nevertheless required as described above.

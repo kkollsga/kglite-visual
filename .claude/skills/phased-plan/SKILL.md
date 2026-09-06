@@ -5,10 +5,10 @@ description: Run a large feature or refactor as a gated, phased project. Starts 
 
 # Phased plan
 
-For any large feature or non-trivial refactor. **Demand this skill** when the
-user kicks off such work. Do **not** use standard plan mode
-(`EnterPlanMode` / `ExitPlanMode`) — this skill builds its own gated phased
-plan instead of the harness's generic plan.
+Use for substantial work that benefits from separately testable phases. Respect
+the user's chosen workflow and existing scope approval; a small fix or review
+alone does not require this process. This skill builds its own phased plan.
+Use available harness tools; named agent roles are not required API names.
 
 ## Working dir: `dev-docs/` (gitignored)
 
@@ -27,74 +27,43 @@ the phased-plan-relevant subset:**
   → **`bench/out/`** (>14-day purge; never write artifacts next to the
   script).
 
-## Doctrine sync — first action of the run, before Phase −1
+## Doctrine sync — before planning
 
-The estate's rules live in the sibling `doctrine` repo and are versioned.
-**Pull them forward before planning anything**, so a plan is never built on
-doctrine this repo has already been told is superseded.
+Follow `../doctrine/learn-from-us.md` → **Doctrine sync procedure** against
+`dev-docs/.doctrine-synced`, or reuse completed evidence from this session.
+Compare numeric semver tuples; a missing marker requires an initial audit.
+Deferred actions do not count as completed. Advance atomically only through
+contiguous fully completed entries, after authority merges, sweeps and mirror
+verification (`make sync-agents`, `make check-skill-mirrors`).
 
-1. Read **`../doctrine/VERSION`** and **`dev-docs/.doctrine-synced`**. If the
-   marker is absent, create it with the current version and note in the
-   report-out that this was a first sync.
-2. **Versions equal → done.** That is the normal case and it costs **one file
-   read**; it is never worth skipping to save time, and "we're probably
-   current" is not the check.
-3. **Doctrine ahead → read `../doctrine/CHANGELOG.md` forward from the
-   marker** and act on every entry newer than it. Each item carries exactly
-   one action class:
-   - **`[skills-update]`** — merge the change into this repo's declared
-     **authority** (see the Authority line at the top of the conventions
-     file) and regenerate the adapter from it in the same action; verify with
-     `make check-skill-mirrors`. Never hand-port into an adapter — that is
-     what `R7` measures.
-   - **`[local-sweep]`** — run the check command the entry states. If it comes
-     back clean, say so and move on. **If it fails, the sweep becomes Phase 0
-     work of *this* plan** — scoped, listed and visible in the plan doc, never
-     a silent side-task folded into an unrelated phase.
-   - **`[info]`** — nothing to do.
-4. **Write the new version to `dev-docs/.doctrine-synced` only after those
-   actions completed.** A marker written first permanently hides the entry it
-   skipped: the next run compares against it and sees nothing.
+kglite-visual is a consumer: read and name the oracle version; never edit the
+oracle from here (R14). Versioned corrections are source doctrine even where
+reference snapshots normally originate in KGLite. Preserve local improvements
+while merging corrections into `.claude/skills/` and `CLAUDE.md` (R7).
 
-**kglite-visual is a pure consumer of doctrine**, unlike KGLite, which is the
-source those entries are generated from. So: read the oracle first, name the
-version you read, and never "fix" the oracle from here (`R14`). A divergence
-you find between doctrine's reference copies and this repo's installed copies
-is either a **local improvement** (a candidate to upstream) or **staleness**
-(fixed *from* the oracle) — say which, then act on the authority rather than
-on whichever copy you happen to have open.
+## Phase −1 — Check existing work
 
-## Phase −1 — Start fresh (recommend cleanup first)
-
-Before investigating, **recommend the user run the `dev-docs-cleanup` skill**
-so we start from a tidy `dev-docs/` and a current `todos.md`. Relevant
-carried-over todos can then be folded into this plan — **only with the user's
-go-ahead.** If they decline, proceed without it.
+Read `dev-docs/todos.md` for relevant ongoing work and avoid duplicates. Run
+`dev-docs-cleanup` when stale entries impede this task and cleanup is authorized;
+otherwise proceed. Reuse existing permission to incorporate relevant actions.
 
 ## Phase 0 — Investigation (get a feel for scale before committing to a plan)
 
-- **Do not enter plan mode.** Investigate first, plan second.
-- **Read-only until approval.** The main loop makes **zero edits** during
-  Phase 0 and Phase 1 — no branch, no PR, no code, no file writes. All
-  investigation goes through **read-only `Explore` agents**; nothing touches
-  the working tree until the user approves the plan in Phase 1.
-- Kick off **investigator agents** equipped with the **code-review MCP**
-  (Cypher over the code graph + ripgrep). Fan them out in parallel — one per
-  subsystem / suspected blast-radius area. **Scale the count to blast
-  radius:** 1–2 for a medium change, more only for a genuinely large one.
-  Have them report: structure of the affected area, impacted paths / callers,
-  hidden couplings, existing test coverage, a rough size estimate — **and any
-  structural or design objection they hold.** Phase 0/1 is the only stage that
-  will hear it: an investigator that thinks a boundary is wrong says so *now*,
-  because review will not accept it later.
-- **While this repo is small or empty, the investigation looks outward.** The
-  code graph has nothing to map, and that is a fact to report, not a failed
-  investigation. Investigate instead: the actual `kglite` API surface (the
-  crate's docs and its Python stub, which is the stated source of truth for
-  its API), the actual cosmos.gl API, and the architecture plan read against
-  both. An investigator that reports "the plan assumes an API that does not
-  exist in the version we would pin" has done the most valuable thing this
-  phase can do.
+- Investigate before choosing implementation. Before scope approval, source
+  changes, branches and PRs wait; a reviewable plan and bounded scratch probes
+  in the session scratch area or documented dev-docs tier are permitted.
+- Use the code-review MCP for structural questions; verify active root and graph
+  freshness. If unavailable or incomplete, report that limit and inspect source.
+  Delegate independent subsystem investigations when the harness permits it;
+  otherwise investigate locally. Bound workers to read-only source and scratch
+  fixtures. Report affected structure, callers, hidden couplings, test coverage,
+  scale and design objections. Phase 0/1 settles design before implementation.
+
+- **Investigate outward dependencies too.** Check the actual pinned `kglite`
+  API (including its Python stub where applicable), the cosmos.gl API, and the
+  architecture plan against both. If the local graph has no relevant structure,
+  report that limit. An API assumed by the plan but absent from the pinned
+  version is a concrete planning finding.
 - **Probe behaviour before preserving it.** For a behaviour-preserving
   refactor, write a throwaway scratch script that exercises the paths you are
   about to move and capture their *actual* outputs — don't trust your mental
@@ -134,8 +103,9 @@ go-ahead.** If they decline, proceed without it.
   was never a decision point. **Checkable: the stop rule is in the approved
   plan, dated before the measuring phase ran.** One composed after the numbers
   are in is a rationalisation of the outcome.
-- No phase touches version manifests or CHANGELOG promotion — shipping is the
-  `release` skill's job.
+- No phase bumps package versions or promotes the release CHANGELOG block.
+  Dependency/feature manifest changes within the approved scope are permitted;
+  shipping is the `release` skill's job.
 - **Challenge the plan once before presenting it.** (a) List the factual
   claims it rests on — paths, call sites, API behaviour, cost attributions —
   and verify each against the code (or the upstream API), recording the
@@ -147,8 +117,8 @@ go-ahead.** If they decline, proceed without it.
   — argue it in the approval loop, unlabelled. **No severity tiers**:
   severity labels are how preferences get laundered, and planning needs only
   the binary *changes the plan* or *argued and settled*.
-- Present the plan, then **invite revision: ask the user to revise or approve,
-  and loop on their feedback until they approve.**
+- Present a concrete plan for scope/design decisions not yet authorized and
+  invite revision. Record approval already supplied; do not ask for it again.
 - **This is the stage where design critique belongs — raise it now or hold
   it.** "I would have designed this differently", "this should be split", "use
   X instead of Y", "that boundary is in the wrong place": all **in scope
@@ -158,15 +128,15 @@ go-ahead.** If they decline, proceed without it.
   correctness — never against a design someone preferred afterwards (CLAUDE.md
   → "Code review — report what is broken"). A design objection arriving at
   review time is late; it becomes input to the *next* plan.
-- **Hard stop — wait for an explicit go-ahead.** Do not create the branch,
-  open the PR, or write any code until the user says proceed. A simple proceed
-  is enough. Until then, stay read-only.
+- Begin implementation once scope is authorized. A required pending decision
+  remains pending until answered; elapsed time is not approval.
+
 - Once approved, **do not pause between phases.**
 
 ## Phase 2 — Branch + draft PR (the CI tracking handle)
 
-- Create a feature branch: `feat/<slug>` or `refactor/<slug>` (never work the
-  project directly on `main`).
+- Create the user-requested branch or follow the harness naming convention
+  (`codex/<slug>` in Codex); do not implement directly on `main`.
 - **Exactly one branch + one draft PR per plan. Phases are commits, never
   sub-branches** — no per-phase or per-workstream branches merged back later
   (one such plan left 8 stale branches in this estate). When the plan ships,
@@ -177,7 +147,9 @@ go-ahead.** If they decline, proceed without it.
   projects in `Rust/` (that habit left 7 worktrees totalling ~46 GB in the
   estate root). A fresh worktree inherits neither a build-cache symlink nor an
   installed `node_modules`; set both up before its first build or it
-  cold-builds onto whatever volume the workspace sits on.
+  cold-builds onto whatever volume the workspace sits on. Removal follows
+  `dev-docs-cleanup` §6, including verified staged/untracked recovery and
+  preservation of detached commits; do not substitute a plain `git diff`.
 - **Run the CI-only tier once before that first push**, not per phase
   (CLAUDE.md → "Build & test"). A long-lived branch can accumulate weeks of
   work that CI rejects on contact.
@@ -248,8 +220,9 @@ For every phase, in order:
    you push.
 6. **Retire any `todos.md` action this phase completed** — at phase-commit
    time, not as a separate pass:
-   - **Fully done** → remove the backlink line and move its supporting
-     `plans/<doc>.md` to `dev-docs/bin/` (7-day grace).
+   - **Fully done** → remove the backlink only after preserving required evidence;
+     archive unused detail via `dev-docs-cleanup` §5, with a unique completed
+     manifest and a fresh seven-day grace period. A plain move retains old mtime.
    - **Partially done** → leave the doc; trim the entry to what is left.
    - **Shared doc** (one `plans/` file backing several todos, e.g.
      `consider-for-future.md`) → remove only the closed entry; move the doc to
@@ -269,42 +242,25 @@ restart under another profile.
 Stop mid-plan only for a genuine blocker (unfixable test, architectural
 surprise invalidating a later phase). Surface it; don't push through.
 
-**Bugs that surface mid-plan — no bugs left behind. Fixing is the default; the
-backlog is for missing capability, never for a known defect.** The first
-question a surfaced defect asks is *fix it now*, and the answer is yes unless
-fixing it is genuinely impossible inside this plan. "Out of scope" is a reason
-to give the fix its **own** phase, not a reason to file the bug and walk past
-it.
+**Bugs found during the plan:** reproduce the failure, confirm the root cause
+and scan for its class. Fix defects within the authorized scope in a separate
+bisectable change where needed. A materially broader fix, separate investigation
+or blocked defect is preserved through `add-todo` under **Bugs (surfaced, not yet
+fixed)** with reproduction and reason. Do not force unrelated implementation to
+finish this plan. Keep missing capabilities and unmeasured hypotheses distinct.
 
-First, **classify — bug or missing capability**, because only one may be
-filed:
+An engine, Cypher or `.kgl` format defect belongs to KGLite, whose source remains
+read-only from here. Preserve our reproduction; use `notify` for an authorized
+send or record a pending draft. State the disposition in the report.
 
-- A **bug** is a defect in behaviour that exists: a wrong result, a crash,
-  data loss or corruption, a broken contract, a *measured* regression, a gate
-  that cannot fail, a claim the code contradicts. A bug is **fixed**, never
-  backlogged.
-- A **missing capability** is a feature that was never built. *That* is what
-  `plans/consider-for-future.md` is for.
+Use the repository's configured build-cache paths, including any shared target
+symlink. Check free space before builds; do not override `CARGO_TARGET_DIR` or
+`SCCACHE_DIR` based on an assumption about disk speed.
 
-Then fix, by where the bug lives:
-
-- **In scope** — reproduce, confirm the root cause, fix it as its **own
-  bisectable phase** (`Phase Nb`) with its own test and commit. Don't fold a
-  behaviour change into a mechanical-refactor commit.
-- **Out of scope** — still fix by default, as its own `Phase Nb`. Out-of-scope
-  changes the *commit boundary*, not the decision to fix. File to
-  `consider-for-future.md` only when fixing now is genuinely blocked, and then
-  it is a *surfaced* bug with a `todos.md` backlink and a cheap regression
-  assertion pinning it. Say **why** in the report-out.
-- **Upstream** — a defect that traces to `kglite`, the Cypher dialect or the
-  `.kgl` format is **not ours to fix**: KGLite is read-only from here. Pin it
-  locally with a regression assertion if we can, route it via `notify` with a
-  reproduction, and record it in the report-out.
-- **Suspected perf bug** — an unmeasured perf change is not a fix, so it earns
-  a measurement *before* the fix counts — but that measurement runs **in this
-  plan**, not deferred.
-
-Either way, record it in the **report-out** — a discovered bug never vanishes.
+Before Python correctness tests, rebuild the debug extension if any linked
+Rust engine/core/CLI code changed or a performance run left a release extension
+installed. A current debug extension can be reused. Rebuild the production
+frontend before embedding it in either CLI or Python artifacts.
 
 ## Phase 4 — Perf gate (only if the plan touched perf-sensitive paths)
 
@@ -315,8 +271,9 @@ per-cell statistic (p95/p99 for frame time, mean-of-first-events for
 time-to-first-paint, exact/median for deterministic quantities), the control
 cells and their ≥2× margin, the two agreeing runs, and the
 threshold-adjacent retake — before declaring done. Record the numbers **and
-the machine state they were taken under**. Fix regressions now, not in a
-follow-up.
+the machine state they were taken under**. Compare against published artifacts
+from an isolated environment, never a source-built ancestor. Fix regressions
+within scope; explicitly preserve any blocked fix.
 
 For plans that never touched those paths, skip this phase and say so.
 
@@ -341,11 +298,10 @@ block the branch — record it as input for the next plan
 Keep it under the 400-token rule and link the plan doc for detail:
 
 - **Phases** done (one line each) + the PR link / final commit shas.
-- **Bugs surfaced** during execution and each one's disposition — *fixed in
-  Phase Nb* by default; *routed upstream* with the note path; *filed to
-  backlog* only for a bug fixing-now was genuinely blocked, stating **why**
-  (not "out of scope" — that is a location, not a reason). **Mandatory even
-  if empty** ("no bugs surfaced").
+- **Bugs surfaced** and each disposition: fixed in a named phase; sent upstream
+  with the note path; or preserved with reproduction and a concrete scope/blocker
+  reason. Distinguish pending drafts from sent notes. Mandatory even if empty.
+
 - **Perf gate** result (per-cell statistic + verdict: flat / regression /
   improved), or "not applicable — no perf-sensitive path touched".
 - **Gate steps that were ABSENT** rather than green.

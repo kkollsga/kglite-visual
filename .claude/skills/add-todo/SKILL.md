@@ -44,6 +44,9 @@ pick up alone. For the whole set, before filing:
   own.
 - **Dedup against the existing backlog** — read `todos.md` first; fold an item
   that extends an existing thread into that thread instead of a new line.
+- **Separate evidence from proposals.** A confirmed defect names a failing
+  input/state. Unmeasured hypotheses and design preferences are planning input;
+  a review can correctly produce no items.
 - **Order by priority/effort** so the backlink hooks read sensibly.
 
 Then run steps 2–5 for each resulting item (step 1's index read is done once).
@@ -66,14 +69,12 @@ infer from context; ask only if you truly can't place it.
   → `## Bootstrap (carrying the project into existence)`. That section is
   deleted when it empties; do not resurrect it for ordinary work.
 
-**A bug is fixed, not filed.** A defect in behaviour that exists — a wrong
-result, a crash, data loss, a broken contract, a *measured* regression, a gate
-that cannot fail, a claim the code contradicts — gets fixed now or gets its own
-phase. The `Bugs` section is for a defect that is genuinely blocked from being
-fixed in the current run, and the entry must say **why** it could not be fixed
-("out of scope" is a location, not a reason). A *missing capability* is what
-the parking lot is for; filing a feature gap is correct, filing a bug is the
-anti-pattern this rule exists to kill.
+**Preserve defects without expanding the user's scope.** Fix confirmed defects
+within the authorized implementation scope in a bisectable change. A review or
+backlog request does not authorize implementation. Materially broader fixes,
+separate investigations and blocked defects are recorded under `Bugs`, with
+reproduction and the concrete reason they cannot be completed in this run.
+Missing capabilities belong in the parking lot; do not disguise bugs as features.
 
 ## 3. Ground it (cheap, high-value)
 
@@ -83,10 +84,7 @@ location is worth far more than a vague one. For a claimed bug, confirm it is a
 real defect and not intended behaviour before filing it. Convert any relative
 date to an absolute one.
 
-**Until this repo has code**, "pin the fix site" usually means pinning the
-*decision* site instead: the section of the architecture plan, or the upstream
-API the item depends on. Say which — an entry that looks grounded but points at
-nothing is worse than one that admits it is unscoped.
+
 
 ## 4. Choose the detail home (reuse first)
 
@@ -107,8 +105,7 @@ Scope the detail with these bullets (adapt to the item):
 - **Fix site + approach** — `file:line` (or the decision site) + the shape of
   the change.
 - **Regression pin** — for a correctness bug, the test the fix must land with.
-  *(This project has no suite yet; until it does, name the test that will have
-  to exist, so the fix cannot quietly ship untested.)*
+  Name the regression assertion that must fail before the fix.
 - **Effort** — rough size.
 
 ## 5. Add the lean backlink
@@ -117,7 +114,10 @@ Append **one line** to the chosen `todos.md` section:
 
 `- <short title> → [plans/<doc>.md](plans/<doc>.md) — <≤200-char hook with fix-site + effort>. Surfaced <date>.`
 
-Match the terse style of the existing lines. Do not duplicate the detail.
+Match the terse style. If the thread already has an entry, update its hook and
+detail instead of adding another backlink. Preserve essential evidence in the
+durable detail; an expiring inbox/temp link alone is not storage. Capturing a
+todo records a proposal or unresolved action; it does not authorize implementation.
 
 ## 6. Report
 

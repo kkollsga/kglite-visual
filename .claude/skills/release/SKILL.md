@@ -55,7 +55,8 @@ Four rules, and they override any instinct to check in:
    yourself writing "next I will…", do that thing instead.
 
 **The run is complete when the published artifact set and the tag are
-verified — or when you have surfaced a specific blocker you cannot fix.** "CI
+verified and authorized follow-up steps through step 16 are complete or carry
+a recorded blocker.** "CI
 is running", "the commit is ready" and "waiting for X" are not endings.
 
 **Stop only for:** an unfinished open PR at step 0, a genuine scope change (a
@@ -63,34 +64,33 @@ new version shape, a feature gap, a removal of declared functionality), a CI
 failure that survives ~3 fix attempts without progress, or a
 destructive/irreversible action outside the release itself.
 
-## Step 0 — land every open PR, or stop for the user's decision
+## Doctrine sync
 
-A release ships `main` complete: **every open PR is merged before the goal
-check** — none rides past a release silently. For each open PR:
+Before release work, follow `../doctrine/learn-from-us.md` → **Doctrine sync
+procedure**. Reuse a completed sync from this session. A pending action does
+not advance the marker; verify authorities and adapters before recording adoption.
 
-- **Finished** — ready for review (not draft), CI green on its head, no
-  conflicts against `main` → ff-merge it.
-- **Not finished** — draft, red or incomplete CI, merge conflicts, or visibly
-  partial work → **stop and put it to the user as a decision before any
-  release work begins.** Name the PR, its exact state, and the options:
-  *finish it as part of this run*, *merge it as-is*, or *defer it to the next
-  release*. This is a sanctioned stop under the autonomy contract (an
-  unfinished PR is a release-scope decision only the user can make), and it
-  sits at step 0 precisely so the run never stalls on it later.
+## Step 0 — establish and integrate the release scope
 
-A deferred PR is named in the final report with the user's decision recorded,
-not just "deferred". *(The prior rule elsewhere in this estate silently
-skipped drafts, and a release shipped past a draft fix branch the user learned
-about only from the final report. Skipping is a scope decision, so it belongs
-to the user, up front.)*
+Inventory open PRs. Include finished, green, conflict-free PRs unless the user
+already chose a different scope. For unfinished PRs, describe their state and
+resolve finish/defer decisions not already authorized. Record deferred PRs.
+
+Integrate selected heads into a release branch, preserving commits. If on main,
+create a temporary release branch and use an appropriate PR for full CI.
+Validate the combined HEAD: independently green PRs do not prove their
+combination. Prefer fast-forward integration; resolve conflicts and validate on
+the release branch. **Never push main to obtain pre-release CI.** Only step 9
+publishes, after the goal, test and version checks.
 
 ## Preconditions
 
-- **No release already staged.** `git log origin/main..HEAD --oneline | grep
-  -E "^\w+ release\("` — if it returns a commit, **keep that version** and
-  fold the new work into the same `[x.y.z]` block. One version bump per push
-  (`R5`).
-- On `main` (or a fold-into-main branch). If there is **unrelated uncommitted
+- Inspect unpublished commits against the verified remote default branch for
+  an existing release commit. Read the history command's own exit status; a
+  missing remote ref does not prove zero commits. Reuse an already prepared
+  version and fold follow-ups into its changelog block (R5).
+
+- On the release/integration branch. If there is **unrelated uncommitted
   work**, don't block on it and don't sweep it in: **stage every release file
   explicitly by path** (`git add <file> …`, never `git add -A` or `.`), then
   verify with `git status --porcelain` that only release files are staged. One
@@ -111,7 +111,10 @@ to the user, up front.)*
    HEAD is unchanged, do not rerun them. If evidence is missing or stale,
    rerun only the affected suites plus `make gate`. Never serialize CI locally
    — the green PR checks in step 3 are authoritative. Never run a
-   release-profile build as a correctness test.
+   release-profile build as a correctness test. Rebuild the debug Python
+   extension when changed linked Rust engine/core/CLI code or an installed
+   performance build makes it stale. A current debug extension can be reused;
+   rebuild the production frontend before embedding it in tested artifacts.
 
 3. **Test review before the CI push — the release's tests are reviewed like
    its code.** Walk the release diff test-first:
@@ -186,10 +189,8 @@ to the user, up front.)*
    committed baselines — the protocol framing baseline (P2,
    `crates/kglite-visual-core/tests/baselines/`) and the perf record (P4,
    `dev-docs/bench/results/results.csv`) — so every rule below is live, not
-   prospective. When this project has exact committed baselines — the protocol shape, a public API surface,
-   the type stubs, the perf baseline — refreshing them is
-   **artifact/data generation, not another test gate**. Rules that will apply
-   the day they exist:
+   prospective. Refreshing those baselines is **artifact/data generation, not another test
+   gate**. Apply these rules:
    - **No step in the refresh is best-effort.** A step that cannot do its job
      exits non-zero with the fix printed. A missing artifact, a wrong-version
      tool, a failed capture: all abort. Do the remediation and re-run; never
@@ -203,7 +204,9 @@ to the user, up front.)*
      frontend), captured under **whatever load the machine has**, with its
      control cells and **the machine state recorded** — it is a longitudinal
      record read several releases later, and an unrecorded hot capture is
-     indistinguishable from real drift (`R11`).
+     indistinguishable from real drift (`R11`). Compare against published
+     reference artifacts installed in isolation, not source-built ancestors;
+     record toolchains and consumed results. Honor configured build-cache paths.
    - **Add an anchor comparison against several releases back.** A gate that
      recaptures its own baseline each release structurally cannot see slow
      drift; 10% per release passes a 20% threshold forever. Recapturing must
@@ -250,10 +253,10 @@ to the user, up front.)*
     green on that SHA); **require the expected run count to be present** before
     concluding anything (a zero-incomplete loop exits instantly green on an
     empty array); and report **`conclusion`, not `status`**. A timeout is a
-    non-zero exit, never a pass. **(The workflow exists as of P6 and has
-    never run; the poller does not exist. Write it against `ci.yml`'s
-    `ci-success` aggregate, and poll the PUSH-triggered run — the same commit
-    can carry a `pull_request` run with identical check names.)**
+    non-zero exit, never a pass. **Poll the PUSH-triggered CI and release workflows for the publishing HEAD.
+    The same commit can carry a `pull_request` run with identical check names.
+    Use an existing verified poller if available; any new one must enforce the
+    run-presence, exact-HEAD and conclusion checks above.**
     - **CI fix-and-push loop — authorized, and it is a loop.** Diagnose, push
       `fix(...)` / `ci(...)`, poll again, repeat. Green means **continue to
       the next step in the same run**, not report and stop. Stop and surface
@@ -267,15 +270,14 @@ to the user, up front.)*
     five must-pass platform tags, the two best-effort aarch64 legs
     deliberately uncounted — before uploading, and creates the tag AFTER the
     upload so a failed publish leaves no tag claiming a release that does not
-    exist. Verify it independently anyway; a check that has never run is not
-    a check.)**
+    exist. Verify the published set independently as well.)**
     - **A version check answers "did something publish", never "did everything
       publish".** Cross-compiled legs are often best-effort, and an upload step
       without a fail-on-empty setting uploads an *empty* artifact from a green
       build — so a partial set ships and nothing says so. Compare the artifact
       count and platform tags against the previous release. For this project
-      the set is at least: the crates, and the wheel for **every** platform tag
-      the workflow claims to build.
+      the set is the sdist and wheels for the workflow's required platform tags,
+      with best-effort tags reported separately.
     - Conversely, an empty version read out of a manifest by a pipeline
       (`grep … | cut` reports cut's status, always 0) yields a green run that
       publishes *nothing* — a silent non-release. Assert the extracted version
@@ -290,7 +292,9 @@ to the user, up front.)*
       **Report a missing tag; never mint it locally**, which would hide the CI
       failure that caused it.
 
-12. **Notify affected downstreams.** Write a release note into `inbox/unread/`
+12. **Prepare affected-downstream notes.** Use `notify` to send only with
+    existing authorization for those recipients and that purpose. Otherwise
+    retain complete drafts and pending-send actions; continue cleanup. Send into `inbox/unread/`
     of each *affected* sibling only — one whose declared range excludes the
     new version, which pins a superseded exact version, which states a
     superseded version in published prose, or which references this release's
@@ -301,36 +305,21 @@ to the user, up front.)*
     unnotified elsewhere. **(No downstreams today. kglite-visual is a leaf: it
     consumes KGLite and nothing consumes it.)**
 
-13. **Delete the released branch** — local + remote. Once publish is verified
-    the feature branch is fully merged and its PR shows merged, so it is pure
-    clutter. `git branch -f main origin/main`, then `git switch main` (a
-    zero-diff switch when `main == HEAD`, so working-tree WIP is preserved),
-    then `git branch -d <branch>` (it refuses if somehow unmerged — don't
-    `-D` past that) and delete the remote branch. Confirm the PR shows merged;
-    if it shows open, the commits didn't land — investigate, don't force-close.
+13. **Delete the released feature branch after verification.** Fetch `origin`
+    and confirm the released commit is contained in `origin/main`. Skip deletion
+    on `main`, for protected branches, or branches with unreleased commits.
+    Before a zero-diff switch verify `origin/main == HEAD`; if main advanced,
+    preserve this checkout and report the cleanup still needed. Do not force
+    update a branch checked out in another worktree. Switch only while preserving
+    unrelated work, use `git branch -d`, then delete the released remote ref.
+    Never force-delete or force-close a PR whose merge state is unexplained.
 
-14. **Tidy dev-docs — perform directly, no prompt** (the `/release` invocation
-    is the authorization). Follow the **`dev-docs-cleanup`** logic, which is
-    `todos.md`-driven: auto-purge the time-boxed dirs, then read **only
-    `todos.md`** — archive the now-shipped plan to `dev-docs/bin/` and prune
-    its entry, trim other completed entries (reading a backlinked doc only to
-    confirm it shipped). Carry the step-1 gaps into `todos.md`. Don't read
-    `designs/` or sweep through `plans/`.
-
-    **Then process `../kglite-visual-worktrees/` per that skill's §6** — it
-    exists only while worktrees are in progress, so the release empties it: per
-    worktree, migrate outstanding actions into `todos.md`; a **dirty** tree
-    gets its `git diff` saved under `dev-docs/` **first** — never remove
-    uncommitted work without that diff and a todos entry — then
-    `git worktree remove` + `prune`; finally delete the emptied directory.
-    Removing a worktree does not delete its branch, so unmerged work survives.
-    Anything ambiguous, or dirty *and* touched within the week, is left in
-    place and reported.
-
-    **Adapter resync:** perform `dev-docs-cleanup` §7 — never blind-sync a
-    divergent pair; an improvement is merged into the authority first and the
-    adapter regenerated from it (`R7`). `make check-skill-mirrors` is the end
-    state this must leave green.
+14. **Tidy dev-docs** through `dev-docs-cleanup`, within existing release
+    authorization. Preserve unfinished work and shared detail docs. Its §5 owns
+    archival with fresh timestamps; §6 owns complete verified worktree recovery,
+    including staged/untracked contents and detached commits; §7 owns adapter
+    reconciliation. Active/ambiguous worktrees may remain. Run the mirror gate
+    after adapter changes and preserve remaining actions in the backlog.
 
 15. **Snapshot / conformance.** Run `../doctrine/conform.sh kglite-visual` and
     report any rule violation — reported, never fatal to the release. Note
@@ -339,16 +328,13 @@ to the user, up front.)*
     `CLAUDE.md`, `.claude/skills/`, `Makefile` and `scripts/` are committed
     files rather than gitignored working state.
 
-16. **Prune the dev environment.** Every file accumulation needs a gate
-    (`R4`): the cargo target dir (cargo never garbage-collects it — a 503 GB
-    one was found in this estate), `node_modules`, the frontend build output,
-    wheel builds, and tool caches. `make prune` ages out the tiers that
-    declare a lifetime (dev-docs' `temp/`, `bench/out/`, `bin/`, and the
-    Playwright artifacts); `make clean-build` deletes `target/` — wheel
-    builds included — `node_modules`, `frontend/dist` and `.venv`;
-    `make gate` reports them against advisory ceilings. Then leave
-    the working tree in the canonical debug/dev state, not with the release
-    build installed.
+16. **Prune the dev environment within the verified disposal rules.** Follow
+    `dev-docs-cleanup` eligibility and retention checks; do not blindly invoke
+    `make prune` while it is age-only. `make clean-build` is human-owned under
+    CLAUDE.md; use the authorized `make prune-target` for bounded build-cache
+    reclamation. Preserve evidence and valuable work. Restore a current debug
+    Python extension after a release-profile performance build, with a current
+    embedded production frontend. Do not finish with stale Python test evidence.
 
 ## Notes
 

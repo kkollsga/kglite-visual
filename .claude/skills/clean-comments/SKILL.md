@@ -9,15 +9,9 @@ Make the comments in a measured scope **true and lean**: delete what carries
 no information, compress the rest to what it carries, fix comments the code
 contradicts (`R17`), and never touch what the tooling reads (`R18`).
 
-> **The tree is young (P1 landed 2026-08-29: three crates and a frontend
-> skeleton), so a full run here would measure almost nothing.** The skill was
-> installed before the first comment was written because the failure it repairs
-> is *accumulated*. The steady state is `R17`'s same-change duty (CLAUDE.md → "Code
-> health"): a change that falsifies a nearby comment corrects it in the same
-> change, and a change through commented code applies the information test to
-> what it touches. **This skill is for the residue, and a heavy residue is
-> itself the finding** that the same-change duty is being skipped — that is
-> the headline of the report, not the line counts.
+The steady state is R17's same-change duty (CLAUDE.md → "Code health").
+This skill handles residue; heavy residue after a recent cleanup means that
+duty is being skipped.
 
 ## 0. Shape of the run
 
@@ -26,34 +20,34 @@ verifies, reports — and does not edit comments itself. Sub-agents (**workers**
 do the edits, one file each, because de-duplication needs the whole-file read
 and self-reports need an independent checker. One exception: if measurement
 returns ≤ 2 files, skip the workers and apply the brief yourself — a
-coordinator with one worker is ceremony.
+coordinator with one worker is ceremony. If delegation is unavailable or not
+permitted, apply the brief locally and inspect the final diff separately.
+Capture each selected file's current bytes before editing, including user edits.
+Verification and rollback use this baseline, never blindly HEAD.
 
 Invocation authorizes the whole run (`R12`): it ends in the report or a named
 blocker, never in "workers are running".
 
 ## 1. Measure first, and be ready to stop
 
-Count comment lines per file over the scope (default: the whole repo; a
-subtree argument narrows it). This project has two comment syntaxes and they
-must both be counted or the head is wrong:
+Measure the requested scope (or the touched files when none is specified),
+not the whole repository by default. Collect candidate counts with `rg -c`
+without suppressing errors: status 1 means no matches, status 2 means the
+measurement failed. Store and inspect the result before sorting; a downstream
+`head` exit status cannot verify the scan. Counts are a heuristic and include
+lookalikes inside strings, so read selected files before classifying comments.
 
-```bash
-# Rust + Python
-rg -c --no-messages '^\s*(//|#)' -t rust -t py <scope> | sort -t: -k2 -rn | head -40
-# TypeScript / JavaScript, including block-comment continuation lines
-rg -c --no-messages '^\s*(//|/\*|\*)' -t ts -t js <scope> | sort -t: -k2 -rn | head -40
-```
+Compute the total across the entire selected scope before taking the **head**:
+the files that jointly hold roughly half its comment lines.
+**Stop rule, decided before counting (R13):** if the head is empty or trivially
+small, report "already lean — nothing to do" and stop. A cleanup that runs
+regardless of what measurement says is a formality with a diff attached. A
+heavy head right after a recent cleanup is itself the finding: R17's
+same-change duty is being skipped — say so in the report.
 
-Take the **head**: the files that jointly hold ~half the scope's comment
-lines. **Stop rule, decided before counting (`R13`):** if the head is empty or
-trivially small, report "already lean — nothing to do" and stop. A cleanup
-that runs regardless of what measurement says is a formality with a diff
-attached.
-
-Expect the two languages to split differently and **report them separately** —
-a generated-ish protocol encoder and a hand-written renderer adapter do not
-have the same right answer, and a single head list ranks them against each
-other for no reason.
+Count Rust/Python line comments and TypeScript/JavaScript block continuations.
+Report Rust and frontend counts separately; measure the full selected scope
+before choosing the head, without truncating the scan with `head -40`.
 
 ## 2. Assemble the worker brief (once, fixed)
 
@@ -77,7 +71,8 @@ format it does not own, and that is exactly where a deleted comment costs a
 user a legible error); **protocol-version handling** on either side of the
 wire, for the same reason; regression rationale in tests — the reason the test
 is not deletable; bail reasons in any planner-like code, where deleting one
-invites a wrong-results regression a comparison-based corpus *cannot* catch;
+can introduce a shared executor defect that optimized-vs-naive comparison
+cannot catch (that comparison does catch optimizer divergence);
 and a repeated comment that is a **local contract** rather than a duplicate —
 eight identical arena-guard preconditions were kept by four independent agents
 in KGLite because collapsing them parks the protocol in one arbitrary
@@ -177,20 +172,20 @@ Worker summaries were wrong twice in one day on the audit that bought this
 skill (one claimed it left published C-ABI docs alone while two of its
 compressions were inside one). In this order:
 
-1. **Comment-only diff check, before any formatter.** Every changed line, both
-   sides of the diff, is a comment line or blank. Rust/TS: audit that each
-   changed line starts with a comment marker (`//`, `/*`, `*`, `///`).
-   Python: parse both revisions (`git show HEAD:<file>` vs worktree), strip
-   docstrings, compare ASTs — equal, or the file is reverted and reported.
-2. **Run the formatters for real, not `--check`.** Comment removal *moves
-   code*: `cargo fmt` collapses a block whose only content was a comment, and
-   removing a separator reorders `use` statements; Prettier does the analogous
-   thing to a TS block. Code motion introduced *by the formatter* is the only
-   non-comment change allowed in the final diff.
-3. **Re-run every gate that reads comments** (§2's list — empty today, so this
-   step is currently a no-op and **must be reported as such**, not silently
-   skipped). Re-diff any generated contract artifact the touched surfaces feed.
-   An unexplained artifact diff reverts the file that caused it.
+1. **Comment-only check before formatting, against captured pre-edit bytes.**
+   Rust/TypeScript: compare token streams with a lexer that distinguishes comments
+   from string/raw-string contents. Prefixes alone do not prove equivalence. If a
+   suitable lexer is unavailable, inspect changed spans and state the limitation.
+   Python: compare ASTs after removing docstrings, then separately check changed
+   docstring consumers (`__doc__` can affect runtime output). Undo behavioral
+   changes using only this run's edits; preserve pre-existing work.
+2. **Run the formatters for real.** `cargo fmt` and the frontend formatter can
+   move code after comment removal. Inspect their delta; only formatter-induced
+   code motion is allowed. Never restore a whole file from HEAD over user edits.
+3. **Run the gates for applicable readers in §2.** Regenerate and re-diff touched
+   TypeScript/protocol contracts and run the relevant freshness/baseline checks;
+   run clippy on touched crates. Preserve published reader contracts. Undo this
+   run's causative edits for unexplained artifact changes, retaining user work.
 
 ## 6. Report
 
@@ -204,7 +199,9 @@ compressions were inside one). In this order:
 - Findings fixed in-run are part of the diff; anything larger — code defects
   workers noticed, cross-file de-dup decisions, a reader-list gap — goes
   through `add-todo` under its entry rules. Anything reported as a finding
-  meets `R15`'s bar: a concrete failure, or it is not reported.
+  meets `R15`'s bar: a concrete failure, or it is not reported. A comment-cleanup
+  request does not authorize unrelated implementation; preserve blocked defects
+  and their evidence explicitly.
 - **Budget for findings, not just deletions.** Reading comments against code
   is effective static analysis: the audit that bought this skill surfaced ~60
   code-contradicted comments, three undocumented public API surfaces and two
