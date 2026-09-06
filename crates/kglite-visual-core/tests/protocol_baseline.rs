@@ -191,7 +191,7 @@ fn generate_framing_golden() {
         }),
         ("appearance", {
             let mut enc = ResponseEncoder::new();
-            enc.push_json(MessageType::Appearance, r#"{"color_by":"field"}"#);
+            enc.push_json(MessageType::Appearance, r#"{"color_by":"field","color_field":{"kind":"property","name":"field"},"size_by":null,"size_field":null}"#);
             enc.finish()
         }),
         // v4's layout (E5). Two frames, and the pairing is the point: the
@@ -209,7 +209,7 @@ fn generate_framing_golden() {
             let mut enc = ResponseEncoder::new();
             enc.push_json(
                 MessageType::Records,
-                r#"{"generation":"fixture-generation","rows":[]}"#,
+                r#"{"generation":"fixture-generation","columns":[{"name":"Total degree","types":["int64"],"field":{"kind":"derived","calculation_id":"fixture-degree","column":"total"}}],"rows":[]}"#,
             );
             enc.finish()
         }),
@@ -220,7 +220,7 @@ fn generate_framing_golden() {
         }),
         ("shared-update", {
             let mut enc = ResponseEncoder::new();
-            enc.push_json(MessageType::SharedUpdate, r#"{"snapshot":{"stamp":{"generation":"fixture-generation","revision":"1"},"content_revision":"1","appearance_mapping":{"scope":"loaded","nodes":[],"categories":[],"other_categories":0,"size_min":null,"size_max":null},"saved_view":null,"history":{"entries":[],"oldest_available":null,"evicted_count":"0"},"presentation":{"label_density":1.0,"prioritize_selected_labels":true,"prioritize_hovered_labels":false,"edge_opacity":1.0,"node_size_min":4.0,"node_size_max":22.0,"legend_visible":true}},"request_id":"fixture-request","focus":null,"mutation_kind":"query","compacted":false,"restored":false}"#);
+            enc.push_json(MessageType::SharedUpdate, r#"{"snapshot":{"stamp":{"generation":"fixture-generation","revision":"1"},"content_revision":"1","calculations":[],"appearance":{"color_by":null,"size_by":null,"color_field":null,"size_field":null},"appearance_mapping":{"scope":"loaded","nodes":[],"categories":[],"other_categories":0,"size_min":null,"size_max":null},"saved_view":null,"history":{"entries":[],"oldest_available":null,"evicted_count":"0"},"presentation":{"label_density":1.0,"prioritize_selected_labels":true,"prioritize_hovered_labels":false,"edge_opacity":1.0,"node_size_min":4.0,"node_size_max":22.0,"legend_visible":true}},"request_id":"fixture-request","focus":null,"mutation_kind":"query","compacted":false,"restored":false}"#);
             enc.push_f32(MessageType::Points, &[1.0, 2.0]);
             enc.push_f32(MessageType::Links, &[]);
             enc.finish()

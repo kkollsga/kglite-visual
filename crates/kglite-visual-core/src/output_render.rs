@@ -196,18 +196,59 @@ fn scene_status(
         "Deterministic server image".into(),
     ];
     if state.presentation.legend_visible {
-        if let Some(field) = &state.appearance.color_by {
+        if let Some(field) = &state.appearance.color_field {
+            let field = channel_label(state, field);
             status.push(format!(
                 "Color: {field} · {} loaded categories",
                 state.appearance_mapping.categories.len()
                     + state.appearance_mapping.other_categories as usize
             ));
         }
-        if let Some(field) = &state.appearance.size_by {
+        if let Some(field) = &state.appearance.size_field {
+            let field = channel_label(state, field);
             status.push(format!("Size: {field} · loaded values"));
         }
     }
+    status.extend(frozen_input_status(state));
     status
+}
+
+fn channel_label(state: &SharedViewState, field: &crate::subset::FieldRef) -> String {
+    match field {
+        crate::subset::FieldRef::Property { name } => name.clone(),
+        crate::subset::FieldRef::Derived {
+            calculation_id,
+            column,
+        } => state
+            .calculations
+            .iter()
+            .find(|meta| &meta.id == calculation_id)
+            .and_then(|meta| {
+                meta.fields
+                    .iter()
+                    .find(|definition| &definition.field == field)
+            })
+            .map(|definition| definition.label.clone())
+            .unwrap_or_else(|| format!("Unavailable calculation ({column})")),
+    }
+}
+
+fn frozen_input_status(state: &SharedViewState) -> Vec<String> {
+    let mut seen = HashSet::new();
+    [&state.appearance.color_field, &state.appearance.size_field].into_iter().flatten()
+        .filter_map(|field| {
+            let crate::subset::FieldRef::Derived { calculation_id, .. } = field else { return None; };
+            if !seen.insert(calculation_id) { return None; }
+            let Some(meta) = state.calculations.iter().find(|meta| &meta.id == calculation_id) else {
+                return Some(format!("{} · frozen input unavailable", channel_label(state, field)));
+            };
+            let label = match meta.kind {
+                crate::calculations::CalculationKind::Degree => "Degree",
+                crate::calculations::CalculationKind::WeakComponents => "Weak components",
+            };
+            Some(format!("{label} · frozen visible input · revision {} · subset {} · {} nodes · {} relation records",
+                meta.input_stamp.revision, meta.input_subset_revision, meta.node_count, meta.edge_count))
+        }).collect()
 }
 
 fn node_refs(references: &[ViewReference]) -> HashSet<u32> {

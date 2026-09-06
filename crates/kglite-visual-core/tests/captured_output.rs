@@ -176,6 +176,8 @@ fn canonical_mapping_preserves_typed_categories_and_adjacent_large_integer_sizes
     let session = fixture();
     session
         .handle(&Request::Appearance(AppearanceRequest {
+            color_field: None,
+            size_field: None,
             color_by: Some("category".into()),
             size_by: Some("score".into()),
         }))
@@ -223,6 +225,8 @@ fn presentation_is_atomic_preserves_channels_and_captures_legend_visibility() {
     let session = fixture();
     session
         .handle(&Request::Appearance(AppearanceRequest {
+            color_field: None,
+            size_field: None,
             color_by: Some("category".into()),
             size_by: None,
         }))
@@ -240,6 +244,8 @@ fn presentation_is_atomic_preserves_channels_and_captures_legend_visibility() {
     assert_eq!(before.meta.appearance.color_by.as_deref(), Some("category"));
     let bad = Request::Style(StyleRequest {
         appearance: Some(AppearanceRequest {
+            color_field: None,
+            size_field: None,
             color_by: None,
             size_by: None,
         }),
@@ -351,6 +357,7 @@ fn huge_columnar_string_refuses_output_and_records_return_only_bounded_preview()
         .is_err());
     let records = session
         .records(&RecordsRequest {
+            field_refs: None,
             handles: vec![session.node_handle(0)],
             fields: vec!["huge".into()],
             offset: 0,
@@ -369,6 +376,8 @@ fn view_state_settings_come_from_the_acknowledged_stamp() {
     session
         .handle(&Request::Style(StyleRequest {
             appearance: Some(AppearanceRequest {
+                color_field: None,
+                size_field: None,
                 color_by: Some("category".into()),
                 size_by: None,
             }),

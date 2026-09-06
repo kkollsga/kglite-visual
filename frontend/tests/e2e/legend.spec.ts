@@ -59,7 +59,7 @@ test('the legend lists the encoding in force, and changes when it does', async (
     expect(values.length).toBeGreaterThan(1)
 
     await openDrawer(page, 'appearance')
-    await page.getByTestId('color-by').selectOption(property as string)
+    await page.getByTestId('color-by').selectOption(`property:${JSON.stringify(property)}`)
     await page.waitForFunction((name) => window.__kglv.colorBy === name, property, {
       timeout: 15_000,
     })

@@ -190,6 +190,7 @@ fn router(state: AppState) -> Router {
         // be re-run by any cache or prefetcher in the path.
         .route("/api/cypher", post(api::cypher))
         .route("/api/records", post(api::records))
+        .route("/api/calculate", post(api::calculate))
         .route("/api/field-detail", post(api::field_detail))
         .route("/api/browse-type", post(api::browse_type))
         .route("/api/load-nodes", post(api::load_nodes))

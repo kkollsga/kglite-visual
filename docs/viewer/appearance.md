@@ -12,6 +12,9 @@ not silently change the scale. Typed category labels distinguish a number from
 a string containing the same characters. Missing and unavailable values remain
 explicit rather than becoming invented measurements.
 
+[Calculated fields](calculations.md) can also supply colour and size. Their
+names identify the frozen calculation, separately from source properties.
+
 ```bash
 curl -s -XPOST $B/api/appearance -H "$C" -d '{"color_by":"city","size_by":"age"}'
 ```

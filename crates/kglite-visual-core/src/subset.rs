@@ -15,7 +15,7 @@ pub const MAX_PREDICATE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
-#[serde(tag = "kind", rename_all = "kebab-case")]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum FieldRef {
     Property {
         name: String,
@@ -24,6 +24,30 @@ pub enum FieldRef {
         calculation_id: String,
         column: String,
     },
+}
+impl FieldRef {
+    pub(crate) fn validate(&self) -> Result<(), CoreError> {
+        let names: Vec<_> = match self {
+            Self::Property { name } => vec![name],
+            Self::Derived {
+                calculation_id,
+                column,
+            } => vec![calculation_id, column],
+        };
+        if names.iter().any(|name| name.is_empty() || name.len() > 256) {
+            return Err(refusal("field names must contain 1–256 bytes"));
+        }
+        Ok(())
+    }
+    pub fn label(&self) -> String {
+        match self {
+            Self::Property { name } => name.clone(),
+            Self::Derived {
+                calculation_id,
+                column,
+            } => format!("{calculation_id}: {column}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -208,7 +232,12 @@ fn field(predicate: &SubsetPredicate) -> Option<&FieldRef> {
         _ => None,
     }
 }
-fn read(graph: &DirGraph, derived: &FrozenFields, id: u32, field: &FieldRef) -> RecordCell {
+pub(crate) fn read(
+    graph: &DirGraph,
+    derived: &FrozenFields,
+    id: u32,
+    field: &FieldRef,
+) -> RecordCell {
     match field {
         FieldRef::Property { name } => records::read_cell(graph, id, name),
         FieldRef::Derived {
@@ -226,7 +255,9 @@ fn read(graph: &DirGraph, derived: &FrozenFields, id: u32, field: &FieldRef) -> 
                         RecordCell::Value { value }
                     }
                 })
-                .unwrap_or(RecordCell::Missing),
+                .unwrap_or_else(|| RecordCell::Unavailable {
+                    reason: "node is outside the frozen calculation input".into(),
+                }),
             None => RecordCell::Unavailable {
                 reason: "calculation is not available".into(),
             },
@@ -527,7 +558,7 @@ mod tests {
         assert!(numeric(&TypedValue::Int64("9223372036854775808".into())).is_none());
     }
     #[test]
-    fn derived_fields_are_namespaced_and_frozen_missing_is_not_null() {
+    fn derived_fields_are_namespaced_and_outside_input_is_unavailable() {
         let mut graph = DirGraph::new();
         execute_mut(
             &mut graph,
@@ -582,7 +613,10 @@ mod tests {
             1
         );
         assert_eq!(derived.values().next().unwrap().input_subset_revision, "4");
-        assert_eq!(read(&graph, &derived, 123, &computed), RecordCell::Missing);
+        assert!(matches!(
+            read(&graph, &derived, 123, &computed),
+            RecordCell::Unavailable { .. }
+        ));
         assert!(matches!(
             read(&graph, &FrozenFields::new(), 0, &computed),
             RecordCell::Unavailable { .. }

@@ -8,10 +8,13 @@
 
 pub mod appearance_mapping;
 pub mod bookmark;
+mod bookmark_calculations;
 mod bookmark_capture;
 mod bookmark_members;
 mod bookmark_restore;
 pub mod bound;
+mod calculation_kernels;
+pub mod calculations;
 pub mod control;
 pub mod error;
 pub mod expand;

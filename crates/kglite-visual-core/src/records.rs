@@ -94,11 +94,26 @@ pub enum RecordCell {
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct RecordsRequest {
     pub handles: Vec<NodeHandle>,
+    #[serde(default)]
     pub fields: Vec<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub field_refs: Option<Vec<crate::subset::FieldRef>>,
     #[serde(default)]
     pub offset: u32,
     #[serde(default = "default_page_size")]
     pub limit: u32,
+}
+
+impl RecordsRequest {
+    fn canonical_fields(&self) -> Vec<crate::subset::FieldRef> {
+        self.fields
+            .iter()
+            .cloned()
+            .map(|name| crate::subset::FieldRef::Property { name })
+            .chain(self.field_refs.iter().flatten().cloned())
+            .collect()
+    }
 }
 
 fn default_page_size() -> u32 {
@@ -121,6 +136,7 @@ pub struct LoadNodesRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct RecordColumn {
+    pub field: crate::subset::FieldRef,
     pub name: String,
     pub types: Vec<String>,
 }
@@ -149,19 +165,16 @@ pub struct RecordTable {
 }
 
 pub(crate) fn validate(request: &RecordsRequest) -> Result<(), CoreError> {
-    if request.handles.len() > MAX_RECORD_HANDLES || request.fields.len() > MAX_RECORD_FIELDS {
+    if request.handles.len() > MAX_RECORD_HANDLES
+        || request.fields.len() + request.field_refs.as_ref().map_or(0, Vec::len)
+            > MAX_RECORD_FIELDS
+    {
         return Err(CoreError::Request(format!(
             "records allow at most {MAX_RECORD_HANDLES} handles and {MAX_RECORD_FIELDS} fields"
         )));
     }
-    if request
-        .fields
-        .iter()
-        .any(|field| field.is_empty() || field.len() > 256)
-    {
-        return Err(CoreError::Request(
-            "record field names must contain 1–256 bytes".into(),
-        ));
+    for field in request.canonical_fields() {
+        field.validate()?;
     }
     Ok(())
 }
@@ -362,7 +375,8 @@ impl crate::Session {
         self.check_handles(&request.handles)?;
         let offset = (request.offset as usize).min(request.handles.len());
         let limit = (request.limit as usize).min(MAX_RECORD_ROWS);
-        let (stamp, subset_revision, slots) = {
+        let fields = request.canonical_fields();
+        let (stamp, subset_revision, slots, derived) = {
             let state = self.state_read();
             let visible: std::collections::HashSet<_> = state
                 .subset
@@ -386,12 +400,13 @@ impl crate::Session {
                 state.stamp(self.generation()),
                 state.subset_revision.to_string(),
                 slots,
+                state.derived.clone(),
             )
         };
         let mut table = RecordTable {
             stamp, subset_revision,
             generation: self.generation().into(),
-            columns: request.fields.iter().map(|name| RecordColumn { name: name.clone(), types: Vec::new() }).collect(),
+            columns: fields.iter().map(|field| RecordColumn { field: field.clone(), name: field.label(), types: Vec::new() }).collect(),
             rows: Vec::new(),
             bound: BoundInfo::new(0, request.handles.len().saturating_sub(offset)),
             next_offset: None,
@@ -404,10 +419,9 @@ impl crate::Session {
                 handle: handle.clone(),
                 slot,
                 visible,
-                cells: request
-                    .fields
+                cells: fields
                     .iter()
-                    .map(|field| read_cell(self.graph(), handle.node_id, field))
+                    .map(|field| crate::subset::read(self.graph(), &derived, handle.node_id, field))
                     .collect(),
             };
             let row_bytes = serde_json::to_vec(&row)

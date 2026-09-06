@@ -5,10 +5,10 @@ use kglite::api::{EdgeIndex, GraphRead};
 
 use crate::bookmark::{
     Bookmark, BookmarkFocus, BookmarkLayout, BookmarkMember, BookmarkName, BookmarkReference,
-    BookmarkSource, BOOKMARK_VERSION, MAX_BOOKMARK_BYTES,
+    BookmarkSource, MAX_BOOKMARK_BYTES,
 };
 use crate::bookmark_members;
-use crate::control::{Appearance, Focus};
+use crate::control::Focus;
 use crate::history::HistoryAction;
 use crate::query_provenance::{LoadEntitiesRequest, RelationHandle};
 use crate::records;
@@ -54,7 +54,8 @@ impl Session {
         {
             let mut state = candidate.state_write();
             state.predicates = bookmark.predicates.clone();
-            state.appearance = Appearance::new(bookmark.color_by.clone(), bookmark.size_by.clone());
+            state.appearance = crate::bookmark_calculations::appearance(bookmark)?;
+            state.calculations = bookmark.calculations.clone().unwrap_or_default();
             state.caption_by = bookmark.caption_by.clone();
             state.presentation = bookmark.presentation.clone();
             state.highlighted =
@@ -63,6 +64,7 @@ impl Session {
             state.last_layout = restore_layout(self, &bookmark.layout, &nodes, &state.view)?;
             state.layout_kernel = bookmark.layout.kernel_chosen;
             state.derived = self.restore_derived(bookmark, deadline)?;
+            crate::calculations::validate_results(&state.calculations, &state.derived)?;
             state.saved_view = None;
         }
         let replacement = candidate.state_read().clone();
@@ -206,10 +208,9 @@ impl Session {
 }
 
 pub fn validate_bookmark(bookmark: &Bookmark) -> Result<(), CoreError> {
-    if bookmark.version != BOOKMARK_VERSION {
-        return Err(refusal("unsupported bookmark version"));
-    }
+    crate::bookmark_calculations::validate_version(bookmark)?;
     records::serialized_bytes(bookmark, MAX_BOOKMARK_BYTES)?;
+    crate::bookmark_calculations::validate_values(bookmark)?;
     if bookmark.members.len() > records::MAX_LOADED_NODES
         || bookmark.relations.len() > records::MAX_LOADED_EDGES
     {

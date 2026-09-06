@@ -167,7 +167,7 @@ test('appearance moves both channels and the menus that show them', async ({ pag
     // The menu says what the graph is doing. A dropdown still reading
     // "capability" while the points are coloured by `department` is a UI lying
     // about its own state.
-    await expect(page.getByTestId('color-by')).toHaveValue('department')
+    await expect(page.getByTestId('color-by')).toHaveValue('property:"department"')
 
     // Clearing is an instruction, not an omission.
     await post(server.info.url, 'appearance', { color_by: null, size_by: null })

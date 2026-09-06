@@ -37,6 +37,8 @@ fn corrupt_misspelled_persisted_field_is_not_silently_replaced_with_none() {
     apply(
         &source,
         Request::Appearance(AppearanceRequest {
+            color_field: None,
+            size_field: None,
             color_by: Some("score".into()),
             size_by: None,
         }),
@@ -180,6 +182,8 @@ fn durable_reopen_restores_exact_parallel_edges_self_loop_filters_and_schema_coo
     apply(
         &source,
         Request::Appearance(AppearanceRequest {
+            color_field: None,
+            size_field: None,
             color_by: Some("score".into()),
             size_by: None,
         }),
@@ -356,6 +360,8 @@ fn stale_prepared_restore_cannot_replace_a_peer_change_or_its_history() {
     apply(
         &source,
         Request::Appearance(AppearanceRequest {
+            color_field: None,
+            size_field: None,
             color_by: Some("score".into()),
             size_by: None,
         }),
@@ -406,6 +412,8 @@ fn saved_local_selection_is_acknowledged_and_focus_does_not_dirty_it() {
     apply(
         &source,
         Request::Appearance(AppearanceRequest {
+            color_field: None,
+            size_field: None,
             color_by: Some("score".into()),
             size_by: None,
         }),
@@ -467,6 +475,8 @@ fn recovery_rolls_at_twenty_and_transient_actions_do_not_fill_it() {
         apply(
             &source,
             Request::Appearance(AppearanceRequest {
+                color_field: None,
+                size_field: None,
                 color_by: Some(format!("field{i}")),
                 size_by: None,
             }),

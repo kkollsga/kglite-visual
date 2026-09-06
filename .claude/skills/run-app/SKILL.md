@@ -214,9 +214,9 @@ neither.
 ## 3c. Drive the live view over MCP
 
 The running server speaks MCP at the `mcp` URL its stdout line printed —
-streamable HTTP, no second process, no discovery file. Twenty-six tools:
+streamable HTTP, no second process, no discovery file. Twenty-seven tools:
 `view_state`, `show_cypher`, `browse_type`, `load_nodes`, `load_entities`,
-`records`, `field_detail`, `expand`,
+`records`, `field_detail`, `calculate`, `expand`,
 `collapse`, `highlight`, `focus`, `set_appearance`, `set_subset`, `set_caption`,
 `set_layout`, `reset_view`, `render`, `list_saved_queries`, `run_saved_query`,
 `export_view`, `list_views`, `save_view`, `restore_view`, `delete_view`,
@@ -320,6 +320,19 @@ a truncated 200 in ~1 s — the deadline fix landed — but one hop wider is
 refused by the work-units guard after climbing ~3 GB of RSS, and the
 deadline bounds time, not memory. The preview is still the cheap way to
 learn the size; the count answers in ~100 ms.
+
+### Frozen visible calculations
+
+POST `/api/calculate` with `kind: "degree" | "weak-components"` and current
+`expected` stamp. Omit `calculation_id` for a new result; an existing ID
+explicitly recomputes the same kind on the current visible relation records.
+Results are under HTTP `meta.calculations`; the MCP `calculate` result carries
+`state.calculations`. Values are frozen until recomputation. Read them through
+Records `field_refs`, using the returned canonical derived FieldRef, and use
+that same reference in filters or appearance `color_field`/`size_field`.
+Outside-input nodes are unavailable, not zero. Saved views retain values and
+original input metadata. Verify an actual compute→Data→style→filter→save path
+before claiming that workflow works.
 
 **Prefer a running server's `/api/render` over one-shot CLI renders** when a
 server is already up: each CLI render loads the whole graph fresh (~627MB

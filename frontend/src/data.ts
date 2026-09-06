@@ -5,6 +5,8 @@ import type { RecordRow } from './generated/RecordRow'
 import type { RecordTable } from './generated/RecordTable'
 import type { SharedSnapshotMeta } from './generated/SharedSnapshotMeta'
 import { apiUrl } from './urls'
+import type { FieldRef } from './generated/FieldRef'
+import { fieldKey, fieldLabel, fieldTestId, calculationInputKey } from './fields'
 
 export const handleKey = (handle: NodeHandle): string => `${handle.generation}:${handle.node_id}`
 type Scope = 'visible' | 'loaded' | 'selected'
@@ -24,7 +26,7 @@ function button(text: string, testid: string, action: () => void): HTMLButtonEle
 }
 const MAX_BATCH_BYTES = 16 * 1024 * 1024
 
-/** Bounded source records, independent of the most recent query result. */
+/** Bounded records and frozen calculated fields, independent of query results. */
 export class DataWorkspace {
   readonly queryHost = el('section')
   private readonly recordsHost = el('section')
@@ -33,6 +35,7 @@ export class DataWorkspace {
   private readonly scope = el('select')
   private readonly status = el('p', 'No instances loaded. Browse a type in Explore to inspect records.')
   private readonly fieldsHost = el('div')
+  private readonly fieldStatus = el('p')
   private readonly typeNote = el('div')
   private readonly grid = el('div')
   private readonly pager = el('div')
@@ -41,11 +44,11 @@ export class DataWorkspace {
   private readonly csv = button('Download fetched records CSV', 'records-csv', () => this.exportCsv())
   private readonly fieldInput = el('input')
   private snapshot: SharedSnapshotMeta | null = null
-  private fields = ['id', 'title']
+  private fields: FieldRef[] = [{kind: 'property', name: 'id'}, {kind: 'property', name: 'title'}]
   private rows: RecordRow[] = []
   private selected = new Map<string, NodeHandle>()
   private selectedKey = ''
-  private sort: {field: number; descending: boolean} | null = null
+  private sort: {field: string; descending: boolean} | null = null
   private page = 0
   private pageSize = 100
   private nodeType: string | null = null
@@ -73,12 +76,13 @@ export class DataWorkspace {
     }
     tabs.append(this.recordsTab, this.queryTab)
     this.queryHost.dataset['testid'] = 'query-lane'; this.recordsHost.dataset['testid'] = 'records-lane'
+    this.fieldStatus.dataset['testid'] = 'records-field-status'; this.fieldStatus.setAttribute('role', 'status'); this.fieldStatus.className = 'kglv-hint kglv-warn'
     this.status.dataset['testid'] = 'records-status'; this.status.setAttribute('role', 'status')
     this.grid.className = 'kglv-record-grid'; this.fieldsHost.className = 'kglv-field-chips'
     this.showSelected = button('Show selection in Explore', 'records-show-selected', () => this.handlers.showGraph([...this.selected.values()]))
     const actions = el('div'); actions.className = 'kglv-data-actions'
     actions.append(this.scopeControl(), this.showSelected, this.selectionStatus, this.csv)
-    this.recordsHost.append(actions, this.typeNote, this.fieldControls(), this.fieldsHost, this.status, this.grid, this.pager)
+    this.recordsHost.append(actions, this.typeNote, this.fieldControls(), this.fieldsHost, this.fieldStatus, this.status, this.grid, this.pager)
     host.append(tabs, this.recordsHost, this.queryHost)
     this.paintFields(); this.paintLanes(); this.paintSelection()
   }
@@ -96,9 +100,9 @@ export class DataWorkspace {
     this.fieldInput.setAttribute('aria-label', 'Source property to add'); this.fieldInput.dataset['testid'] = 'records-field'
     const add = button('Add field', 'records-add-field', () => {
       const field = this.fieldInput.value.trim()
-      if (!field || this.fields.includes(field)) return
-      if (this.fields.length >= 32) { this.status.textContent = 'Choose at most 32 source fields.'; return }
-      this.fields.push(field); this.fieldInput.value = ''; this.page = 0; this.paintFields(); this.reload()
+      if (!field || this.fields.some(item => item.kind === 'property' && item.name === field)) return
+      if (this.fields.length >= 32) { this.status.textContent = 'Choose at most 32 fields.'; return }
+      this.fieldStatus.textContent = ''; this.fields.push({kind: 'property', name: field}); this.fieldInput.value = ''; this.page = 0; this.paintFields(); this.reload()
     })
     this.fieldInput.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); add.click() } }
     row.append(this.fieldInput, add)
@@ -106,11 +110,12 @@ export class DataWorkspace {
   }
   private paintFields(): void {
     this.fieldsHost.replaceChildren(...this.fields.map(field => {
-      const chip = button(`${field} ×`, `records-remove-${field}`, () => {
-        if (this.fields.length === 1) { this.status.textContent = 'Keep at least one source field.'; return }
-        this.fields = this.fields.filter(item => item !== field); this.sort = null; this.page = 0; this.paintFields(); this.reload()
+      const label = fieldLabel(field, this.snapshot?.calculations ?? [])
+      const chip = button(`${label} ×`, `records-remove-${fieldTestId(field)}`, () => {
+        if (this.fields.length === 1) { this.status.textContent = 'Keep at least one field.'; return }
+        this.fieldStatus.textContent = ''; this.fields = this.fields.filter(item => fieldKey(item) !== fieldKey(field)); if (this.sort?.field === fieldKey(field)) this.sort = null; this.page = 0; this.paintFields(); this.reload()
       })
-      chip.setAttribute('aria-label', `Remove field ${field}`)
+      chip.setAttribute('aria-label', `Remove field ${label}`)
       return chip
     }))
   }
@@ -131,17 +136,30 @@ export class DataWorkspace {
     this.page = 0; this.dirty = true; this.showRecords(); this.handlers.reveal()
   }
   showType(nodeType: string, fields: string[]): void {
-    this.nodeType = nodeType; this.scope.value = 'loaded'
-    this.fields = [...new Set(['id', 'title', ...fields])].slice(0, 12)
+    this.nodeType = nodeType; this.scope.value = 'loaded'; this.fieldStatus.textContent = ''
+    this.fields = [...new Set(['id', 'title', ...fields])].slice(0, 12).map(name => ({kind: 'property', name}))
     this.sort = null; this.page = 0; this.paintFields()
     const clear = button('All types', 'records-all-types', () => { this.nodeType = null; this.typeNote.replaceChildren(); this.reload() })
     this.typeNote.replaceChildren(el('span', `Loaded ${nodeType} records `), clear)
     this.dirty = true; this.showRecords(); this.handlers.reveal()
   }
+  showFields(fields: FieldRef[]): void {
+    const known = new Set(this.fields.map(fieldKey))
+    const additions = fields.filter(field => { const key = fieldKey(field); if (known.has(key)) return false; known.add(key); return true })
+    if (this.fields.length + additions.length > 32) {
+      this.showRecords(); this.handlers.reveal()
+      this.fieldStatus.textContent = `No calculated fields were added: ${additions.length} requested columns would exceed the 32-field limit. Remove ${this.fields.length + additions.length - 32} or more fields, then inspect this result again. Your current fields are unchanged.`
+      return
+    }
+    this.fieldStatus.textContent = ''
+    if (additions.length > 0) { this.fields.push(...additions); this.paintFields(); this.reload() }
+    this.showRecords(); this.handlers.reveal()
+  }
   update(snapshot: SharedSnapshotMeta): void {
     const before = this.membershipKey()
     const presentationChanged = this.snapshot?.subset_revision !== snapshot.subset_revision || this.snapshot?.topology_revision !== snapshot.topology_revision
     this.snapshot = snapshot
+    this.paintFields()
     if (before !== this.membershipKey()) this.reload()
     else if (presentationChanged && this.rows.length > 0) {
       this.reconcileRows()
@@ -179,7 +197,7 @@ export class DataWorkspace {
     return this.snapshot?.slice.nodes.filter(node => (this.nodeType === null || node.node_type === this.nodeType) &&
       (this.scope.value as Scope === 'loaded' || visible.has(handleKey(node.handle)))).map(node => node.handle) ?? []
   }
-  private membershipKey(): string { return `${this.snapshot?.stamp.generation ?? ''}|${this.scope.value}|${JSON.stringify(this.fields)}|${this.handles().map(handleKey).join(',')}` }
+  private membershipKey(): string { return `${this.snapshot?.stamp.generation ?? ''}|${this.scope.value}|${JSON.stringify(this.fields.map(field => [fieldKey(field), calculationInputKey(field, this.snapshot?.calculations ?? [])]))}|${this.handles().map(handleKey).join(',')}` }
   private reconcileRows(): void {
     const slots = new Map(this.snapshot?.slice.nodes.map(node => [handleKey(node.handle), node.slot]) ?? [])
     const visible = new Set(this.snapshot?.subset.visible_nodes.map(handleKey) ?? [])
@@ -191,7 +209,9 @@ export class DataWorkspace {
     const token = ++this.token
     const membership = this.membershipKey()
     this.abort?.abort(); this.abort = new AbortController()
-    const handles = this.handles(); const fields = [...this.fields]
+    const handles = this.handles(); const chosenFields = [...this.fields]
+    const fields = chosenFields.flatMap(field => field.kind === 'property' ? [field.name] : [])
+    const field_refs = chosenFields.filter(field => field.kind === 'derived')
     this.dirty = false; this.loading = true; this.rows = []; this.note = ''; this.paintGrid()
     const rows: RecordRow[] = []
     let offset: number | null = 0; let bytes = 0
@@ -199,14 +219,18 @@ export class DataWorkspace {
       while (offset !== null && handles.length > 0) {
         this.status.textContent = `Reading ${rows.length} / ${handles.length} ${this.scope.value} records…`
         const response = await fetch(apiUrl('api/records'), {method: 'POST', headers: {'content-type': 'application/json'}, signal: this.abort.signal,
-          body: JSON.stringify({handles, fields, offset, limit: 500, request_id: `records-${token}-${offset}`})})
+          body: JSON.stringify({handles, fields, field_refs, offset, limit: 500, request_id: `records-${token}-${offset}`})})
         if (!response.ok) throw new Error(`Records read refused (${response.status}): ${await response.text()}`)
         const text = await response.text()
         const table = JSON.parse(text) as RecordTable
         if (token !== this.token || this.snapshot === null || table.stamp.generation !== this.snapshot.stamp.generation || membership !== this.membershipKey()) return
         bytes += new TextEncoder().encode(text).length
         if (bytes > MAX_BATCH_BYTES) { this.note = 'Partial records: the 16 MiB Data limit was reached. Choose fewer fields to read more rows.'; break }
-        rows.push(...table.rows)
+        const columns = new Map(table.columns.map((column, index) => [fieldKey(column.field), index]))
+        rows.push(...table.rows.map(row => ({...row, cells: chosenFields.map(field => {
+          const index = columns.get(fieldKey(field))
+          return index === undefined ? {state: 'unavailable' as const, reason: 'The response did not include this field.'} : row.cells[index] ?? {state: 'unavailable' as const, reason: 'The response did not include this cell.'}
+        })})))
         if (table.next_offset !== null && table.next_offset <= offset) throw new Error('Records pagination did not advance.')
         offset = table.next_offset
         if (table.bound.truncated && offset === null) this.note = `Partial records: ${table.bound.returned} / ${table.bound.total} returned.`
@@ -221,16 +245,21 @@ export class DataWorkspace {
   private ordered(): RecordRow[] {
     if (this.sort === null) return this.rows
     const sort = this.sort
+    const index = this.fields.findIndex(field => fieldKey(field) === sort.field)
     return this.rows.map((row, index) => ({row, index})).sort((a, b) => {
-      const left = a.row.cells[sort.field] ?? {state: 'missing' as const}
-      const right = b.row.cells[sort.field] ?? {state: 'missing' as const}
+      const left = a.row.cells[index] ?? {state: 'missing' as const}
+      const right = b.row.cells[index] ?? {state: 'missing' as const}
       return compareCells(left, right, sort.descending) || a.index - b.index
     }).map(item => item.row)
   }
   private exportCsv(): void {
     try {
       const rows = this.ordered()
-      saveTableCsv(this.fields, rows.map(row => row.cells), `records-${this.scope.value}-fetched.csv`)
+      saveTableCsv(this.fields.map(field => {
+        const label = fieldLabel(field, this.snapshot?.calculations ?? [])
+        const input = field.kind === 'derived' ? this.snapshot?.calculations.find(item => item.id === field.calculation_id)?.input_stamp.revision : undefined
+        return input === undefined ? label : `${label} [frozen input revision ${input}]`
+      }), rows.map(row => row.cells), `records-${this.scope.value}-fetched.csv`)
       this.status.textContent = `Downloaded ${rows.length} fetched ${this.scope.value} records in current sort order. Each field includes cell state, value type and detail columns; partial previews stay partial.${this.note ? ` ${this.note}` : ''}`
     } catch (error) { this.status.textContent = error instanceof Error ? error.message : String(error) }
   }
@@ -241,14 +270,14 @@ export class DataWorkspace {
     const rows = this.ordered()
     this.page = Math.min(this.page, Math.max(0, Math.ceil(rows.length / this.pageSize) - 1))
     const from = this.page * this.pageSize; const shown = rows.slice(from, from + this.pageSize)
-    this.status.textContent = `${rows.length} / ${this.handles().length} ${this.scope.value} records${this.nodeType === null ? '' : ` · ${this.nodeType}`} · ${this.fields.length} source fields${this.note ? ` · Sort covers these ${rows.length} fetched records. ${this.note}` : ''}`
+    this.status.textContent = `${rows.length} / ${this.handles().length} ${this.scope.value} records${this.nodeType === null ? '' : ` · ${this.nodeType}`} · ${this.fields.filter(field => field.kind === 'property').length} source fields · ${this.fields.filter(field => field.kind === 'derived').length} frozen calculated fields${this.note ? ` · Sort covers these ${rows.length} fetched records. ${this.note}` : ''}`
     const table = el('table'); table.className = 'kglv-table'; table.dataset['testid'] = 'records-table'
     const head = el('tr'); head.append(el('th', 'Select'), el('th', 'Graph'))
-    this.fields.forEach((field, index) => {
-      const th = el('th'); const active = this.sort?.field === index
+    this.fields.forEach(field => {
+      const th = el('th'); const active = this.sort?.field === fieldKey(field)
       th.setAttribute('aria-sort', active ? this.sort?.descending ? 'descending' : 'ascending' : 'none')
-      const sort = button(`${field}${active ? this.sort?.descending ? ' ▾' : ' ▴' : ''}`, `records-sort-${field}`, () => {
-        this.sort = {field: index, descending: active && this.sort !== null ? !this.sort.descending : false}; this.page = 0; this.paintGrid()
+      const sort = button(`${fieldLabel(field, this.snapshot?.calculations ?? [])}${active ? this.sort?.descending ? ' ▾' : ' ▴' : ''}`, `records-sort-${fieldTestId(field)}`, () => {
+        this.sort = {field: fieldKey(field), descending: active && this.sort !== null ? !this.sort.descending : false}; this.page = 0; this.paintGrid()
       })
       sort.className = 'kglv-th-sort'; th.append(sort); head.append(th)
     })
@@ -269,7 +298,7 @@ export class DataWorkspace {
     tr.append(check, graph)
     row.cells.forEach((cell, index) => {
       const td = el('td'); const field = this.fields[index]
-      td.append(recordCell(cell, field === undefined ? undefined : () => this.handlers.inspectValue(row.handle, field)))
+      td.append(recordCell(cell, field?.kind === 'property' ? () => this.handlers.inspectValue(row.handle, field.name) : undefined))
       tr.append(td)
     })
     return tr

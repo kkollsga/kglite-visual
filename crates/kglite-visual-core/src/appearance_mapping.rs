@@ -83,7 +83,7 @@ pub(crate) fn compute(
     deadline: Option<Instant>,
 ) -> Result<AppearanceMapping, CoreError> {
     let mut mapping = AppearanceMapping::default();
-    if state.appearance.color_by.is_none() && state.appearance.size_by.is_none() {
+    if state.appearance.color_field.is_none() && state.appearance.size_field.is_none() {
         return Ok(mapping);
     }
     let _guard = graph.begin_read_pass();
@@ -108,10 +108,10 @@ pub(crate) fn compute(
             size_state: None,
         })
         .collect();
-    if let Some(field) = &state.appearance.color_by {
-        color(graph, field, &mut mapping, deadline)?;
+    if let Some(field) = &state.appearance.color_field {
+        color(graph, field, state, &mut mapping, deadline)?;
     }
-    if let Some(field) = &state.appearance.size_by {
+    if let Some(field) = &state.appearance.size_field {
         size(graph, field, state, &mut mapping, deadline)?;
     }
     records::serialized_bytes(&mapping, 2 * 1024 * 1024)?;
@@ -120,7 +120,8 @@ pub(crate) fn compute(
 
 fn color(
     graph: &DirGraph,
-    field: &str,
+    field: &crate::subset::FieldRef,
+    state: &SharedViewState,
     mapping: &mut AppearanceMapping,
     deadline: Option<Instant>,
 ) -> Result<(), CoreError> {
@@ -129,7 +130,7 @@ fn color(
     let mut bytes = 0usize;
     for node in &mut mapping.nodes {
         crate::source_identity::check_deadline(deadline)?;
-        let cell = records::read_cell(graph, node.handle.node_id, field);
+        let cell = crate::subset::read(graph, &state.derived, node.handle.node_id, field);
         node.color_state = Some(cell_state(&cell));
         node.color = Some(UNSET);
         let token = if let RecordCell::Value { value } = cell {
@@ -184,7 +185,7 @@ fn color(
 
 fn size(
     graph: &DirGraph,
-    field: &str,
+    field: &crate::subset::FieldRef,
     state: &SharedViewState,
     mapping: &mut AppearanceMapping,
     deadline: Option<Instant>,
@@ -192,7 +193,7 @@ fn size(
     let mut values = Vec::with_capacity(mapping.nodes.len());
     for node in &mut mapping.nodes {
         crate::source_identity::check_deadline(deadline)?;
-        let cell = records::read_cell(graph, node.handle.node_id, field);
+        let cell = crate::subset::read(graph, &state.derived, node.handle.node_id, field);
         node.size_state = Some(cell_state(&cell));
         let value = match cell {
             RecordCell::Value { value } if crate::subset::compare(&value, &value).is_some() => {

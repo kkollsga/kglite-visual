@@ -13,11 +13,15 @@ headless renderer are three consumers of it.
 
 ## The version number
 
-Every response carries `protocol_version`. It currently reads **9**.
+Every response carries `protocol_version`. It currently reads **10**.
 
 ```json
-{"protocol_version":9,"core_version":"<package version>","tier":"compact","slot_count":98,…}
+{"protocol_version":10,"core_version":"<package version>","tier":"compact","slot_count":98,…}
 ```
+
+Version 10 adds frozen calculation metadata and canonical field identities in
+Records and appearance channels. Degree and weak components share the same
+visible input and revision contract as filters and exports.
 
 Version 9 adds the canonical bounded appearance mapping and shared readability
 settings requests. Browsers and captured images consume the same colour/size

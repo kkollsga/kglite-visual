@@ -1,4 +1,3 @@
-import { requestNonce } from './request-id'
 /**
  * Entry point: connect, decode, render, and drive the drill-in.
  *
@@ -18,6 +17,10 @@ import './workspace.css'
 import { Workspace, type GraphScope } from './workspace'
 import { SharedState } from './shared'
 import { Filters } from './filters'
+import { requestNonce } from './request-id'
+import { Calculations } from './calculations'
+import { fieldLabel, calculationInputKey } from './fields'
+import type { FieldRef } from './generated/FieldRef'
 import { DataWorkspace, handleKey } from './data'
 import { FieldDetails } from './field-detail'
 import { ExplorationTrail } from './trail'
@@ -252,6 +255,10 @@ const captionValues = new Map<number, string>()
  */
 const schema = new SchemaCache()
 
+const calculations = new Calculations(workspace.panelHosts.data, {
+  calculate: (kind, calculation_id) => send({type: 'calculate', kind, calculation_id}),
+  inspect: fields => dataWorkspace?.showFields(fields),
+})
 const fieldDetails = new FieldDetails(root, () => shared.generation)
 dataWorkspace = new DataWorkspace(workspace.panelHosts.data, {
   select: handles => setTableSelection(handles),
@@ -299,8 +306,8 @@ const panels = new Panels(workspace.panelHosts.inspector, {
   focusHandle: handle => showEntities({nodes: [handle], relationships: [], truncated: false}),
   selectHandles: handles => setTableSelection(handles),
   showEntities: references => showEntities(references),
-  setColorBy: (property) => send({type: 'appearance', color_by: property, size_by: shared.snapshot?.appearance.size_by ?? null}),
-  setSizeBy: (property) => send({type: 'appearance', color_by: shared.snapshot?.appearance.color_by ?? null, size_by: property}),
+  setColorBy: field => send({type: 'appearance', color_field: field, size_field: shared.snapshot?.appearance.size_field ?? null}),
+  setSizeBy: field => send({type: 'appearance', color_field: shared.snapshot?.appearance.color_field ?? null, size_field: field}),
   setLayoutKernel: (kernel) => requestLayout(kernel),
   setCaptionBy: (_nodeType, property) => send({type: 'caption', caption_by: property}),
   saveQuery: (name, query) => void refreshQueries(store.saveQuery(name, query)),
@@ -632,7 +639,7 @@ function applyLayout(message: LayoutMessage): void {
 
 /** Drive both appearance channels from a remote command. */
 function applyAppearance(command: AppearanceCommand): void {
-  panels.setAppearanceSelection(command.color_by, command.size_by)
+  panels.setAppearanceSelection(command.color_by === null ? null : {kind: 'property', name: command.color_by}, command.size_by === null ? null : {kind: 'property', name: command.size_by})
   colorByName = command.color_by; sizeByName = command.size_by
   debugState.colorBy = colorByName; debugState.sizeBy = sizeByName
   redraw()
@@ -647,7 +654,7 @@ const transportHandlers: TransportHandlers = {
   onStatus: (connected) => {
     connectedAtom.set(connected)
     workspace.setConnected(connected)
-    if (!connected) readability.disconnected()
+    if (!connected) { readability.disconnected(); calculations.disconnected() }
     renderStatus()
   },
   onError: (message) => fail(message),
@@ -666,7 +673,7 @@ const transportHandlers: TransportHandlers = {
 }
 transport.connect(transportHandlers)
 
-const sharedMutations = new Set(['expand', 'collapse', 'browse-type', 'load-nodes', 'load-entities', 'reset', 'layout', 'appearance', 'presentation', 'caption', 'subset', 'focus', 'highlight'])
+const sharedMutations = new Set(['expand', 'collapse', 'browse-type', 'load-nodes', 'load-entities', 'reset', 'layout', 'appearance', 'presentation', 'calculate', 'caption', 'subset', 'focus', 'highlight'])
 function send(request: Request): string {
   const request_id = `${browserRequestPrefix}-${++requestSerial}`
   const mutation = sharedMutations.has(request.type) || (request.type === 'cypher' && request.as_graph)
@@ -810,7 +817,7 @@ async function handle(completed: Completed): Promise<void> {
         completed.value,
         captionByType.get(completed.value.node_type) ?? null,
       )
-      if (shared.snapshot !== null) panels.setAppearanceSelection(shared.snapshot.appearance.color_by, shared.snapshot.appearance.size_by)
+      if (shared.snapshot !== null) panels.setAppearanceSelection(shared.snapshot.appearance.color_field, shared.snapshot.appearance.size_field)
       debugState.appearanceCandidates = candidates
       debugState.approximateStats = approximate
       break
@@ -840,6 +847,7 @@ async function handle(completed: Completed): Promise<void> {
         if (requestKind === undefined && ![...privateRequests.values()].includes(completed.request_id)) break
       }
       if (requestKind === 'cypher' && privateRequests.get('cypher') !== completed.request_id) break
+      if (requestKind === 'calculate') { calculations.error(completed.value); break }
       if (requestKind === 'presentation') { readability.error(completed.value); break }
       if (requestKind === 'subset') { filters.error(completed.conflict !== undefined ? `Shared view changed: ${completed.value}. Review and apply again.` : completed.value); break }
       if (completed.conflict !== undefined) { filters.error(`Shared view changed: ${completed.value}. Review the current filters and apply again.`); break }
@@ -921,12 +929,14 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
   }
   const bound = snapshot.last_slice?.bound ?? snapshot.slice.bound
   noteTruncation(bound.truncated, bound.returned, bound.total, 'nodes', snapshot.last_slice?.link_bound ?? snapshot.slice.link_bound)
+  filters.setCalculations(snapshot.calculations)
   filters.update(snapshot.subset)
   readability.update(snapshot.presentation, message.meta.request_id)
   exportCard.update(snapshot)
   legend.setVisible(snapshot.presentation.legend_visible)
   if (previous?.presentation.edge_opacity !== snapshot.presentation.edge_opacity) surface?.graph.setConfigPartial({linkOpacity: snapshot.presentation.edge_opacity})
   dataWorkspace?.update(snapshot)
+  calculations.update(snapshot, message.meta.request_id)
   savedViews?.update(snapshot)
   redraw(layoutChanged || (topology && layoutKernel !== 'simulation') ? 'server' : undefined, topology)
   if (firstAdmission || emptiedByCollapse || (initialShared && instancesOnScreen() > 0) || (layoutChanged && snapshot.layout !== null)) fitVisible()
@@ -974,14 +984,16 @@ function applySnapshotMembership(change: SnapshotChange, message: {meta: SharedW
 
 function applySnapshotEncoding(change: SnapshotChange): boolean {
   const {snapshot, previous, topology} = change
-  const encodingChanged = topology || JSON.stringify(previous?.appearance) !== JSON.stringify(snapshot.appearance)
+  const inputKey = (state: SharedSnapshotMeta | null): string => JSON.stringify([state?.appearance.color_field, state?.appearance.size_field].map(field => field == null ? '' : calculationInputKey(field, state?.calculations ?? [])))
+  const encodingChanged = topology || JSON.stringify(previous?.appearance) !== JSON.stringify(snapshot.appearance) || inputKey(previous) !== inputKey(snapshot)
+  panels.setCalculations(snapshot.calculations)
   if (encodingChanged) {
-    colorByName = snapshot.appearance.color_by
+    colorByName = snapshot.appearance.color_field === null ? null : fieldLabel(snapshot.appearance.color_field, snapshot.calculations)
     if (colorByName !== null) legend.open()
-    sizeByName = snapshot.appearance.size_by
+    sizeByName = snapshot.appearance.size_field === null ? null : fieldLabel(snapshot.appearance.size_field, snapshot.calculations)
 
     debugState.colorBy = snapshot.appearance.color_by; debugState.sizeBy = sizeByName
-    panels.setAppearanceSelection(snapshot.appearance.color_by, sizeByName)
+    panels.setAppearanceSelection(snapshot.appearance.color_field, snapshot.appearance.size_field)
   }
   if (encodingChanged || previous?.presentation.node_size_min !== snapshot.presentation.node_size_min || previous?.presentation.node_size_max !== snapshot.presentation.node_size_max) mappedAppearance.set(snapshot.appearance_mapping)
   panels.setCaptionSelection(snapshot.caption_by)
@@ -1280,6 +1292,13 @@ function recomputeProjection(): void {
 }
 
 
+function snapshotField(channel: 'color' | 'size'): FieldRef | null { return shared.snapshot?.appearance[channel === 'color' ? 'color_field' : 'size_field'] ?? null }
+function appearanceScope(field: FieldRef | null): string {
+  if (field?.kind !== 'derived') return 'Domain: loaded instances'
+  const calculation = shared.snapshot?.calculations.find(item => item.id === field.calculation_id)
+  return `Frozen visible input revision ${calculation?.input_stamp.revision ?? '?'} · ${calculation?.node_count ?? 0} instances; outside input unavailable`
+}
+
 /** Legend rows use the core mapping and the same structural fallback as the points. */
 function legendSections(): LegendSection[] {
   const sections: LegendSection[] = []
@@ -1290,7 +1309,7 @@ function legendSections(): LegendSection[] {
     for (const node of mapping.nodes) if (node.color_state !== null && node.color_state !== 'value') states.set(node.color_state, (states.get(node.color_state) ?? 0) + 1)
     if (mapping.other_categories > 0) entries.push({color: UNSET_COLOR, label: `other · ${mapping.other_categories} categories`})
     for (const [state, count] of states) entries.push({color: UNSET_COLOR, label: `${state} · ${count}`})
-    sections.push({title: `colour — ${colorByName}`, entries, note: 'Domain: loaded instances. Visual filters keep these colors stable.'})
+    sections.push({title: `colour — ${colorByName}`, entries, note: `${appearanceScope(snapshotField('color'))}. Visual filters keep these colors stable.`})
   } else {
     // The structural encoding. These four literals mirror `baseColor` above.
     const entries: LegendEntry[] = [
@@ -1317,7 +1336,7 @@ function legendSections(): LegendSection[] {
     note:
       sizeByName === null
         ? 'a type circle grows with its member count (log); an instance node is fixed'
-        : `node size is ${sizeByName} · loaded instances · ${mapping?.size_min == null ? 'no numeric values' : `${typedText(mapping.size_min)} to ${typedText(mapping.size_max ?? mapping.size_min)}`} · ${shared.snapshot?.presentation.node_size_min ?? 4}–${shared.snapshot?.presentation.node_size_max ?? 22} radius; missing/non-numeric values use the minimum`,
+        : `node size is ${sizeByName} · ${appearanceScope(snapshotField('size'))} · ${mapping?.size_min == null ? 'no numeric values' : `${typedText(mapping.size_min)} to ${typedText(mapping.size_max ?? mapping.size_min)}`} · ${shared.snapshot?.presentation.node_size_min ?? 4}–${shared.snapshot?.presentation.node_size_max ?? 22} radius; missing/non-numeric values use the minimum`,
   })
   sections.push({
     title: 'links',

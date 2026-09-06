@@ -115,6 +115,7 @@ impl LayoutKernel {
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Request {
+    Calculate(crate::calculations::CalculateRequest),
     LoadEntities(crate::query_provenance::LoadEntitiesRequest),
     FieldDetail(crate::field_detail::FieldDetailRequest),
     Reset,
@@ -234,7 +235,8 @@ impl Request {
     pub fn is_shared(&self) -> bool {
         match self {
             Self::Cypher(request) => request.as_graph,
-            Self::LoadEntities(_)
+            Self::Calculate(_)
+            | Self::LoadEntities(_)
             | Self::Reset
             | Self::Subset(_)
             | Self::Appearance(_)

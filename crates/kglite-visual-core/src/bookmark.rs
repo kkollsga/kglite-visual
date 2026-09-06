@@ -8,7 +8,7 @@ use crate::shared::{RevisionStamp, ViewReference};
 use crate::source_identity::SourceFingerprint;
 use crate::subset::SubsetFilter;
 
-pub const BOOKMARK_VERSION: u32 = 1;
+pub const BOOKMARK_VERSION: u32 = 2;
 pub const MAX_BOOKMARK_BYTES: usize = 4 * 1024 * 1024;
 pub use crate::bookmark_restore::validate_bookmark;
 
@@ -119,8 +119,37 @@ pub struct BookmarkDerivedField {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 #[serde(deny_unknown_fields)]
+pub struct BookmarkChannels {
+    #[serde(deserialize_with = "required_option")]
+    pub color_field: Option<crate::subset::FieldRef>,
+    #[serde(deserialize_with = "required_option")]
+    pub size_field: Option<crate::subset::FieldRef>,
+}
+fn present_value<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../frontend/src/generated/")]
+#[serde(deny_unknown_fields)]
 pub struct Bookmark {
     pub version: u32,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_value"
+    )]
+    #[ts(optional)]
+    pub channels: Option<BookmarkChannels>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_value"
+    )]
+    #[ts(optional)]
+    pub calculations: Option<Vec<crate::calculations::CalculationMeta>>,
     pub source: BookmarkSource,
     pub members: Vec<BookmarkMember>,
     pub relations: Vec<BookmarkRelation>,

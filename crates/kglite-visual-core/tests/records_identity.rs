@@ -50,6 +50,7 @@ fn direct_records_keep_large_keys_zero_false_empty_missing_and_null() {
         .clone();
     let table = session
         .records(&RecordsRequest {
+            field_refs: None,
             handles: vec![handle],
             fields: vec![
                 "id".into(),
@@ -92,6 +93,7 @@ fn direct_records_keep_large_keys_zero_false_empty_missing_and_null() {
     assert!(null_key.key.is_none());
     let null_record = session
         .records(&RecordsRequest {
+            field_refs: None,
             handles: vec![null_key.handle.clone()],
             fields: vec!["id".into()],
             offset: 0,
@@ -122,6 +124,7 @@ fn direct_records_keep_large_keys_zero_false_empty_missing_and_null() {
     let foreign = build_session("CREATE (:P {id:9007199254740993})");
     assert!(foreign
         .records(&RecordsRequest {
+            field_refs: None,
             handles: vec![table.rows[0].handle.clone()],
             fields: vec![],
             offset: 0,
@@ -199,6 +202,7 @@ fn compaction_does_not_redirect_a_record_handle() {
     }
     let table = session
         .records(&RecordsRequest {
+            field_refs: None,
             handles: vec![survivor.clone()],
             fields: vec!["id".into()],
             offset: 0,
@@ -265,6 +269,7 @@ fn cell_preview_and_record_page_limits_are_explicit() {
         })
         .unwrap();
     let request = RecordsRequest {
+        field_refs: None,
         handles: slice
             .meta
             .nodes

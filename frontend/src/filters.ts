@@ -3,6 +3,9 @@ import type { SubsetPredicate } from './generated/SubsetPredicate'
 import type { SubsetSnapshot } from './generated/SubsetSnapshot'
 import type { TypedValue } from './generated/TypedValue'
 import { typedText } from './cells'
+import type { FieldRef } from './generated/FieldRef'
+import type { CalculationMeta } from './generated/CalculationMeta'
+import { fieldKey, fieldLabel } from './fields'
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, text = ''): HTMLElementTagNameMap[K] {
   const result = document.createElement(tag)
@@ -30,6 +33,9 @@ export class Filters {
   private readonly status = node('p', 'Filters apply to loaded instances and their relationships.')
   private readonly kind = select(['type', 'category', 'numeric-range', 'missing', 'relation', 'hide-isolated'], 'subset-kind')
   private readonly field = input('Property name', 'subset-field')
+  private readonly fieldKind = select(['source property', 'calculated field'], 'subset-field-kind')
+  private readonly derivedField = select([], 'subset-derived-field')
+  private calculations: CalculationMeta[] = []
   private readonly values = input('Values, separated by commas', 'subset-values')
   private readonly valueType = select(['string', 'int64', 'float64', 'boolean'], 'subset-value-type')
   private readonly min = input('Minimum (inclusive, optional)', 'subset-min')
@@ -58,13 +64,22 @@ export class Filters {
     this.add.onclick = () => { try { this.apply([...this.predicates, { id: `ui-${Date.now()}-${++this.serial}`, enabled: true, predicate: this.predicate() }]); this.pending() } catch (error) { this.error(String(error)) } }
     this.clear.onclick = () => { this.apply([]); this.pending() }
     this.kind.onchange = () => this.form()
+    this.fieldKind.setAttribute('aria-label', 'Field source'); this.derivedField.setAttribute('aria-label', 'Calculated filter field')
+    this.fieldKind.onchange = () => { if (this.fieldKind.value === 'calculated field') this.valueType.value = 'int64'; this.form() }
     const form = node('div'); form.className = 'kglv-filter-form'
-    form.append(this.kind, this.choices, this.field, this.valueType, this.values, this.min, this.max, nullLabel, missingLabel, this.add, this.clear)
+    form.append(this.kind, this.choices, this.fieldKind, this.field, this.derivedField, this.valueType, this.values, this.min, this.max, nullLabel, missingLabel, this.add, this.clear)
     host.append(title, this.status, this.list, form, this.detail)
     this.form()
   }
 
   setSchema(types: string[], relations: string[]): void { this.types = types; this.relations = relations; this.form() }
+  setCalculations(calculations: CalculationMeta[]): void {
+    const before = this.derivedField.value
+    this.calculations = calculations
+    this.derivedField.replaceChildren(...calculations.flatMap(calculation => calculation.fields.map(definition => new Option(fieldLabel(definition.field, calculations), fieldKey(definition.field)))))
+    if ([...this.derivedField.options].some(option => option.value === before)) this.derivedField.value = before
+    this.form()
+  }
   error(message: string): void { this.status.textContent = message; this.add.disabled = this.clear.disabled = false }
   private pending(): void { this.status.textContent = 'Applying to the shared view…'; this.add.disabled = this.clear.disabled = true }
 
@@ -82,7 +97,7 @@ export class Filters {
       const remove = node('button', 'Remove'); remove.className = 'kglv-button kglv-button-small'
       remove.setAttribute('aria-label', `Remove ${filter.predicate.kind} filter`)
       remove.onclick = () => { this.apply(this.predicates.filter(item => item.id !== filter.id)); this.pending() }
-      row.append(toggle, node('span', describe(filter.predicate)), remove); this.list.append(row)
+      row.append(toggle, node('span', describe(filter.predicate, this.calculations)), remove); this.list.append(row)
     }
     this.detail.replaceChildren()
     for (const distribution of snapshot.distributions) {
@@ -98,11 +113,14 @@ export class Filters {
     this.choices.hidden = kind !== 'type' && kind !== 'relation'
     const choices = kind === 'relation' ? this.relations : this.types
     this.choices.replaceChildren(...choices.map(value => { const option = node('option', value); option.value = value; return option }))
-    this.field.hidden = !['category', 'numeric-range', 'missing'].includes(kind)
+    const usesField = ['category', 'numeric-range', 'missing'].includes(kind)
+    this.fieldKind.hidden = !usesField
+    this.field.hidden = !usesField || this.fieldKind.value !== 'source property'
+    this.derivedField.hidden = !usesField || this.fieldKind.value !== 'calculated field'
     this.valueType.hidden = kind !== 'category'
     this.values.hidden = kind !== 'category'
     this.min.hidden = this.max.hidden = kind !== 'numeric-range'
-    ;(this.includeNull.parentElement as HTMLElement).hidden = (this.includeMissing.parentElement as HTMLElement).hidden = this.field.hidden
+    ;(this.includeNull.parentElement as HTMLElement).hidden = (this.includeMissing.parentElement as HTMLElement).hidden = !usesField
   }
 
   private predicate(): SubsetPredicate {
@@ -113,9 +131,11 @@ export class Filters {
       return kind === 'type' ? {kind, node_types: names} : {kind, names}
     }
     if (kind === 'hide-isolated') return {kind}
-    const name = this.field.value.trim()
-    if (!name) throw new Error('Enter a source property name.')
-    const common = {field: {kind: 'property' as const, name}, include_null: this.includeNull.checked, include_missing: this.includeMissing.checked}
+    const field: FieldRef | undefined = this.fieldKind.value === 'source property'
+      ? this.field.value.trim() ? {kind: 'property', name: this.field.value.trim()} : undefined
+      : this.calculations.flatMap(calculation => calculation.fields).find(definition => fieldKey(definition.field) === this.derivedField.value)?.field
+    if (!field) throw new Error(this.fieldKind.value === 'source property' ? 'Enter a source property name.' : 'Select an available calculated field.')
+    const common = {field, include_null: this.includeNull.checked, include_missing: this.includeMissing.checked}
     if (kind === 'missing') return {kind, ...common}
     if (kind === 'numeric-range') return {kind, ...common, min: numeric(this.min.value), max: numeric(this.max.value)}
     const values = this.values.value.split(',').map(value => typed(value.trim(), this.valueType.value))
@@ -135,9 +155,9 @@ function typed(value: string, type: string): TypedValue {
   if (type === 'boolean') { if (!['true','false'].includes(value)) throw new Error('Boolean values are true or false.'); return {type, value: value === 'true'} }
   return {type: 'string', value}
 }
-function describe(predicate: SubsetPredicate): string {
+function describe(predicate: SubsetPredicate, calculations: CalculationMeta[]): string {
   if (predicate.kind === 'type') return `Types: ${predicate.node_types.join(', ')}`
   if (predicate.kind === 'relation') return `Relationships: ${predicate.names.join(', ')}`
   if (predicate.kind === 'hide-isolated') return 'Hide isolated instances'
-  return `${predicate.kind}: ${predicate.field.kind === 'property' ? predicate.field.name : predicate.field.column}`
+  return `${predicate.kind}: ${fieldLabel(predicate.field, calculations)}`
 }

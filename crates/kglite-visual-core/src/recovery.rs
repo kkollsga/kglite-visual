@@ -151,6 +151,7 @@ impl RecoveryState {
             last_layout: state.last_layout.clone(),
             last_slice: state.last_slice.clone(),
             derived: state.derived.clone(),
+            calculations: state.calculations.clone(),
         }
     }
     fn apply(&self, state: &mut SharedViewState) {
@@ -165,6 +166,7 @@ impl RecoveryState {
         state.last_layout = self.last_layout.clone();
         state.last_slice = self.last_slice.clone();
         state.derived = self.derived.clone();
+        state.calculations = self.calculations.clone();
     }
     fn bytes(&self) -> Result<usize, CoreError> {
         let entries: Vec<_> = self.view.entries_with_tombstones().collect();
@@ -186,6 +188,7 @@ impl RecoveryState {
                 &self.last_layout,
                 &self.last_slice,
                 fields,
+                &self.calculations,
             ),
             MAX_HISTORY_BYTES,
         )
@@ -202,6 +205,7 @@ pub(crate) fn same_content(a: &SharedViewState, b: &SharedViewState) -> bool {
         && a.selected == b.selected
         && a.layout_kernel == b.layout_kernel
         && a.derived == b.derived
+        && a.calculations == b.calculations
         && same_layout(a.last_layout.as_ref(), b.last_layout.as_ref())
 }
 fn same_layout(a: Option<&crate::LayoutResult>, b: Option<&crate::LayoutResult>) -> bool {

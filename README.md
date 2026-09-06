@@ -68,7 +68,7 @@ Three things this does that a graph viewer normally does not.
 
 **An agent drives the window you are watching.** The running server speaks MCP
 at `/mcp` — no second process to start, no discovery file, nothing to install:
-attaching an agent is pointing it at a URL. Twenty-six tools act on **one shared
+attaching an agent is pointing it at a URL. Twenty-seven tools act on **one shared
 view**, with ordered changes and optional revision checks: read what is on screen, put a Cypher result into it,
 expand or collapse, highlight, zoom, recolour, re-lay-out, export it, draw a
 picture of it, and run the queries *you* saved under the names you chose.
@@ -174,7 +174,7 @@ Full docs at **[kglite-visual.readthedocs.io](https://kglite-visual.readthedocs.
   [layouts](https://kglite-visual.readthedocs.io/en/latest/viewer/layouts.html) ·
   [query surfaces](https://kglite-visual.readthedocs.io/en/latest/viewer/queries.html) (editor, saved queries, generated tables, the path builder, `PROFILE`/`EXPLAIN`) ·
   [appearance and filtering](https://kglite-visual.readthedocs.io/en/latest/viewer/appearance.html).
-- **[Agents and MCP](https://kglite-visual.readthedocs.io/en/latest/agents.html)** — the launch contract, the JSON twin, the twenty-six tools, `window.__kglv`, and what an agent may claim about a screen it cannot see.
+- **[Agents and MCP](https://kglite-visual.readthedocs.io/en/latest/agents.html)** — the launch contract, the JSON twin, the twenty-seven tools, `window.__kglv`, and what an agent may claim about a screen it cannot see.
 - **[Python API](https://kglite-visual.readthedocs.io/en/latest/python.html)** · **[CLI reference](https://kglite-visual.readthedocs.io/en/latest/cli.html)** · **[Render](https://kglite-visual.readthedocs.io/en/latest/render.html)** · **[Export](https://kglite-visual.readthedocs.io/en/latest/export.html)**.
 - **[Concepts](https://kglite-visual.readthedocs.io/en/latest/concepts/index.html)** —
   [bounds in core](https://kglite-visual.readthedocs.io/en/latest/concepts/bounds-in-core.html) ·

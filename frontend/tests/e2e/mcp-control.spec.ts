@@ -66,6 +66,7 @@ test('MCP protocol: initialize, list_tools, call_tool over streamable HTTP', asy
     const tools = await mcp.listTools()
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       'browse_type',
+      'calculate',
       'collapse',
       'delete_view',
       'expand',

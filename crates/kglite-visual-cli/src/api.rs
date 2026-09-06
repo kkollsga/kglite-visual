@@ -104,6 +104,14 @@ pub async fn cypher(
     dispatch(state, body.request(Request::Cypher)).await
 }
 
+/// `POST /api/calculate` — frozen derived fields over the acknowledged visible subset.
+pub async fn calculate(
+    state: State<AppState>,
+    Json(body): Json<RequestBody<kglite_visual_core::calculations::CalculateRequest>>,
+) -> Response {
+    dispatch(state, body.request(Request::Calculate)).await
+}
+
 /// `POST /api/records` — typed fields for generation-scoped source handles.
 pub async fn records(
     state: State<AppState>,

@@ -16,6 +16,9 @@ import { saveTableCsv } from './table-csv'
  */
 
 import { statLabel } from './appearance'
+import type { FieldRef } from './generated/FieldRef'
+import type { CalculationMeta } from './generated/CalculationMeta'
+import { fieldKey, fieldLabel } from './fields'
 import { compareCells, recordCell } from './cells'
 import { handleKey } from './data'
 import type { NodeHandle } from './generated/NodeHandle'
@@ -49,8 +52,8 @@ export type PanelHandlers = {
   focusHandle(handle: NodeHandle): void
   selectHandles(handles: NodeHandle[]): void
   showEntities(references: QueryRowReferences): void
-  setColorBy(property: string | null): void
-  setSizeBy(property: string | null): void
+  setColorBy(field: FieldRef | null): void
+  setSizeBy(field: FieldRef | null): void
   /**
    * Draw this type's nodes under a different property's value instead of the
    * title kglite chose (plan E11). `null` restores the title.
@@ -148,6 +151,9 @@ export class Panels {
   private readonly searchInput: HTMLInputElement
   private readonly searchType: HTMLSelectElement
   private readonly searchResults: HTMLDivElement
+  private calculations: CalculationMeta[] = []
+  private calculationOptionsKey = ''
+  private readonly appearanceFields = new Map<string, FieldRef>()
   private readonly colorBy: HTMLSelectElement
   private readonly sizeBy: HTMLSelectElement
   private readonly captionBy: HTMLSelectElement
@@ -235,10 +241,10 @@ export class Panels {
     this.sizeBy = element('select', 'kglv-select')
     this.sizeBy.setAttribute('data-testid', 'size-by')
     this.colorBy.addEventListener('change', () =>
-      this.handlers.setColorBy(this.colorBy.value === '' ? null : this.colorBy.value),
+      this.handlers.setColorBy(this.appearanceFields.get(this.colorBy.value) ?? null),
     )
     this.sizeBy.addEventListener('change', () =>
-      this.handlers.setSizeBy(this.sizeBy.value === '' ? null : this.sizeBy.value),
+      this.handlers.setSizeBy(this.appearanceFields.get(this.sizeBy.value) ?? null),
     )
     // The third per-type display channel, beside the two it belongs with.
     // The plan called it "the type panel"; this card IS that panel for these
@@ -1168,27 +1174,37 @@ export class Panels {
     this.layoutNote.textContent = message
   }
 
-  /**
-   * Show a colour-by / size-by choice this panel did not make.
-   *
-   * A remote `appearance` command (plan D14) moves the same two channels the
-   * menus do, and a menu still reading "capability" while the graph is
-   * coloured by `field` is a UI lying about its own state. An option the menus
-   * have not been filled with yet is added rather than dropped: the agent
-   * named a property the server accepted, and the human needs to see which.
-   */
-  setAppearanceSelection(colorBy: string | null, sizeBy: string | null): void {
-    const choose = (select: HTMLSelectElement, value: string | null) => {
-      const wanted = value ?? ''
-      if (wanted !== '' && ![...select.options].some((option) => option.value === wanted)) {
-        const option = element('option', undefined, wanted)
-        option.value = wanted
-        select.appendChild(option)
+  /** Preserve remote field choices even before local source statistics arrive. */
+  setAppearanceSelection(colorBy: FieldRef | null, sizeBy: FieldRef | null): void {
+    const choose = (select: HTMLSelectElement, field: FieldRef | null) => {
+      const wanted = field === null ? '' : fieldKey(field)
+      if (field !== null && ![...select.options].some(option => option.value === wanted)) {
+        select.append(new Option(fieldLabel(field, this.calculations), wanted))
+        this.appearanceFields.set(wanted, field)
       }
       select.value = wanted
     }
-    choose(this.colorBy, colorBy)
-    choose(this.sizeBy, sizeBy)
+    choose(this.colorBy, colorBy); choose(this.sizeBy, sizeBy)
+  }
+
+  setCalculations(calculations: CalculationMeta[]): void {
+    this.calculations = calculations
+    const key = JSON.stringify(calculations.map(calculation => [calculation.id, calculation.kind, calculation.fields]))
+    if (key === this.calculationOptionsKey) return
+    this.calculationOptionsKey = key
+    for (const [key, field] of this.appearanceFields) if (field.kind === 'derived') this.appearanceFields.delete(key)
+    for (const select of [this.colorBy, this.sizeBy]) {
+      const selected = select.value
+      select.querySelector('optgroup[data-calculations]')?.remove()
+      const group = document.createElement('optgroup'); group.label = 'Frozen calculated fields'; group.dataset['calculations'] = ''
+      for (const calculation of calculations) for (const definition of calculation.fields) {
+        const key = fieldKey(definition.field)
+        this.appearanceFields.set(key, definition.field)
+        group.append(new Option(fieldLabel(definition.field, calculations), key))
+      }
+      if (group.children.length > 0) select.append(group)
+      if ([...select.options].some(option => option.value === selected)) select.value = selected
+    }
   }
 
   setCaptionSelection(property: string | null): void {
@@ -1221,12 +1237,14 @@ export class Panels {
       for (const name of names) {
         const stat = byName.get(name)
         const option = element('option', undefined, stat ? statLabel(stat) : name)
-        option.value = name
+        const field: FieldRef = {kind: 'property', name}
+        option.value = fieldKey(field); this.appearanceFields.set(option.value, field)
         select.appendChild(option)
       }
     }
     fill(this.colorBy, stats.categorical_candidates, 'capability')
     fill(this.sizeBy, stats.numeric_candidates, 'uniform')
+    this.calculationOptionsKey = ''; this.setCalculations(this.calculations)
 
     // Every string property is offered, not only the server's own candidate:
     // the candidate is a heuristic about what a human finds readable, and the
@@ -1262,14 +1280,6 @@ export class Panels {
     const approximate = offered.filter((stat) => stat.approx).length
 
     const notes: string[] = [`${stats.node_type}: ${count(stats.node_count)} nodes`]
-    // The approx rule applies to a caption exactly as it applies to a colour:
-    // a value drawn from a sampled population is a value some nodes will not
-    // have, and a label falling back to the title on those looks like a bug in
-    // the labelling rather than a fact about the statistics.
-    const captionStat = caption === null ? undefined : byName.get(caption)
-    if (captionStat?.approx === true) {
-      notes.push(`captions come from ${caption}, whose values kglite only sampled`)
-    }
     if (stats.sampled) {
       notes.push(
         `statistics are approximate — kglite samples above ${count(stats.exact_scan_ceiling)} nodes`,

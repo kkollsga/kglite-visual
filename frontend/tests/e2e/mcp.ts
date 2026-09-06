@@ -24,9 +24,9 @@ type RpcResponse = {
 /** A tool's answer: the content blocks, plus whether it failed. */
 export type ToolResult = {
   isError: boolean
-  /** Concatenated text blocks — every tool here answers with JSON in one. */
+  /** Concatenated text blocks; artifact tools may append file text after metadata. */
   text: string
-  /** Parsed from {@link text}. Throws if the tool answered with prose. */
+  /** Parses the complete text as JSON; only valid for metadata-only replies. */
   json: <T = Record<string, unknown>>() => T
   /** Base64 image blocks, in order, with their mime types. */
   images: { mimeType: string; base64: string }[]

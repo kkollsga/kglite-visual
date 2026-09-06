@@ -230,6 +230,21 @@ struct FilterArg {
     predicate: PredicateArg,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum CalculationKindArg {
+    Degree,
+    WeakComponents,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+struct CalculateArgs {
+    kind: CalculationKindArg,
+    /// Omit to create a new frozen result; name a matching existing result to recompute it explicitly.
+    #[serde(default)]
+    calculation_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
 struct SubsetArgs {
     #[serde(default)]
@@ -337,6 +352,8 @@ struct RecordsArgs {
     handles: Vec<HandleArg>,
     #[serde(default)]
     fields: Vec<String>,
+    #[serde(default)]
+    field_refs: Option<Vec<FieldArg>>,
     #[serde(default)]
     offset: u32,
     #[serde(default)]
@@ -460,8 +477,8 @@ enum ThemeArg {
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 enum RenderTargetArg {
-    /// The live view — exactly the nodes and links on the human's screen,
-    /// re-laid out server-side. The default.
+    /// Legacy loaded content and schema context, including hidden nodes,
+    /// re-laid out server-side. Explicit scope selects captured instance output.
     #[default]
     LiveView,
     /// The type-level meta-graph, drawn from scratch. Does not touch the live
@@ -547,11 +564,24 @@ struct AppearanceArgs {
     pub size_by: Option<Option<String>>,
     #[serde(default)]
     pub presentation: Option<PresentationArgs>,
+    /// Canonical source or calculated field. Explicit null clears the channel.
+    #[serde(
+        default,
+        deserialize_with = "present_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub color_field: Option<Option<FieldArg>>,
+    #[serde(
+        default,
+        deserialize_with = "present_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub size_field: Option<Option<FieldArg>>,
 }
-fn present_nullable<'de, D: serde::Deserializer<'de>>(
+fn present_nullable<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<Option<Option<String>>, D::Error> {
-    Option::<String>::deserialize(deserializer).map(Some)
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -804,7 +834,7 @@ impl ViewControl {
                        changing the shared view. At most 500 rows, 32 fields, 5000 handles \
                        and 2 MiB per answer; default page size is 100. Missing, null, unavailable \
                        and truncated cells are explicit. Use returned next_offset to page. \
-                       Handles are source identities, never renderer slots or Cypher id values."
+                       Handles are source identities, never renderer slots or Cypher id values. fields names source properties only; additive field_refs accepts canonical property/derived references discovered from view_state.calculations. Source fields precede field_refs and share the 32-field bound. Values outside a frozen calculation input are unavailable."
     )]
     async fn records(
         &self,
@@ -814,6 +844,7 @@ impl ViewControl {
             .run(Request::Records(RecordsRequest {
                 handles: args.handles.into_iter().map(Into::into).collect(),
                 fields: args.fields,
+                field_refs: args.field_refs.map(catalog_args).transpose()?,
                 offset: args.offset,
                 limit: args.limit.unwrap_or(100),
             }))
@@ -1081,18 +1112,24 @@ impl ViewControl {
     }
 
     #[tool(
-        description = "Set shared colour/size property channels and optional presentation settings. Without presentation, omitted/null channels clear to structural defaults. Presentation-only preserves both channels. When any channel is supplied, omitted channels clear. Explicit channel fields plus presentation change atomically; explicit null clears a channel. Presentation defaults are applied to omitted presentation fields; density/opacity0–1 and finite numeric size range are bounded in core."
+        description = "Set shared colour/size source or calculated field channels and optional presentation settings. Use canonical color_field/size_field property or derived references; legacy color_by/size_by always name source properties. Contradictory canonical and legacy inputs refuse atomically. Without presentation, omitted/null channels clear to structural defaults. Presentation-only preserves both channels. When any channel is supplied, omitted channels clear. Explicit channel fields plus presentation change atomically; explicit null clears a channel. Presentation defaults are applied to omitted presentation fields; density/opacity0–1 and finite numeric size range are bounded in core."
     )]
     async fn set_appearance(
         &self,
         Parameters(shared): Parameters<SharedArgs<AppearanceArgs>>,
     ) -> Result<CallToolResult, McpError> {
         let SharedArgs { args, options } = shared;
-        let has_channels = args.color_by.is_some() || args.size_by.is_some();
-        let appearance = AppearanceRequest {
-            color_by: args.color_by.clone().flatten(),
-            size_by: args.size_by.clone().flatten(),
-        };
+        let has_channels = args.color_by.is_some()
+            || args.size_by.is_some()
+            || args.color_field.is_some()
+            || args.size_field.is_some();
+        let mut fields = serde_json::to_value(&args)
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
+        fields
+            .as_object_mut()
+            .expect("appearance args object")
+            .remove("presentation");
+        let appearance: AppearanceRequest = catalog_args(fields)?;
         if let Some(presentation) = args.presentation {
             let presentation = catalog_args(presentation)?;
             let request = if has_channels {
@@ -1112,10 +1149,30 @@ impl ViewControl {
             Ok(execution) => execution,
             Err(error) => return Ok(refused(&error)),
         };
-        ok_json(&serde_json::json!({
-            "color_by":args.color_by.flatten(),"size_by":args.size_by.flatten(),
-            "connected_viewers":self.state.bus.client_count(),"stamp":execution.stamp,"request_id":execution.request_id,
-        }))
+        let Response::Shared(snapshot) = execution.response else {
+            return Err(McpError::internal_error(
+                "appearance returned an unexpected response",
+                None,
+            ));
+        };
+        let mut value = serde_json::to_value(snapshot.meta.appearance)
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        value["connected_viewers"] = self.state.bus.client_count().into();
+        value["stamp"] = serde_json::json!(execution.stamp);
+        value["request_id"] = serde_json::json!(execution.request_id);
+        ok_json(&value)
+    }
+
+    #[tool(
+        description = "Calculate degree or weak components over the exact visible retained relation multiset. Degree exposes in/out/total; parallel relations count separately and a self-loop adds one in, one out, two total. Weak components ignore direction and include isolates. Results are frozen namespaced derived fields for records, appearance and filters; applying a filter never recursively recalculates them. Omit calculation_id for a new result, or name a matching existing result to recompute explicitly on the current view. At most eight results are retained; source properties are unchanged. Pass expected from view_state to refuse a changed input; one acknowledged update reaches every viewer."
+    )]
+    async fn calculate(
+        &self,
+        Parameters(shared): Parameters<SharedArgs<CalculateArgs>>,
+    ) -> Result<CallToolResult, McpError> {
+        let SharedArgs { args, options } = shared;
+        let request = catalog_args::<_, kglite_visual_core::calculations::CalculateRequest>(args)?;
+        self.settings(Request::Calculate(request), options).await
     }
 
     #[tool(
@@ -1709,8 +1766,9 @@ mod tests {
     use kglite_visual_core::{GEOMETRY_CAVEAT, GEOMETRY_STATIC_CAVEAT};
 
     /// Names are the API: a count alone cannot detect a rename.
-    const EXPECTED: [&str; 26] = [
+    const EXPECTED: [&str; 27] = [
         "browse_type",
+        "calculate",
         "collapse",
         "delete_view",
         "expand",
@@ -1835,3 +1893,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "mcp_calculations.rs"]
+mod calculation_tests;

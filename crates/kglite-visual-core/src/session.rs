@@ -205,6 +205,7 @@ pub struct ViewBounds {
 pub struct ViewState {
     pub stamp: RevisionStamp,
     pub appearance: crate::control::Appearance,
+    pub calculations: Vec<crate::calculations::CalculationMeta>,
     pub caption_by: Option<String>,
     pub presentation: crate::presentation::PresentationSettings,
     pub subset: SubsetSnapshot,
@@ -659,6 +660,7 @@ impl Session {
     }
     pub(crate) fn handle_uncommitted(&self, request: &Request) -> Result<Response, CoreError> {
         match request {
+            Request::Calculate(request) => self.calculate_uncommitted(request),
             Request::LoadEntities(request) => {
                 self.load_entities_uncommitted(request).map(Response::Slice)
             }
@@ -1329,6 +1331,7 @@ impl Session {
         ViewState {
             stamp: view.stamp(self.generation()),
             appearance: view.appearance.clone(),
+            calculations: view.calculations.clone(),
             caption_by: view.caption_by.clone(),
             presentation: view.presentation.clone(),
             subset: view.subset.clone(),

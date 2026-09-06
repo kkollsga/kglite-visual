@@ -69,6 +69,7 @@ pub(crate) struct RecoveryState {
     pub last_layout: Option<LayoutResult>,
     pub last_slice: Option<LastSlice>,
     pub derived: FrozenFields,
+    pub calculations: Vec<crate::calculations::CalculationMeta>,
 }
 
 #[derive(Debug, Clone)]

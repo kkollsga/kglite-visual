@@ -82,7 +82,9 @@ use std::fmt;
 /// presentation settings in the atomic snapshot, with a separate content revision.
 /// **v9** adds canonical source-handle appearance mappings, shared by browser,
 /// reconnect and server-rendered output instead of per-client statistic order.
-pub const PROTOCOL_VERSION: u32 = 9;
+/// **v10** adds frozen calculation metadata and canonical field references to
+/// records and appearance, preserving literal source-property names.
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// Header size in bytes (6 × `u32`).
 pub const HEADER_BYTES: usize = 24;

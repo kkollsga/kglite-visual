@@ -72,6 +72,7 @@ pub struct SharedSnapshotMeta {
     pub subset: SubsetSnapshot,
     pub appearance: Appearance,
     pub appearance_mapping: crate::appearance_mapping::AppearanceMapping,
+    pub calculations: Vec<crate::calculations::CalculationMeta>,
     pub caption_by: Option<String>,
     pub highlighted: Vec<ViewReference>,
     pub selected: Vec<ViewReference>,
@@ -122,6 +123,7 @@ pub(crate) struct SharedViewState {
     pub subset: SubsetSnapshot,
     pub appearance: Appearance,
     pub appearance_mapping: crate::appearance_mapping::AppearanceMapping,
+    pub calculations: Vec<crate::calculations::CalculationMeta>,
     pub caption_by: Option<String>,
     pub highlighted: Vec<ViewReference>,
     pub selected: Vec<ViewReference>,
@@ -145,6 +147,7 @@ impl SharedViewState {
             subset: SubsetSnapshot::default(),
             appearance: Appearance::new(None, None),
             appearance_mapping: Default::default(),
+            calculations: Vec::new(),
             caption_by: None,
             highlighted: Vec::new(),
             selected: Vec::new(),
@@ -334,7 +337,7 @@ impl Session {
         let captured = self.state_read().clone();
         self.fork_state(captured).snapshot_direct()
     }
-    fn snapshot_direct(&self) -> SharedSnapshot {
+    pub(crate) fn snapshot_direct(&self) -> SharedSnapshot {
         let slice = self.sync_slice();
         let state = self.state_read();
         let points = state
@@ -355,6 +358,7 @@ impl Session {
                 subset: state.subset.clone(),
                 appearance: state.appearance.clone(),
                 appearance_mapping: state.appearance_mapping.clone(),
+                calculations: state.calculations.clone(),
                 caption_by: state.caption_by.clone(),
                 highlighted: state.highlighted.clone(),
                 selected: state.selected.clone(),
@@ -437,16 +441,14 @@ impl Session {
             }
             Request::Style(style) => {
                 if let Some(appearance) = &style.appearance {
-                    check_name(&appearance.color_by)?;
-                    check_name(&appearance.size_by)?;
+                    appearance.resolve()?;
                 }
                 if let Some(presentation) = &style.presentation {
                     presentation.validate()?;
                 }
                 let mut state = self.state_write();
                 if let Some(appearance) = &style.appearance {
-                    state.appearance =
-                        Appearance::new(appearance.color_by.clone(), appearance.size_by.clone());
+                    state.appearance = appearance.resolve()?;
                 }
                 if let Some(presentation) = &style.presentation {
                     state.presentation = presentation.clone();
@@ -457,10 +459,7 @@ impl Session {
                 self.state_write().predicates = request.predicates.clone();
             }
             Request::Appearance(request) => {
-                check_name(&request.color_by)?;
-                check_name(&request.size_by)?;
-                self.state_write().appearance =
-                    Appearance::new(request.color_by.clone(), request.size_by.clone());
+                self.state_write().appearance = request.resolve()?;
             }
             Request::Caption(request) => {
                 check_name(&request.caption_by)?;

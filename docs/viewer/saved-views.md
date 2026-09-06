@@ -2,7 +2,7 @@
 
 Open **Saved views & history** to save a named exploration or restore a previous
 one. A view includes the loaded nodes and exact relationships, visual filters,
-appearance, captions, selected identities and layout settings. Saving a query
+appearance, captions, selected identities, layout settings and frozen calculations. Saving a query
 is separate: restoring a view does not execute query text.
 
 The header names the active saved view and shows when the current exploration
@@ -30,6 +30,12 @@ save; it does not remove an existing named view. Replacement is explicit.
 Unreadable or newer unsupported saved formats are refused rather than
 overwritten. Durable writes coordinate across processes and replace the
 catalog atomically.
+
+Format version 2 preserves canonical field identities and calculation input
+metadata. Supported version 1 views containing source fields migrate on read;
+a newer format or an incomplete version 2 record is refused. Frozen results
+are restored as saved, including their original input revision, without
+recomputation.
 
 ## Layout and selection
 

@@ -78,6 +78,8 @@ fn stale_prepared_layout_cannot_overwrite_newer_membership_or_settings() {
     apply(
         &session,
         Request::Appearance(AppearanceRequest {
+            color_field: None,
+            size_field: None,
             color_by: Some("score".into()),
             size_by: None,
         }),
@@ -109,6 +111,8 @@ fn two_preparations_from_one_base_admit_exactly_one() {
     let b = session
         .prepare_shared(&SharedRequest::new(Request::Appearance(
             AppearanceRequest {
+                color_field: None,
+                size_field: None,
                 color_by: Some("score".into()),
                 size_by: None,
             },
@@ -160,6 +164,7 @@ fn direct_mutators_commit_but_records_and_sync_do_not() {
     assert_eq!(session.shared_stamp().revision, "2");
     let records = session
         .records(&RecordsRequest {
+            field_refs: None,
             handles: vec![slice.meta.nodes[0].handle.clone()],
             fields: vec!["id".into()],
             offset: 0,
@@ -305,6 +310,8 @@ fn appearance_highlight_and_caption_snapshot_are_coherent_and_hide_retains_ident
     apply(
         &session,
         Request::Appearance(AppearanceRequest {
+            color_field: None,
+            size_field: None,
             color_by: Some("score".into()),
             size_by: Some("score".into()),
         }),

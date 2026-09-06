@@ -40,17 +40,28 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
   nodes with source-induced relationships. Revision-checked downloads include
   graph formats, deterministic SVG/PNG and explicitly scoped table CSV.
 
+- Degree and weak components calculate over the exact visible relationship
+  records. Frozen results become Data columns, appearance channels and filters,
+  with explicit recomputation and saved-view restoration.
+
 ### Changed
 
 - Shared HTTP, WebSocket and MCP mutations commit and publish in one order.
   Optional expected revisions reject stale actions without changing the view;
-  reconnects receive an atomic snapshot. Protocol 9 carries these snapshots
+  reconnects receive an atomic snapshot. Protocol 10 carries these snapshots
   alongside typed-array topology, positions, typed query cells and field detail.
 - Cumulative explorations refuse additions above 5,000 instance nodes, 20,000
   relationships or 2 MiB of membership/topology, without partially applying them.
 
 ### Fixed
 
+- Notebook iframe startup and saved-view actions work when the parent context
+  does not expose the secure-context UUID API.
+- Browser request identities no longer collide across clients. Browsing and
+  delayed graph replies preserve newer private query results, and the Data
+  scope line identifies the records or query-results lane.
+- D3 JSON export refuses relationship properties that would overwrite topology
+  fields in the pinned exporter; GraphML retains those properties.
 - Query tables preserve large integer values without confusing them with text,
   and enforce their byte ceiling even when the first row is oversized.
 - Shared schema selections remain visible in the inspector, and atomic view

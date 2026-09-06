@@ -164,10 +164,10 @@ mcp set_layout '{"kernel":"geo"}'
 Errors an agent can act on come back as `isError: true` with kglite's own
 message. Quote it; do not summarise it.
 
-## The twenty-six tools
+## The twenty-seven tools
 
 The shared-view tools load, inspect, arrange and export a bounded exploration.
-`records` reads typed fields without changing that view. Saved-query tools use
+`records` reads typed source or calculated fields without changing that view. Saved-query tools use
 the visualizer's own query store.
 
 | Tool | What it does |
@@ -183,7 +183,8 @@ the visualizer's own query store.
 | `collapse` | Remove a slot's expansion. Slot numbers are not reissued unless the answer carries a compaction, which renumbers everything and says so |
 | `highlight` | Make things stand out. Name `slots`, or give a `search` string and let the server find them — hits already loaded are marked, hits that are not are counted back. `concept` is `highlighted` (a result set) or `selected` (the one thing you are talking about) |
 | `focus` | Zoom the human's camera to frame these slots — the honest way to say "look at this". An empty list frames the whole view. Changes nothing about what is loaded |
-| `set_appearance` | Set property colour/size channels and optional shared `presentation` settings. Presentation-only changes preserve channels; supplying a channel uses legacy replacement semantics, where an omitted channel clears it |
+| `set_appearance` | Set source or calculated colour/size channels and optional shared `presentation` settings. Presentation-only changes preserve channels; supplying a channel uses legacy replacement semantics, where an omitted channel clears it |
+| `calculate` | Calculate degree or weak components over the exact visible relationship records; omit `calculation_id` for a new result, or supply an existing ID to explicitly recompute |
 | `set_subset` | Set enabled type, category, numeric-range, missing-value, relation and isolate predicates over loaded instances; all clients receive the same visible subset |
 | `set_caption` | Set the shared caption property, or clear it back to the display title |
 | `set_layout` | Re-arrange the view with a layout computed **here**, and hold it still. See [what an agent may claim](#what-an-agent-may-claim) |

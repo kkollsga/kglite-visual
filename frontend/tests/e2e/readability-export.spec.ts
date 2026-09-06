@@ -60,11 +60,23 @@ test('shared readability keeps selected labels, schema labels, camera and render
     await expect(page.locator('.kglv-label')).toHaveCount(0)
     await peer.getByTestId('readability-prioritize_hovered_labels').check()
     await page.getByTestId('fit-visible').click()
-    const point = await page.evaluate(() => {
-      const graph = window.__kglvBench.graph!; const xy = graph.getPointPositions(); const host = document.querySelector('.kglv-graph-host')!.getBoundingClientRect()
-      for (let slot = 5; slot < window.__kglv.slotCount; slot += 1) {
-        const [x, y] = graph.spaceToScreenPosition([xy[slot * 2]!, xy[slot * 2 + 1]!])
-        if (x > 45 && x < host.width - 45 && y > 100 && y < host.height - 120) return {slot, x: host.x + x, y: host.y + y}
+    const point = await page.evaluate(async () => {
+      const graph = window.__kglvBench.graph!
+      let previous = new Map<number, [number, number]>()
+      for (let frame = 0; frame < 120; frame += 1) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+        const xy = graph.getPointPositions(); const current = new Map<number, [number, number]>()
+        let stable = previous.size > 0
+        for (let slot = 5; slot < window.__kglv.slotCount; slot += 1) {
+          const screen = graph.spaceToScreenPosition([xy[slot * 2]!, xy[slot * 2 + 1]!]) as [number, number]
+          current.set(slot, screen)
+          const before = previous.get(slot)
+          if (before === undefined || Math.hypot(screen[0] - before[0], screen[1] - before[1]) > 0.25) stable = false
+        }
+        previous = current
+        if (!stable) continue
+        const host = document.querySelector('.kglv-graph-host')!.getBoundingClientRect()
+        for (const [slot, [x, y]] of current) if (x > 45 && x < host.width - 45 && y > 100 && y < host.height - 120) return {slot, x: host.x + x, y: host.y + y}
       }
       return null
     })

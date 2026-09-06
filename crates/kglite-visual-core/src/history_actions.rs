@@ -72,6 +72,17 @@ impl HistoryAction {
                     .and_then(|slot| reference(before, slot, generation));
                 action
             }
+            Request::Calculate(request) => Self::named(
+                if request.calculation_id.is_some() {
+                    "recompute"
+                } else {
+                    "calculate"
+                },
+                Some(match request.kind {
+                    crate::calculations::CalculationKind::Degree => "degree",
+                    crate::calculations::CalculationKind::WeakComponents => "weak-components",
+                }),
+            ),
             Request::Subset(_) => Self::named("subset", None),
             Request::Appearance(_) => Self::named("appearance", None),
             Request::Presentation(_) => Self::named("presentation", None),

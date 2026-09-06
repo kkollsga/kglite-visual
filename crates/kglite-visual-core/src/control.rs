@@ -57,17 +57,16 @@ pub struct Highlight {
     pub concept: HighlightConcept,
 }
 
-/// Drive the colour-by / size-by channels.
-///
-/// A property *name*, because that is what the client's own menus are keyed by
-/// and what its property-statistics response describes. `None` clears the
-/// channel back to the app's structural encoding.
+/// Canonical field channels feed the shared server-computed appearance mapping.
+/// Legacy names mirror source-property channels; null restores structural encoding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct Appearance {
     pub protocol_version: u32,
     pub color_by: Option<String>,
     pub size_by: Option<String>,
+    pub color_field: Option<crate::subset::FieldRef>,
+    pub size_field: Option<crate::subset::FieldRef>,
 }
 
 impl Focus {
@@ -93,6 +92,12 @@ impl Appearance {
     pub fn new(color_by: Option<String>, size_by: Option<String>) -> Self {
         Self {
             protocol_version: PROTOCOL_VERSION,
+            color_field: color_by
+                .clone()
+                .map(|name| crate::subset::FieldRef::Property { name }),
+            size_field: size_by
+                .clone()
+                .map(|name| crate::subset::FieldRef::Property { name }),
             color_by,
             size_by,
         }
@@ -139,14 +144,103 @@ pub struct HighlightRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
+#[serde(try_from = "AppearanceInput")]
 #[ts(export, export_to = "../../../frontend/src/generated/")]
 pub struct AppearanceRequest {
-    /// Property driving the colour channel, or `null` to clear it.
-    #[serde(default)]
+    #[ts(optional = nullable)]
     pub color_by: Option<String>,
-    /// Property driving the size channel, or `null` to clear it.
-    #[serde(default)]
+    #[ts(optional = nullable)]
     pub size_by: Option<String>,
+    #[ts(optional)]
+    pub color_field: Option<Option<crate::subset::FieldRef>>,
+    #[ts(optional)]
+    pub size_field: Option<Option<crate::subset::FieldRef>>,
+}
+
+#[derive(Deserialize)]
+struct AppearanceInput {
+    #[serde(default, deserialize_with = "present_option")]
+    color_by: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present_option")]
+    size_by: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present_option")]
+    color_field: Option<Option<crate::subset::FieldRef>>,
+    #[serde(default, deserialize_with = "present_option")]
+    size_field: Option<Option<crate::subset::FieldRef>>,
+}
+fn present_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+impl TryFrom<AppearanceInput> for AppearanceRequest {
+    type Error = String;
+    fn try_from(input: AppearanceInput) -> Result<Self, Self::Error> {
+        for (legacy, canonical) in [
+            (&input.color_by, &input.color_field),
+            (&input.size_by, &input.size_field),
+        ] {
+            if let (Some(legacy), Some(canonical)) = (legacy, canonical) {
+                let property = legacy
+                    .clone()
+                    .map(|name| crate::subset::FieldRef::Property { name });
+                if &property != canonical {
+                    return Err(
+                        "legacy and canonical appearance fields contradict each other".into(),
+                    );
+                }
+            }
+        }
+        Ok(Self {
+            color_by: input.color_by.flatten(),
+            size_by: input.size_by.flatten(),
+            color_field: input.color_field,
+            size_field: input.size_field,
+        })
+    }
+}
+impl AppearanceRequest {
+    pub(crate) fn resolve(&self) -> Result<Appearance, crate::CoreError> {
+        let channel = |legacy: &Option<String>,
+                       canonical: &Option<Option<crate::subset::FieldRef>>|
+         -> Result<_, crate::CoreError> {
+            let property = legacy
+                .clone()
+                .map(|name| crate::subset::FieldRef::Property { name });
+            if legacy.is_some() && canonical.as_ref().is_some_and(|field| field != &property) {
+                return Err(crate::CoreError::Request(
+                    "legacy and canonical appearance fields contradict each other".into(),
+                ));
+            }
+            let field = canonical.clone().unwrap_or(property);
+            if let Some(field) = &field {
+                field.validate()?;
+            }
+            Ok(field)
+        };
+        Ok(Appearance::from_fields(
+            channel(&self.color_by, &self.color_field)?,
+            channel(&self.size_by, &self.size_field)?,
+        ))
+    }
+}
+impl Appearance {
+    pub(crate) fn from_fields(
+        color_field: Option<crate::subset::FieldRef>,
+        size_field: Option<crate::subset::FieldRef>,
+    ) -> Self {
+        let source_name = |field: &Option<crate::subset::FieldRef>| match field {
+            Some(crate::subset::FieldRef::Property { name }) => Some(name.clone()),
+            _ => None,
+        };
+        Self {
+            protocol_version: PROTOCOL_VERSION,
+            color_by: source_name(&color_field),
+            size_by: source_name(&size_field),
+            color_field,
+            size_field,
+        }
+    }
 }
 
 /// One steering command, whichever it is.

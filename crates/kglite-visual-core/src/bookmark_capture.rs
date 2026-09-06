@@ -28,17 +28,35 @@ impl Session {
             let state = self.state_read().clone();
             let _guard = self.graph().begin_read_pass();
             let mut keys = std::collections::HashSet::new();
-            for (_, entry) in state.view.live_entries() {
-                if let SlotEntry::Node {
-                    node_id, node_type, ..
-                } = entry
-                {
-                    let key = bookmark_members::scalar_key(self.graph(), *node_id)?;
-                    let token = serde_json::to_string(&(node_type, key))
+            let members: std::collections::BTreeSet<_> = state
+                .view
+                .live_entries()
+                .filter_map(|(_, entry)| match entry {
+                    SlotEntry::Node { node_id, .. } => Some(*node_id),
+                    _ => None,
+                })
+                .chain(
+                    state
+                        .derived
+                        .values()
+                        .flat_map(|field| field.values.keys().copied()),
+                )
+                .collect();
+            let deadline = self.config().deadline();
+            for node_id in members {
+                crate::source_identity::check_deadline(deadline)?;
+                let node = self
+                    .graph()
+                    .node_view(kglite::api::NodeIndex::new(node_id as usize))
+                    .ok_or_else(|| refusal("saved member is absent from this source"))?;
+                let key = bookmark_members::scalar_key(self.graph(), node_id)?;
+                let token =
+                    serde_json::to_string(&(node.node_type_str(&self.graph().interner), key))
                         .map_err(|error| CoreError::Request(error.to_string()))?;
-                    if !keys.insert(token) {
-                        return Err(refusal("loaded members have duplicate source keys"));
-                    }
+                if !keys.insert(token) {
+                    return Err(refusal(
+                        "loaded or frozen calculation members have duplicate source keys",
+                    ));
                 }
             }
             Ok(())
@@ -92,17 +110,26 @@ impl Session {
                 bookmark_members::durable_members(self.graph(), &captured.view, deadline)
                     .map(|members| (fingerprint, members))
             });
-        let (source, members) = match durable {
-            Ok((source, members)) => (BookmarkSource::Durable { source }, members),
-            Err(error) => (
+        let durable = durable.and_then(|(source, members)| {
+            self.capture_content(
+                &captured,
+                BookmarkSource::Durable { source },
+                members,
+                deadline,
+            )
+        });
+        let mut bookmark = match durable {
+            Ok(bookmark) => bookmark,
+            Err(error) => self.capture_content(
+                &captured,
                 BookmarkSource::SessionOnly {
                     generation: self.generation().into(),
                     reason: error.to_string(),
                 },
                 bookmark_members::session_members(&captured.view, self.generation()),
-            ),
+                deadline,
+            )?,
         };
-        let mut bookmark = self.capture_content(&captured, source, members, deadline)?;
         bookmark.focus = match &options.focus {
             Some(BookmarkFocusRequest::Fit) => Some(BookmarkFocus::Fit),
             Some(BookmarkFocusRequest::References { references }) => {
@@ -163,6 +190,11 @@ impl Session {
         )?;
         Ok(Bookmark {
             version: BOOKMARK_VERSION,
+            channels: Some(crate::bookmark::BookmarkChannels {
+                color_field: state.appearance.color_field.clone(),
+                size_field: state.appearance.size_field.clone(),
+            }),
+            calculations: Some(state.calculations.clone()),
             source,
             members,
             relations,
