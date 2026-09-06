@@ -43,9 +43,19 @@ try {
   if (!info.html.includes('<iframe')) throw new Error('Python repr_html produced no local iframe')
   browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
   const page = await browser.newPage({ viewport: { width: 720, height: 780 } })
+  page.on('pageerror', error => console.error(`Notebook page error: ${error.message}`))
+  const viewRequestIds = []
+  page.on('request', request => {
+    if (!request.url().endsWith('/api/views/save')) return
+    const requestId = request.postDataJSON()?.request_id
+    if (typeof requestId === 'string') viewRequestIds.push(requestId)
+  })
   await page.setContent(`<main style="width:640px;max-width:100%">${info.html}</main>`)
   const frame = page.frameLocator('iframe')
   await expect(frame.getByTestId('destination-explore')).toBeVisible()
+  const content = await page.locator('iframe').elementHandle().then(element => element.contentFrame())
+  const randomUuidType = await content.evaluate(() => typeof crypto.randomUUID)
+  if (randomUuidType !== 'undefined') throw new Error(`Notebook iframe unexpectedly exposes crypto.randomUUID (${randomUuidType}); nonce fallback was not exercised`)
   await expect(frame.getByTestId('count-loaded')).toHaveText('0')
   await frame.getByTestId('destination-query').click()
   await expect(frame.getByTestId('query-editor')).toBeVisible()
@@ -62,7 +72,16 @@ try {
   await expect(frame.getByTestId('records-page')).toContainText('1–60 of 60')
   await frame.getByTestId('records-table').getByRole('checkbox').first().check()
   await expect(frame.getByTestId('records-selection')).toContainText('1 selected')
-  const content = await page.locator('iframe').elementHandle().then(element => element.contentFrame())
+  await frame.getByTestId('views-open').click()
+  await expect(frame.getByTestId('view-storage-note')).not.toContainText('Checking')
+  for (const name of ['notebook-nonce-a', 'notebook-nonce-b']) {
+    await frame.getByTestId('view-name').fill(name)
+    await frame.getByTestId('view-save').click()
+    await expect(frame.getByTestId('views-status')).toContainText(`Saved “${name}”`)
+  }
+  if (viewRequestIds.length !== 2 || new Set(viewRequestIds).size !== 2 || viewRequestIds.some(id => !/^view-[0-9a-f-]{36}$/.test(id))) {
+    throw new Error(`Saved-view request nonces were not unique UUID-shaped values: ${JSON.stringify(viewRequestIds)}`)
+  }
   const width = await content.evaluate(() => ({ viewport: innerWidth, body: document.documentElement.scrollWidth }))
   if (width.body > width.viewport + 1) throw new Error(`Iframe horizontal overflow: ${JSON.stringify(width)}`)
   await page.screenshot({ path: path.join(out, 'notebook-workspace.png') })

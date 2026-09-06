@@ -1,4 +1,5 @@
 import { apiUrl } from './urls'
+import { requestNonce } from './request-id'
 import type { SharedSnapshotMeta } from './generated/SharedSnapshotMeta'
 import type { ViewReference } from './generated/ViewReference'
 import type { RevisionStamp } from './generated/RevisionStamp'
@@ -176,7 +177,7 @@ export class SavedViews {
   private async mutate<T>(path: string, body: object, completed: (value: T) => void, restoreEpoch?: number): Promise<void> {
     if (this.busy || this.snapshot === null) return
     const token = ++this.operationToken; const expected: RevisionStamp = {...this.snapshot.stamp}
-    const request_id = `view-${crypto.randomUUID()}`
+    const request_id = `view-${requestNonce()}`
     if (restoreEpoch !== undefined) this.handlers.restoreRequested(request_id, restoreEpoch)
     this.busy = true; this.save.disabled = true; this.status.textContent = 'Waiting for acknowledgement…'
     try {

@@ -1,3 +1,4 @@
+import { requestNonce } from './request-id'
 /**
  * Entry point: connect, decode, render, and drive the drill-in.
  *
@@ -196,7 +197,7 @@ let incoming = Promise.resolve()
 let receivedShared = false
 let resyncing = false
 let sharedPositionHash: string | null = null
-const browserRequestPrefix = `browser-${crypto.randomUUID()}`
+const browserRequestPrefix = `browser-${requestNonce()}`
 let requestSerial = 0
 let pendingGraphFocus: string | null = null
 const privateRequests = new Map<string, string>()
