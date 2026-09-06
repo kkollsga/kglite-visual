@@ -13,6 +13,7 @@ type Handlers = {
   showGraph(handles: NodeHandle[]): void
   inspectValue(handle: NodeHandle, field: string): void
   reveal(): void
+  scopeChanged(description: string): void
 }
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = ''): HTMLElementTagNameMap[K] {
   const result = document.createElement(tag); result.textContent = text; return result
@@ -113,7 +114,11 @@ export class DataWorkspace {
       return chip
     }))
   }
+  private reportScope(): void {
+    this.handlers.scopeChanged(this.active ? `Data · ${this.scope.value} ${this.nodeType === null ? '' : `${this.nodeType} `}records` : 'Data · query results from source')
+  }
   private paintLanes(): void {
+    this.reportScope()
     this.recordsHost.hidden = !this.active; this.queryHost.hidden = this.active
     this.recordsTab.setAttribute('aria-selected', String(this.active)); this.queryTab.setAttribute('aria-selected', String(!this.active))
     this.recordsTab.tabIndex = this.active ? 0 : -1; this.queryTab.tabIndex = this.active ? -1 : 0
@@ -164,6 +169,7 @@ export class DataWorkspace {
     this.showSelected.disabled = this.selected.size === 0
   }
   private reload(): void {
+    this.reportScope()
     this.dirty = true; this.token += 1; this.abort?.abort()
     if (this.active && this.presented) void this.fetchRows()
   }

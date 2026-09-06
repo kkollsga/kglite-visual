@@ -196,6 +196,7 @@ let incoming = Promise.resolve()
 let receivedShared = false
 let resyncing = false
 let sharedPositionHash: string | null = null
+const browserRequestPrefix = `browser-${crypto.randomUUID()}`
 let requestSerial = 0
 let pendingGraphFocus: string | null = null
 const privateRequests = new Map<string, string>()
@@ -256,6 +257,7 @@ dataWorkspace = new DataWorkspace(workspace.panelHosts.data, {
   showGraph: handles => showEntities({nodes: handles, relationships: [], truncated: false}),
   inspectValue: (handle, field) => fieldDetails.open(handle, field),
   reveal: () => workspace.navigate('data'),
+  scopeChanged: description => workspace.setDataScope(description),
 })
 
 const panels = new Panels(workspace.panelHosts.inspector, {
@@ -665,10 +667,10 @@ transport.connect(transportHandlers)
 
 const sharedMutations = new Set(['expand', 'collapse', 'browse-type', 'load-nodes', 'load-entities', 'reset', 'layout', 'appearance', 'presentation', 'caption', 'subset', 'focus', 'highlight'])
 function send(request: Request): string {
-  const request_id = `browser-${++requestSerial}`
+  const request_id = `${browserRequestPrefix}-${++requestSerial}`
   const mutation = sharedMutations.has(request.type) || (request.type === 'cypher' && request.as_graph)
-  if (!mutation) privateRequests.set(request.type, request_id)
-  else pendingSharedRequests.set(request_id, request.type)
+  if (!mutation || request.type === 'cypher') privateRequests.set(request.type, request_id)
+  if (mutation) pendingSharedRequests.set(request_id, request.type)
   trail.request(request_id, request, 'slot' in request ? view.label(request.slot)?.text ?? null : null)
   transport.send(JSON.stringify({...request, request_id, expected: mutation ? shared.stamp : null}))
   return request_id
@@ -836,6 +838,7 @@ async function handle(completed: Completed): Promise<void> {
         pendingSharedRequests.delete(completed.request_id)
         if (requestKind === undefined && ![...privateRequests.values()].includes(completed.request_id)) break
       }
+      if (requestKind === 'cypher' && privateRequests.get('cypher') !== completed.request_id) break
       if (requestKind === 'presentation') { readability.error(completed.value); break }
       if (requestKind === 'subset') { filters.error(completed.conflict !== undefined ? `Shared view changed: ${completed.value}. Review and apply again.` : completed.value); break }
       if (completed.conflict !== undefined) { filters.error(`Shared view changed: ${completed.value}. Review the current filters and apply again.`); break }
@@ -883,6 +886,7 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
   if (message.meta.compacted) debugState.compactions += 1
   const initialShared = !receivedShared
   receivedShared = true
+  const acknowledgedKind = message.meta.request_id === null ? undefined : pendingSharedRequests.get(message.meta.request_id)
   if (message.meta.request_id !== null) pendingSharedRequests.delete(message.meta.request_id)
   // Clearing or replacing a channel also invalidates reads processed at a newer revision.
   for (const [key, token] of valueTokens) valueTokens.set(key, token + 1)
@@ -912,7 +916,7 @@ function applySharedUpdate(message: {meta: SharedWireMeta; points: Float32Array;
   if (message.meta.mutation_kind !== null) {
     debugState.lastSliceKind = message.meta.mutation_kind
     if (message.meta.mutation_kind !== 'collapse' && instancesOnScreen() > 0) { graphScope = 'instances'; workspace.showInstances() }
-    if (message.meta.mutation_kind === 'query') panels.showGraphResult(snapshot.last_slice?.bound.returned ?? snapshot.slice.bound.returned, addedNodes)
+    if (acknowledgedKind === 'cypher' && privateRequests.get('cypher') === message.meta.request_id) panels.showGraphResult(snapshot.last_slice?.bound.returned ?? snapshot.slice.bound.returned, addedNodes)
   }
   const bound = snapshot.last_slice?.bound ?? snapshot.slice.bound
   noteTruncation(bound.truncated, bound.returned, bound.total, 'nodes', snapshot.last_slice?.link_bound ?? snapshot.slice.link_bound)

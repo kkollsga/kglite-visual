@@ -94,6 +94,7 @@ export class Workspace {
   private readonly drawerClose = button('×', 'drawer-close', () => this.closeDrawer())
   private readonly layoutHost = element('div', 'kglv-canvas-layout')
   private readonly inspectorContent = element('div', 'kglv-inspector-content')
+  private dataScope = 'Data · visible records'
   private destination: Destination = 'explore'
   private scope: GraphScope = 'schema'
   private activeDrawer: Drawer | null = null
@@ -315,11 +316,13 @@ export class Workspace {
     this.inspector.classList.remove('kglv-inspector-open')
   }
 
+  setDataScope(description: string): void { this.dataScope = description; this.updateScopeButtons() }
+
   private updateScopeButtons(): void {
     this.schemaButton?.setAttribute('aria-pressed', String(this.scope === 'schema'))
     this.instancesButton?.setAttribute('aria-pressed', String(this.scope === 'instances'))
     this.scopeLabel.textContent = this.destination === 'query' ? 'Query · source scope'
-      : this.destination === 'data' ? 'Data · query result'
+      : this.destination === 'data' ? this.dataScope
         : this.scope === 'schema' ? 'Schema · types and relationships' : 'Instances · loaded exploration'
     this.root.dataset['scope'] = this.scope
   }
