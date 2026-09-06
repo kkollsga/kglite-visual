@@ -212,7 +212,7 @@ fn to_py_err(err: CoreError, origin: Origin) -> PyErr {
             _ => PyOSError::new_err(message),
         },
         CoreError::Request(_) => PyValueError::new_err(message),
-        CoreError::Query(_) => PyRuntimeError::new_err(message),
+        CoreError::Query(_) | CoreError::Conflict(_) => PyRuntimeError::new_err(message),
     }
 }
 
