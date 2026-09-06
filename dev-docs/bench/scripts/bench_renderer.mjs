@@ -47,8 +47,8 @@
  *
  * - frame period under settling and under interaction → **p95 / p99**. A
  *   renderer that is fast on its best frame and stutters on its worst is a
- *   renderer that stutters. Both the 60 fps (16.7 ms) and 30 fps (33.3 ms)
- *   lines are reported against the p95.
+ *   renderer that stutters. The 60/30 fps lines lie between vsync buckets;
+ *   raw p95 and p99 remain beside the verdict.
  * - time-to-first-paint → **mean of first events**, over `--loads` cold loads.
  *   A once-per-load cost is structurally invisible to `min`.
  * - point/link counts, the WebGL renderer string → **exact**.
@@ -106,6 +106,7 @@ function parseArgs() {
     reference: null,
     referenceVersion: null,
     simulation: 'running',
+    only: 'full',
   }
   const raw = process.argv.slice(2)
   for (let i = 0; i < raw.length; i += 2) {
@@ -117,6 +118,7 @@ function parseArgs() {
     else args[key] = value
   }
   if (!['running', 'stopped'].includes(args.simulation)) throw new Error('--simulation must be running or stopped')
+  if (!['full', 'workspace'].includes(args.only)) throw new Error('--only must be full or workspace')
   return args
 }
 
@@ -466,6 +468,7 @@ async function interactionCosts(context, url, out, repeats) {
 
   for (let i = 0; i < repeats; i += 1) {
     const { page } = await readyPage(context, url)
+    await destination(page, 'query')
     // Wait for the asynchronous editor upgrade before entering the query.
     await page.locator('[data-testid="query-editor"] .cm-content, [data-testid="editor-note"].kglv-warn').first().waitFor({ state: 'attached' })
     await page.locator('[data-testid="query-editor"] .cm-content, [data-testid="query-editor"] textarea').first().fill('MATCH (n:Person) RETURN id(n) AS id, n.title AS title')
@@ -476,14 +479,15 @@ async function interactionCosts(context, url, out, repeats) {
     queryRows = await page.evaluate(() => window.__kglv.queryRows)
     tableDomNodes = await page.locator('[data-testid="query-table"]').evaluate((root) => root.querySelectorAll('*').length)
 
-    // Expand to the node bound, then collapse it: 5 005 slots with 5 000
-    // tombstoned is far past the 30% ratio and past the 64-slot floor, so the
-    // collapse is answered with a compaction and the client applies the remap.
+    // Request the node ceiling, then collapse the admitted result. The 2 MiB
+    // cumulative byte ceiling may admit fewer than 5,000 instances; either
+    // result remains far past the 30% ratio and the 64-slot compaction floor.
+    await destination(page, 'explore')
     await page.locator('.kglv-label-name').filter({ hasText: /^Person$/ }).click()
     await page.getByTestId('expand-limit').fill('5000')
     await page.getByTestId('expand-KNOWS-out').click()
     await page.waitForFunction(
-      () => window.__kglv.lastSliceKind === 'expand' && window.__kglv.pointCount >= 5000,
+      () => window.__kglv.lastSliceKind === 'expand' && (window.__kglv.truncation?.returned ?? 0) > 0,
       undefined,
       { timeout: 180_000 },
     )
@@ -513,6 +517,80 @@ async function interactionCosts(context, url, out, repeats) {
   out.compaction_slots_after = { statistic: 'exact', value: reclaimed }
 }
 
+/** Time from the real click dispatch until its visible DOM result is complete. */
+async function timedClick(page, target, completion) {
+  await target.evaluate((element, condition) => {
+    window.__kglvTaskTimer?.observer?.disconnect()
+    const timer = { startedAt: null, endedAt: null, observer: null }
+    const complete = () => [...document.querySelectorAll(`[data-testid="${condition.testid}"]`)]
+      .some(node => node.textContent?.includes(condition.text))
+    timer.observer = new MutationObserver(() => {
+      if (timer.startedAt !== null && timer.endedAt === null && complete()) {
+        timer.endedAt = performance.now()
+        timer.observer.disconnect()
+      }
+    })
+    timer.observer.observe(document.body, {childList: true, subtree: true, characterData: true})
+    element.addEventListener('click', () => { timer.startedAt = performance.now() }, {capture: true, once: true})
+    window.__kglvTaskTimer = timer
+  }, completion)
+  await target.click()
+  await page.waitForFunction(() => window.__kglvTaskTimer?.endedAt !== null)
+  return page.evaluate(() => window.__kglvTaskTimer.endedAt - window.__kglvTaskTimer.startedAt)
+}
+
+/** New Records tasks have no equivalent in the published viewer. */
+async function workspaceCosts(context, url, out, repeats) {
+  const events = { read: [], sort: [], page: [], select: [] }
+  const controls = []
+  let descendants = 0
+  let renderedRows = 0
+  for (let round = 0; round < repeats; round += 1) {
+    const { page } = await readyPage(context, url)
+    try {
+      if (await page.getByTestId('destination-data').count() === 0) {
+        out.records_tasks = { statistic: 'availability', value: 'absent in published reference' }
+        return
+      }
+      await installCapture(page)
+      const before = await control(page)
+      await page.locator('.kglv-label-name').filter({ hasText: /^Person$/ }).click()
+      await page.getByTestId('expand-limit').fill('5000')
+      await page.getByTestId('expand-KNOWS-out').click()
+      await page.waitForFunction(
+        () => window.__kglv.lastSliceKind === 'expand' && (window.__kglv.truncation?.returned ?? 0) > 0,
+        undefined,
+        {timeout: 180_000},
+      )
+      const returned = await page.evaluate(() => window.__kglv.truncation.returned)
+      events.read.push(await timedClick(page, page.getByTestId('destination-data'), {testid: 'records-page', text: `1–100 of ${returned}`}))
+      events.sort.push(await timedClick(page, page.getByTestId('records-sort-id'), {testid: 'records-sort-id', text: '▴'}))
+      events.page.push(await timedClick(page, page.getByTestId('records-next'), {testid: 'records-page', text: `101–200 of ${returned}`}))
+      events.select.push(await timedClick(page, page.getByTestId('records-table').getByRole('checkbox').first(), {testid: 'records-selection', text: '1 selected'}))
+      renderedRows = await page.getByTestId('records-table').locator('tr').count() - 1
+      if (renderedRows !== 100) throw new Error(`Records page rendered ${renderedRows} rows; expected its bounded 100-row page`)
+      descendants = await page.getByTestId('records-table').evaluate(table => table.querySelectorAll('*').length)
+      const after = await control(page)
+      controls.push({ before, after })
+    } finally { await page.close() }
+  }
+  for (const [task, samples] of Object.entries(events)) {
+    out[`records_${task}_ms`] = {
+      statistic: 'mean of first events, browser action through visible result',
+      clock: 'in-page performance.now(), click dispatch through observed DOM completion',
+      value: +(samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(3),
+      events: samples.map(value => +value.toFixed(3)), n: samples.length,
+    }
+  }
+  out.records_task_controls_ms = {
+    statistic: 'median of 3, before and after each four-task sequence',
+    limitation: 'control drift qualifies the sequence as a whole; it does not isolate one task',
+    value: controls,
+  }
+  out.records_rendered_rows = { statistic: 'exact', value: renderedRows }
+  out.records_dom_descendants = { statistic: 'exact', value: descendants }
+}
+
 /**
  * The app URL in D2's deterministic layout mode.
  *
@@ -527,6 +605,13 @@ function appUrl(info) {
   return `${info.url}?deterministic=1`
 }
 
+// Published viewers predate destinations. Keep their route unchanged while
+// exercising the current workspace through its visible navigation controls.
+async function destination(page, name) {
+  const tab = page.getByTestId(`destination-${name}`)
+  if (await tab.count()) await tab.click()
+}
+
 async function readyPage(context, url) {
   // Every client attaches to the same session; a new page is not a fresh view.
   const reset = await fetch(new URL('/api/reset', url), { method: 'POST' })
@@ -538,6 +623,10 @@ async function readyPage(context, url) {
   })
   await page.goto(url)
   await page.waitForFunction(() => window.__kglv?.ready === true, undefined, { timeout: 60_000 })
+  const schemaContext = page.getByTestId('schema-context')
+  // The published reference draws schema alongside instances. Hold that
+  // presentation constant so a comparison does not change its node/link set.
+  if (await schemaContext.count()) await schemaContext.check()
   return { page, errors }
 }
 
@@ -556,6 +645,7 @@ async function main() {
     backend: { statistic: 'exact', value: args.backend },
     graph: { statistic: 'exact', value: args.graph },
     run: { statistic: 'exact', value: args.run },
+    scope: { statistic: 'exact', value: args.only },
     simulation_mode: { statistic: 'exact', value: args.simulation },
     captured_at: { statistic: 'exact', value: new Date().toISOString() },
     loadavg: { statistic: 'exact', value: (await import('node:os')).loadavg().map((v) => +v.toFixed(2)) },
@@ -570,6 +660,7 @@ async function main() {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
 
   try {
+    if (args.only === 'full') {
     // ── time to first paint: mean of first events, cold loads ──────────
     const ttfp = []
     for (let i = 0; i < args.loads; i += 1) {
@@ -604,13 +695,16 @@ async function main() {
       const { page, errors } = await readyPage(context, appUrl(server.info))
       await page.locator('.kglv-label-name').filter({ hasText: /^Person$/ }).click()
       await page.getByTestId('expand-limit').fill(String(size))
+      const schemaPoints = await page.evaluate(() => window.__kglv.pointCount)
       await page.getByTestId('expand-KNOWS-out').click()
       // Both conditions: `lastSliceKind` alone is set before the upload, so
       // waiting on it can start a capture against a view that is still five
       // meta-graph nodes.
       await page.waitForFunction(
-        (want) => window.__kglv.lastSliceKind === 'expand' && window.__kglv.pointCount >= want,
-        Math.min(size, 5000),
+        (schemaPoints) => window.__kglv.lastSliceKind === 'expand' &&
+          (window.__kglv.truncation?.returned ?? 0) > 0 &&
+          window.__kglv.pointCount >= schemaPoints + window.__kglv.truncation.returned,
+        schemaPoints,
         { timeout: 180_000 },
       )
       const state = await page.evaluate(() => window.__kglv)
@@ -663,6 +757,8 @@ async function main() {
       await page.close()
     }
     await interactionCosts(context, appUrl(server.info), out, 3)
+    }
+    await workspaceCosts(context, appUrl(server.info), out, 3)
   } finally {
     await browser.close()
     server.child.kill()
