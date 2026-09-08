@@ -9,7 +9,18 @@ from unittest.mock import patch
 
 CONF = Path(__file__).resolve().parents[1] / "docs" / "conf.py"
 STATIC = CONF.parent / "_static"
-REQUIRED_ASSETS = ("team.kgl", "team-overview.png", "team-records.png", "team-export.png")
+REQUIRED_PAGES = ("sodir-geologist.md",)
+REQUIRED_ASSETS = (
+    "team.kgl",
+    "team-overview.png",
+    "team-records.png",
+    "team-export.png",
+    "notebooks/sodir-geologist.ipynb",
+    "sodir-producing-fields-map.png",
+    "sodir-depth-context-16-2-6.png",
+    "sodir-notebook-data.png",
+    "sodir-production-2024.png",
+)
 
 
 def load(env):
@@ -20,8 +31,10 @@ def load(env):
 
 
 def main():
+    missing_pages = [name for name in REQUIRED_PAGES if not (CONF.parent / name).is_file()]
+    assert not missing_pages, f"missing documentation page(s): {', '.join(missing_pages)}"
     missing = [name for name in REQUIRED_ASSETS if not (STATIC / name).is_file()]
-    assert not missing, f"missing onboarding asset(s): {', '.join(missing)}"
+    assert not missing, f"missing documentation asset(s): {', '.join(missing)}"
     revision = "0123456789abcdef0123456789abcdef01234567"
     branch, banner = load(
         {

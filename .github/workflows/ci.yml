@@ -295,6 +295,8 @@ jobs:
       # before the published site has it.
       - name: Check documentation preview configuration
         run: python3 scripts/check_docs_config.py
+      - name: Check downloadable SODIR notebook
+        run: make check-sodir-notebook
       - name: Build the documentation
         run: make docs
 

@@ -92,7 +92,7 @@ DOCS_OUT = target/docs
         rust-fmt rust-clippy rust-test cli-build fixture e2e \
         frontend-install frontend-typecheck frontend-build frontend-audit \
         py-venv py-venv-refresh py-develop pytest wheel check-packaged-consumer \
-        docs docs-venv docs-venv-refresh
+        check-sodir-notebook docs docs-venv docs-venv-refresh
 
 help:  ## List the targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | \
@@ -346,6 +346,9 @@ check-docs-sample:  ## Verify docs/_static/team.kgl matches its generator
 	  cmp "$$work/team.kgl" docs/_static/team.kgl \
 	    || { echo "check-docs-sample: FAIL — docs/_static/team.kgl has drifted; run 'make docs-sample' and explain the data-contract change" >&2; exit 1; }; \
 	  echo "check-docs-sample: OK — downloadable graph matches its generator"
+
+check-sodir-notebook:  ## Verify the downloadable SODIR notebook and its executable semantics
+	@$(PYTHON) scripts/check_sodir_notebook.py
 
 # ---- the Python wheel -------------------------------------------------
 #
