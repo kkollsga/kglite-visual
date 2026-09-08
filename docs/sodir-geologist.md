@@ -42,6 +42,10 @@ Appearance.
    producing fields using their source geometry. Color by hydrocarbon type.
    Each point is a representative location derived from source geometry; it does not display a field outline or define reservoir extent.
 
+<a href="_static/sodir-notebook-map-app.png"><img
+src="_static/sodir-notebook-map-app.png"
+alt="KGLite Visual showing twelve producing NCS fields in the live geographic layout, coloured by hydrocarbon type"></a>
+
 <a href="_static/sodir-producing-fields-map.png"><img
 src="_static/sodir-producing-fields-map.png"
 alt="Twelve producing NCS fields on a deterministic coastline map"></a>
@@ -55,15 +59,30 @@ clustered names matter.
    completed 20 September 2010, and continues through eleven appraisal
    completions ending in August 2012. Inspect purpose, content, measured depth,
    and final vertical depth.
+
+<a href="_static/sodir-notebook-appraisal-app.png"><img
+src="_static/sodir-notebook-appraisal-app.png"
+alt="KGLite Visual radial graph of the Johan Sverdrup field, discovery, and twelve early wildcat and appraisal wellbores"></a>
+
 3. **Well depth context.** Combine twenty formation-level tops from 16/2-6
    with three core records and one drill-stem-test record. Formation tops use
    MD m RKB; DST uses MD m; core intervals retain the source unit metres
    because SODIR does not explicitly establish the same datum. Numeric overlap
    is not a formation assignment or connectivity claim.
+
+<a href="_static/sodir-notebook-well-evidence-app.png"><img
+src="_static/sodir-notebook-well-evidence-app.png"
+alt="KGLite Visual radial graph of well 16/2-6 linked to formation tops, core records, and a drill-stem test"></a>
+
 4. **Production comparison.** Show three fields and their packed monthly
    `ProductionProfile` values, then compare JOHAN SVERDRUP, TROLL, and EKOFISK over the
    intentionally complete common 2024 window. Oil and gas use separate axes
    because the source scales differ. The graph contains no invented month nodes.
+
+<a href="_static/sodir-notebook-production-graph-app.png"><img
+src="_static/sodir-notebook-production-graph-app.png"
+alt="KGLite Visual showing Ekofisk, Troll, and Johan Sverdrup connected to their production-profile records"></a>
+
 5. **Handoff.** Save and export an exact visible GraphML slice for the
    reviewable 16/2-6 formation-top, core, and DST neighborhood.
 
@@ -71,6 +90,10 @@ The notebook also includes a production chart recipe. Its query returns flat
 monthly rows that can be charted directly in Visual. See
 [Charts from query results](query-charts.md) for chart controls and
 interpretation boundaries.
+
+<a href="_static/sodir-notebook-production-chart-app.png"><img
+src="_static/sodir-notebook-production-chart-app.png"
+alt="KGLite Visual Data workspace charting 36 monthly oil-production rows for Ekofisk, Johan Sverdrup, and Troll during 2024"></a>
 
 The combined well-evidence query returns 24 ordered source rows: twenty
 formation-top records, three cores, and one DST. The notebook checks both node
