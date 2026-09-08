@@ -10,16 +10,17 @@ rerun and adapt, with a live workspace as the main result.
 The published `kglite-visual 0.1.7` wheel does not contain this workspace. The
 notebook's one-time setup installs the reviewed source revision
 `61e0534a89057535ba5a638dc9a83e2e0281cd78`, `kglite==0.17.1`, and
-`kglite-datasets==0.1.16`. Run that setup before choosing the notebook kernel.
+`kglite-datasets` from `8d190236e36df3e324faa445d641a75c8abd14df`. Run that setup before choosing the notebook kernel.
 ```
 
 The loader owns a project directory containing its downloaded source cache,
-the generated graph, small derived artifacts, and exports. On 2026-09-08 a
-fresh acquisition produced 488,737 nodes and 632,148 relationships in a
-114,256,249-byte graph. SODIR is a changing source, so a later refresh can
-change those counts. A normal rerun reuses the generated graph; set the
-documented `SODIR_FORCE_REBUILD=1` only when you intend to refresh it under the
-loader's cache cooldowns.
+the generated graph, small derived artifacts, and exports. A validated
+2026-09-08 preview graph was about 115 MB. SODIR is a changing source, so a
+later refresh can change its size and counts. A normal rerun reuses the graph
+only when its build record matches the pinned datasets revision and live
+capability queries confirm the play assignments and discovery volumes. Set the
+documented `SODIR_FORCE_REBUILD=1` only when you intend to refresh the source
+under the loader's cache cooldowns.
 
 ## The geological journey
 
@@ -57,15 +58,36 @@ clustered names matter.
    reviewable 16/2-6 formation-top, core, and DST neighborhood.
 
 The notebook also includes two chart recipes. The production query returns
-flat monthly rows that can be charted directly in Visual. An optional NJU-1
-creaming curve requires an enriched graph with explicit
-`Discovery → Prospect → Play` relationships; the standard
-`kglite-datasets==0.1.16` graph does not contain that bridge. The recipe never
-replaces the public workspace: it opens a separately owned enriched workspace
-for this section. It never uses polygon overlap as a substitute. It
-deduplicates discoveries converted
-to the same field, reports missing resource estimates, and labels the result
-as a current reported-resource subtotal. See [Charts from query
+flat monthly rows that can be charted directly in Visual. The NJU-1 curve uses
+one generated `Discovery → Play` assignment per assigned discovery. Published
+field/play examples take priority; other assignments use the designated
+well's hydrocarbon-bearing ages in HC1, HC2, then HC3 order and geometry.
+Same-rank ties remain unassigned, while `CANDIDATE_PLAY` edges preserve
+rejected alternatives for review. The coverage tables report assignment
+method, source wellbore, age evidence, distance, rejected candidates, and
+unassigned discoveries.
+
+The curve orders events by exact designated-well completion date and keeps the
+reported discovery year for comparison. It combines reported
+`DiscoveryVolume` observations, conservative single-discovery field copies,
+and an approximate Troll East/West allocation generated from SODIR's published gas proportion plus explicit oil/liquids assumptions. The two Troll
+components sum to the dated Troll field total and appear at their separate
+completion dates. Other field totals remain separate context. Missing,
+conflicted, and unresolved observations remain gaps; inclusion-window deltas
+are excluded because they have a different dated basis. The result is a
+partial current discovery-resource subtotal, not a historical estimate or a
+complete play-volume allocation.
+
+<a href="_static/sodir-nju1-creaming-qc.png"><img
+src="_static/sodir-nju1-creaming-qc.png"
+alt="Partial NJU-1 creaming curve ordered by designated discovery-well completion date"></a>
+
+This 2026-09-08 quality-control snapshot shows 15 of 41 assigned discoveries
+with usable estimates and leaves 26 missing or unresolved. Its 1,854.9 million
+Sm³ oil-equivalent subtotal includes 22.952 reported observations, 15.974 in
+strict single-discovery field copies, and the approximate 1,815.948 Troll
+allocation described above. It excludes inclusion-window deltas and does not
+allocate other field totals. See [Charts from query
 results](query-charts.md) for the controls and interpretation boundaries.
 
 The combined well-evidence query returns 24 ordered source rows: twenty
@@ -118,8 +140,8 @@ The primary sources are SODIR's
 and [16/2-6 wellbore record and attributes](https://factpages.sodir.no/en/wellbore/PageView/Exploration/All/6374).
 SODIR's [field resource table](https://factpages.sodir.no/en/field/TableView/Resources)
 and [discovery resource table](https://factpages.sodir.no/en/discovery/TableView/Resources)
-define the recoverable oil-equivalent values used by the optional creaming
-recipe. FactPages content is published under the Norwegian Licence for Open
+define the recoverable oil-equivalent values used by the creaming recipe.
+FactPages content is published under the Norwegian Licence for Open
 Government Data.
 
 ## Run and continue

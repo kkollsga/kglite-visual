@@ -19,6 +19,7 @@ REQUIRED_ASSETS = (
     "sodir-producing-fields-map.png",
     "sodir-depth-context-16-2-6.png",
     "sodir-notebook-data.png",
+    "sodir-nju1-creaming-qc.png",
     "sodir-production-2024.png",
     "query-production.png",
     "query-chart-workspace.png",

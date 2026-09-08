@@ -48,18 +48,21 @@ series, more than 5,000 expanded points, or truncated query rows/cells rather
 than drawing a misleading chart. Use Cypher `UNWIND` when you want packed
 points to arrive as ordinary rows with explicit columns.
 
-## Creaming curves need an explicit membership source
+## Creaming curves need membership and volume provenance
 
 A play creaming curve needs discovery-to-play membership and a stated resource
-basis. SODIR's standard discovery and play tables do not contain a direct
-foreign key. An enriched graph can supply the explicit path
-`Discovery -[:HAS_DEPOSIT_PROSPECT]-> Prospect -[:IN_PLAY]-> Play`.
-Geographic overlap is insufficient because plays can overlap vertically.
+basis. SODIR's source discovery and play tables do not contain a direct
+foreign key. The [SODIR notebook](sodir-geologist.md) uses the datasets
+preview's single assigned `Discovery -[:IN_PLAY]-> Play` edge: published
+field examples take precedence, followed by designated-well HC ages and
+polygon geometry. Same-rank ties remain unassigned and available as
+`CANDIDATE_PLAY` diagnostics. Geographic overlap alone is insufficient because
+plays can overlap vertically.
 
-When discoveries have become fields, count the latest original recoverable
-field estimate once and show it separately from standalone discovery
-resources. Keep discoveries with missing estimates visible in coverage rather
-than assigning zero. Field totals can span more than one play when the source
-does not publish a play allocation, so label the result a reported-resource
-subtotal. Current estimates ordered by discovery year do not reconstruct the
-estimate available at the historical discovery date.
+The notebook consumes `DiscoveryVolume` observations and distinguishes reported
+resources, strict single-discovery field copies, and the approximate Troll
+East/West allocation. It excludes inclusion-window reserve deltas from the
+current-estimate curve and does not add field totals again. Missing or
+unresolved estimates remain visible in coverage, never zero. The result is a
+partial discovery-resource subtotal; current estimates ordered by designated
+well completion date do not reconstruct the estimates available at discovery.
