@@ -48,7 +48,7 @@ then open the included 17-node team sample. The
 takes it through browse, inspect, query, filter, calculate, save and export.
 
 <p align="center">
-  <img src="docs/_static/team-overview.png"
+  <img src="https://raw.githubusercontent.com/kkollsga/kglite-visual/8870e9643bb12c930475619fe0ffe6f3291ad40f/docs/_static/team-overview.png"
        alt="The kglite-visual workspace showing the team sample"
        width="720">
 </p>
