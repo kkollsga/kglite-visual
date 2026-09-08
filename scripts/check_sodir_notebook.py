@@ -15,7 +15,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "docs" / "_static" / "notebooks" / "sodir-geologist.ipynb"
 RUNTIME_REVISION = "61e0534a89057535ba5a638dc9a83e2e0281cd78"
-DATASETS_REVISION = "4db33e083bdbf78e729f3426064be27864e8bb2b"
+DATASETS_REVISION = "95794a2879143f305511e60db315cc61a1c319bd"
 PIN_PATTERNS = {
     "kglite==0.17.1": r"(?<![\w-])kglite==0[.]17[.]1(?![\w.])",
     DATASETS_REVISION: re.escape(DATASETS_REVISION),

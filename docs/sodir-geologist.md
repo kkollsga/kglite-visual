@@ -10,7 +10,7 @@ rerun and adapt, with a live workspace as the main result.
 The published `kglite-visual 0.1.7` wheel does not contain this workspace. The
 notebook's one-time setup installs the reviewed source revision
 `61e0534a89057535ba5a638dc9a83e2e0281cd78`, `kglite==0.17.1`, and
-`kglite-datasets` from `4db33e083bdbf78e729f3426064be27864e8bb2b`. Run that setup before choosing the notebook kernel.
+`kglite-datasets` from `95794a2879143f305511e60db315cc61a1c319bd`. Run that setup before choosing the notebook kernel.
 ```
 
 The loader owns a project directory containing its downloaded source cache,
