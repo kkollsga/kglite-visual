@@ -1,0 +1,19 @@
+.kglv-chart-panel { margin-bottom: 14px; border-bottom: 1px solid #314355; padding-bottom: 14px; }
+.kglv-chart-setup { display: grid; gap: 12px; padding: 12px; border: 1px solid #314355; border-radius: 8px; background: #111d28; }
+.kglv-chart-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.kglv-chart-field { display: grid; gap: 5px; color: #b9c8d6; font-size: 12px; }
+.kglv-chart-suggestions, .kglv-chart-series, .kglv-chart-transform { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.kglv-chart-suggestion { text-align: left; }
+.kglv-chart-picture { overflow-x: auto; margin-top: 12px; background: #fff; border-radius: 8px; }
+.kglv-chart-picture svg { display: block; width: 100%; min-width: 480px; height: auto; }
+.kglv-chart-series { margin: 12px 0; }
+.kglv-chart-series label, .kglv-chart-transform label { color: #cbd6e0; font-size: 12px; }
+.kglv-chart-panel details { margin: 10px 0; color: #cbd6e0; }
+.kglv-chart-panel details > summary { cursor: pointer; }
+.kglv-chart-panel pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #b9c8d6; }
+.kglv-chart-values { margin-top: 12px; overflow-x: auto; }
+
+@media (max-width: 520px) {
+  .kglv-chart-fields { grid-template-columns: 1fr; }
+  .kglv-chart-picture svg { min-width: 440px; }
+}

@@ -64,7 +64,8 @@ import { LabelOverlay } from './labels'
 import { ExportCard } from './export'
 import { PathBuilder } from './path'
 import { Legend, type LegendEntry, type LegendSection } from './legend'
-import { Panels } from './panels'
+import { Panels, type QueryProvenance } from './panels'
+import { captureQueryProvenance } from './charts/provenance'
 import {
   assertLittleEndian,
   fnv1a,
@@ -205,6 +206,8 @@ let requestSerial = 0
 let pendingGraphFocus: string | null = null
 const privateRequests = new Map<string, string>()
 const pendingSharedRequests = new Map<string, string>()
+/** At most the latest private query; its editor and parameters may change before the answer. */
+const pendingQueryProvenance = new Map<string, QueryProvenance>()
 const filters = new Filters(workspace.panelHosts.filters, predicates => send({type: 'subset', predicates}))
 const readability = new PresentationControls(workspace.panelHosts.appearance, settings => send({type: 'presentation', ...settings}))
 const mappedAppearance = new AppearanceMappingIndex()
@@ -679,6 +682,10 @@ function send(request: Request): string {
   const mutation = sharedMutations.has(request.type) || (request.type === 'cypher' && request.as_graph)
   if (!mutation || request.type === 'cypher') privateRequests.set(request.type, request_id)
   if (mutation) pendingSharedRequests.set(request_id, request.type)
+  if (request.type === 'cypher' && !request.as_graph) {
+    pendingQueryProvenance.clear()
+    pendingQueryProvenance.set(request_id, captureQueryProvenance(request_id, request.query, request.params))
+  }
   trail.request(request_id, request, 'slot' in request ? view.label(request.slot)?.text ?? null : null)
   transport.send(JSON.stringify({...request, request_id, expected: mutation ? shared.stamp : null}))
   return request_id
@@ -690,6 +697,7 @@ async function handle(completed: Completed): Promise<void> {
   switch (completed.kind) {
     case 'session':
       pendingRestores.clear()
+      pendingQueryProvenance.clear()
       shared.begin(completed.value.generation)
       trail.begin(completed.value.generation)
       resyncing = false
@@ -797,7 +805,11 @@ async function handle(completed: Completed): Promise<void> {
     case 'query-table': {
       const table = completed.value
       if (table.stamp !== null && table.stamp.generation !== shared.generation) break
-      debugState.queryRows = panels.showQueryTable(table)
+      const provenance = completed.request_id === undefined
+        ? null
+        : pendingQueryProvenance.get(completed.request_id) ?? null
+      if (completed.request_id !== undefined) pendingQueryProvenance.delete(completed.request_id)
+      debugState.queryRows = panels.showQueryTable(table, provenance)
       noteTruncation(table.bound.truncated, table.bound.returned, table.bound.total, 'rows')
       renderStatus()
       break
@@ -840,6 +852,7 @@ async function handle(completed: Completed): Promise<void> {
       break
     case 'error': {
       trail.refuse(completed.request_id)
+      if (completed.request_id !== undefined) pendingQueryProvenance.delete(completed.request_id)
       if (completed.request_id === pendingGraphFocus) pendingGraphFocus = null
       const requestKind = completed.request_id === undefined ? undefined : pendingSharedRequests.get(completed.request_id)
       if (completed.request_id !== undefined) {

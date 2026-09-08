@@ -234,7 +234,10 @@ export function buildChart(table: QueryTable, mapping: ChartMapping, options: Ch
     }
     series.points.push({ x: normalizedX.x, y, sourceRow: value.sourceRow, sourceIndex: value.sourceIndex })
   }
-  if (mapping.kind === 'bar' && categories.size > MAX_BAR_CATEGORIES) throw new ChartModelError('category-bound', `Bar charts support at most ${MAX_BAR_CATEGORIES} categories.`)
+  if (mapping.kind === 'bar') {
+    const distinctX = new Set([...bySeries.values()].flatMap((item) => item.points.map((point) => point.x)))
+    if (distinctX.size > MAX_BAR_CATEGORIES) throw new ChartModelError('category-bound', `Bar charts support at most ${MAX_BAR_CATEGORIES} categories.`)
+  }
   if (options.transform && xKind !== 'date') throw new ChartModelError('monthly-x', 'Monthly conversion requires strict calendar dates on the x axis.')
   const series = [...bySeries.values()]
   const insertedGaps = transformMonthly(series, options)
@@ -243,11 +246,15 @@ export function buildChart(table: QueryTable, mapping: ChartMapping, options: Ch
   const plottedPoints = series.reduce((count, item) => count + item.points.filter((point) => point.y !== null).length, 0)
   return {
     kind: mapping.kind,
+    mapping: {...mapping},
     xKind: xKind ?? 'number',
     xLabels: xKind === 'category' ? [...categories.keys()].map((key) => display(JSON.parse(key) as TypedValue)) : null,
     series,
     coverage: { sourceRows: table.bound.returned, expandedPoints: expanded.length, plottedPoints, missingY, insertedGaps, rejectedPoints: 0 },
     provenance: { tableStamp: table.stamp, resultRowsReturned: table.bound.returned, resultRowsTotal: table.bound.total, resultTruncated: table.bound.truncated },
-    ...options,
+    xLabel: options.xLabel ?? mapping.x,
+    yLabel: options.yLabel ?? mapping.y,
+    unit: options.unit,
+    transform: options.transform ? {...options.transform} : undefined,
   }
 }

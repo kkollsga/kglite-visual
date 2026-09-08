@@ -33,6 +33,8 @@ import type { NodeDetail } from './generated/NodeDetail'
 import type { PropertyStat } from './generated/PropertyStat'
 import type { PropertyStatsResponse } from './generated/PropertyStatsResponse'
 import type { QueryTable } from './generated/QueryTable'
+import { QueryChartPanel, type QueryProvenance } from './charts/panel'
+export type { QueryProvenance } from './charts/panel'
 import type { SavedQueries } from './queries'
 import type { SearchResponse } from './generated/SearchResponse'
 
@@ -144,6 +146,7 @@ export class Panels {
   private readonly queryDiagnostics: HTMLDivElement
   private readonly queryProfile: HTMLDivElement
   private readonly queryResults: HTMLDivElement
+  private readonly queryChart: QueryChartPanel
   /** What a generated table left out, when it left anything out. */
   private readonly tableNote: HTMLDivElement
   private readonly selection: HTMLDivElement
@@ -381,6 +384,7 @@ export class Panels {
     this.queryProfile.setAttribute('data-testid', 'query-profile')
     this.queryProfile.hidden = true
     this.queryResults = element('div', 'kglv-results')
+    this.queryChart = new QueryChartPanel({viewChanged: () => this.drawGrid()})
     query.append(
       this.queryHost,
       this.editorNote,
@@ -854,7 +858,7 @@ export class Panels {
   }
 
   /** The results table. Rows are already bounded by the server (D5). */
-  showQueryTable(table: QueryTable): number {
+  showQueryTable(table: QueryTable, provenance: QueryProvenance | null = null): number {
     this.hosts.revealData()
     this.queryResults.replaceChildren()
     this.showQueryDiagnostics(table)
@@ -862,6 +866,7 @@ export class Panels {
     const rows = table.data[0]?.length ?? 0
 
     if (Panels.isDrawablePlan(table)) {
+      this.queryChart.clear()
       // No bound wording: `EXPLAIN` is exempt from the row cap in the engine,
       // so "n of m" would be describing a ceiling that did not apply. And no
       // elapsed time worth reading — the query was planned, not run.
@@ -880,6 +885,7 @@ export class Panels {
     this.queryStatus.textContent = `${bound} in ${count(table.elapsed_ms)} ms`
 
     this.lastTable = table
+    this.queryChart.setResult(table, provenance)
     this.queryPage = 0
     this.sortBy = null
     this.drawGrid()
@@ -919,7 +925,8 @@ export class Panels {
         notice.textContent = `Downloaded ${rows} returned query rows in current sort order; each field includes cell state, value type and detail columns; partial previews stay partial.${table.bound.truncated ? ' The source query result is partial.' : ''}`
       } catch (error) { notice.textContent = error instanceof Error ? error.message : String(error) }
     }
-    this.queryResults.replaceChildren(notice, csv, grid, pager)
+    this.queryResults.replaceChildren(this.queryChart.root)
+    if (!this.queryChart.showingChart()) this.queryResults.append(notice, csv, grid, pager)
   }
   private queryRow(table: QueryTable, row: number, linked: boolean): HTMLTableRowElement {
     const tr = element('tr')
@@ -1002,6 +1009,7 @@ export class Panels {
     this.queryDiagnostics.replaceChildren()
     this.showTableNote(null)
     this.lastTable = null
+    this.queryChart.clear()
     this.sortBy = null
     this.queryStatus.className = 'kglv-hint'
     this.queryStatus.textContent =
@@ -1012,6 +1020,7 @@ export class Panels {
   showQueryError(message: string): void {
     this.hosts.revealData()
     this.queryResults.replaceChildren()
+    this.queryChart.clear()
     // The failed query's predecessor is not this query's result. Left in place,
     // a header click on the old grid would re-draw rows for a question that is
     // no longer on screen.

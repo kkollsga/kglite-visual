@@ -89,6 +89,8 @@ export interface ChartProvenance {
 
 export interface ChartModel {
   kind: ChartKind
+  /** Confirmed source mapping, detached from the controls that supplied it. */
+  mapping: ChartMapping
   xKind: ChartXKind
   xLabels: string[] | null
   series: ChartSeries[]

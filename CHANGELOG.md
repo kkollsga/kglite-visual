@@ -13,6 +13,13 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Added
 
+- Visualize complete query results as line, bar or scatter charts, with
+  data-based suggestions, editable mappings and support for bounded history
+  arrays. Inspect plotted values, retain gaps, compare coloured series and
+  export SVG/PNG with the executed query and explicit transformation labels.
+  Monthly totals can be converted to calendar-day averages using a confirmed
+  monthly basis and user-supplied unit scale.
+
 - Add a downloadable, rerunnable SODIR geologist notebook and rendered guide
   that build a file-backed graph, drive bounded geological views in the live
   workspace, and compare honestly labelled monthly production rates.

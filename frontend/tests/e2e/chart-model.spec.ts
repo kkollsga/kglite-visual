@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 import { analyzeQueryResult, buildChart } from '../../src/charts/model'
-import { ChartModelError, MAX_CHART_POINTS } from '../../src/charts/types'
+import { ChartModelError, MAX_BAR_CATEGORIES, MAX_CHART_POINTS } from '../../src/charts/types'
 import type { QueryTable } from '../../src/generated/QueryTable'
 import type { RecordCell } from '../../src/generated/RecordCell'
 import type { TypedValue } from '../../src/generated/TypedValue'
@@ -86,6 +86,11 @@ test('bounds, truncation, unsafe values and line duplicates refuse misleading ch
   expect(buildChart(duplicate, { kind: 'scatter', shape: 'rows', x: 'x', y: 'y' }).series[0]?.points).toHaveLength(2)
 })
 
+test('the bar readability bound applies to distinct numeric x values', () => {
+  const rows = Array.from({length: MAX_BAR_CATEGORIES + 1}, (_, index) => [tv.int(String(index)), tv.float(index)])
+  expect(failure(() => buildChart(table(['x', 'y'], rows), {kind: 'bar', shape: 'rows', x: 'x', y: 'y'})).code).toBe('category-bound')
+})
+
 test('monthly conversion uses leap calendar days and inserts absent months as gaps', () => {
   const result = table(['month', 'volume'], [
     [tv.date('2024-01-01'), tv.float(31)],
@@ -125,4 +130,29 @@ test('calendar expansion and transformed overflow fail before creating an unboun
   ])
   expect(failure(() => buildChart(distant, { kind: 'line', shape: 'rows', x: 'month', y: 'volume' }, { transform: { kind: 'monthly-average-calendar-day-rate', confirmedMonthly: true, scale: 1 } })).code).toBe('point-bound')
   expect(failure(() => buildChart(table(['month', 'volume'], [[tv.date('2024-01-01'), tv.float(Number.MAX_VALUE)]]), { kind: 'line', shape: 'rows', x: 'month', y: 'volume' }, { transform: { kind: 'monthly-average-calendar-day-rate', confirmedMonthly: true, scale: Number.MAX_VALUE } })).code).toBe('unsafe-number')
+})
+
+test('confirmed mappings and labels are immutable snapshots for scalar and array charts', () => {
+  const rows = table(['month', 'oil', 'gas', 'field'], [[tv.date('2024-01-01'), tv.float(1), tv.float(2), tv.string('A')]])
+  const mapping = {kind: 'line', shape: 'rows', x: 'month', y: 'gas', series: 'field'} as const
+  const options = {xLabel: 'Month', yLabel: 'Chosen gas', unit: 'BillSm3', transform: {kind: 'monthly-average-calendar-day-rate', confirmedMonthly: true, scale: 1_000_000_000}} as const
+  const scalar = buildChart(rows, mapping, options)
+  ;(mapping as {y: string}).y = 'oil'
+  ;(options as {unit: string}).unit = 'changed'
+  ;(options.transform as {scale: number}).scale = 1
+  expect(scalar.mapping).toEqual({kind: 'line', shape: 'rows', x: 'month', y: 'gas', series: 'field'})
+  expect(scalar).toMatchObject({xLabel: 'Month', yLabel: 'Chosen gas', unit: 'BillSm3', transform: {scale: 1_000_000_000}})
+
+  const points = table(['field', 'history'], [[tv.string('A'), tv.list([tv.map([['time', tv.date('2024-01-01')], ['value', tv.float(2)]])])]])
+  expect(buildChart(points, {kind: 'line', shape: 'point-map-array', points: 'history', x: 'time', y: 'value', series: 'field'}).mapping)
+    .toEqual({kind: 'line', shape: 'point-map-array', points: 'history', x: 'time', y: 'value', series: 'field'})
+  const paired = table(['months', 'values'], [[tv.list([tv.date('2024-01-01')]), tv.list([tv.float(2)])]])
+  expect(buildChart(paired, {kind: 'line', shape: 'paired-arrays', x: 'months', y: 'values'}).mapping)
+    .toEqual({kind: 'line', shape: 'paired-arrays', x: 'months', y: 'values'})
+})
+
+test('axis labels default to the confirmed columns and explicit labels override them', () => {
+  const result = table(['period', 'value'], [[tv.int('1'), tv.float(2)]])
+  expect(buildChart(result, {kind: 'line', shape: 'rows', x: 'period', y: 'value'})).toMatchObject({xLabel: 'period', yLabel: 'value'})
+  expect(buildChart(result, {kind: 'line', shape: 'rows', x: 'period', y: 'value'}, {xLabel: 'Year', yLabel: 'Resources'})).toMatchObject({xLabel: 'Year', yLabel: 'Resources'})
 })
