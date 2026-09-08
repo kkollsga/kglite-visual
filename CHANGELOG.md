@@ -51,6 +51,13 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ### Changed
 
+- **The engine is `kglite` 0.17.1**, exactly pinned (was 0.16.22). The
+  upstream release notes declare the `.kgl` checkpoint format unchanged across
+  the intervening releases. Existing portable graph files remain the viewer's
+  input contract, and saved views still record the engine version that loaded
+  their source. Durable views created by the 0.16.22 preview therefore refuse
+  restoration after migration and must be recreated and saved again in the
+  0.17.1 viewer.
 - Shared HTTP, WebSocket and MCP mutations commit and publish in one order.
   Optional expected revisions reject stale actions without changing the view;
   reconnects receive an atomic snapshot. Protocol 10 carries these snapshots
@@ -65,8 +72,8 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 - Browser request identities no longer collide across clients. Browsing and
   delayed graph replies preserve newer private query results, and the Data
   scope line identifies the records or query-results lane.
-- D3 JSON export refuses relationship properties that would overwrite topology
-  fields in the pinned exporter; GraphML retains those properties.
+- D3 JSON export refuses reserved relationship properties to prevent data
+  loss; GraphML retains those properties.
 - Query tables preserve large integer values without confusing them with text,
   and enforce their byte ceiling even when the first row is oversized.
 - Shared schema selections remain visible in the inspector, and atomic view

@@ -829,6 +829,20 @@ digest and nothing here pins one: `make fixture` proves byte-stability by
 regenerating **twice within one run**, and the committed fixtures are loaded
 by tests, never hashed against a constant.
 
+The floor moved to `=0.17.1` on 2026-09-08, from `=0.16.22` in one step,
+carrying 0.16.23, 0.16.24, 0.17.0 and 0.17.1. The documented Rust breaks in
+that range are on blueprint, durability, RDF and description APIs this viewer
+does not call; a tracked-source sweep found no `ClassDecl`, `RawOp`, `WalNode`,
+`WalGroup`, `wrap_for_durability`, `load_rdf`, `compute_description` or
+`DescribeRequest` use. The portable `.kgl` checkpoint format is unchanged.
+0.17.0 does add conservative normalization when older snapshots contain stored
+endpoint references, so actual old-file loads remain the compatibility proof,
+not the unchanged format claim alone. The query route adopts 0.17.1's
+corrections for an `ORDER BY` key carried through `WITH` and for `RETURN *`
+with `ORDER BY … LIMIT`; the migration gate exercises both shapes through this
+viewer rather than inferring their behavior from a successful compile. No
+upstream capability or workaround is added in this move.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves

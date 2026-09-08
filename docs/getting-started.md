@@ -52,6 +52,8 @@ kglite-visual graph.kgl
 ```
 
 Use the [stable documentation](https://kglite-visual.readthedocs.io/en/stable/)
-with that package. A `.kgl` file must be written by its matching kglite engine;
-the current source tree pins kglite 0.16.22. Packaging details, in-memory graph
-handoff and notebooks live in the [Python API](python.md).
+with that package. A `.kgl` file must use a format supported by the embedded
+kglite reader; it need not come from the exact same release. The current source
+tree pins kglite 0.17.1 and reads compatible files written by older releases.
+Packaging details, in-memory graph handoff and notebooks live in the
+[Python API](python.md).

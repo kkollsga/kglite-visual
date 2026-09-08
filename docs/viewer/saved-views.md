@@ -16,6 +16,11 @@ For a file-backed graph, saving verifies the source snapshot and the identities
 of its members. Regular files use a SHA-256 fingerprint; published disk-graph
 generations use their generation identity. Restore requires the same verified
 source. Changed or missing files are refused without replacing the live view.
+The fingerprint also records the KGLite engine version. After an engine
+migration, a durable view created by the earlier viewer refuses restoration
+even when the graph file itself remains compatible and unchanged. Recreate the
+exploration in the migrated viewer and save it as a new durable view; the old
+view cannot be restored in place and resaved.
 
 Null or ambiguous keys cannot identify a node reliably across launches. Such
 explorations use **session-only** saved views. Bytes, in-memory graph objects

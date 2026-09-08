@@ -1,12 +1,10 @@
 name: Publish Python wheels
 
-# AUTHORED IN P6, NEVER RUN, AND INERT AT THE PUBLISH STEP BY DESIGN. There is
-# no remote, no PyPI project and no trusted publisher (2026-08-29). Everything
-# up to `publish` is exercised locally — the sdist round trip, the release
-# wheel and the inventory check were all run on a developer machine before this
-# file was committed — but no Actions runner has executed any of it, and the
-# publish job cannot fire until a human turns it on (see that job's `if`).
-# A committed workflow is not a passing workflow (doctrine R10).
+# Production-exercised since v0.1.0 on 2026-08-29: the trusted publisher,
+# platform wheel matrix, source distribution, artifact-set check and GitHub
+# release have all run on the real remote. Publishing remains gated by the
+# repository variable and the exact CI result below; a committed workflow is
+# not evidence for a new release run (doctrine R10).
 
 on:
   # No paths-ignore, deliberately: the first release proved that a release
@@ -508,19 +506,11 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: [version-check, ci-gate, build-native, build-linux, build-linux-arm, build-sdist]
-    # THIS JOB IS INERT UNTIL A HUMAN ENABLES IT, and that is the whole point
-    # of the first term. `vars.PYPI_PUBLISH_ENABLED` is a repository variable
-    # that DOES NOT EXIST; an unset variable evaluates to the empty string, so
-    # this condition is false and the job is skipped on every run until someone
-    # creates the variable with the value `true`. That is deliberate: the PyPI
-    # project and its trusted publisher do not exist either, and a publish step
-    # that would fail at the registry is worse than one that is visibly off —
-    # a skipped job says "not enabled", a failed one says "broken".
-    #
-    # Turning it on is the LAST release precondition, after: the remote exists,
-    # a CI run has actually gone green, the PyPI project `kglite-visual` is
-    # registered, and a trusted publisher is configured for
-    # kkollsga/kglite-visual + workflow `release.yml`.
+# `PYPI_PUBLISH_ENABLED` is the explicit repository-level release switch. It
+# has been exercised with the registered `kglite-visual` PyPI project and its
+# trusted publisher. An unset or disabled value skips publication; an enabled
+# value still cannot bypass the repository, unpublished-version, CI and
+# must-pass artifact conditions below.
     #
     # The repository check is a second, independent guard: a fork inherits this
     # file, and a fork must never publish under this name.

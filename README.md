@@ -171,8 +171,9 @@ touches stdout.
 ## Requirements
 
 CPython 3.10+ (one abi3 wheel serves every version from 3.10 up) on macOS,
-Linux and Windows, plus a `.kgl` file written by a matching KGLite release —
-this version pins `kglite 0.16.22`. Building from source additionally needs a
+Linux and Windows, plus a `.kgl` file supported by the embedded KGLite reader —
+this version pins `kglite 0.17.1`, which reads compatible files written by
+older releases. Building from source additionally needs a
 Rust toolchain; the published wheels and the source distribution both carry a
 prebuilt frontend, so neither needs Node at install time.
 

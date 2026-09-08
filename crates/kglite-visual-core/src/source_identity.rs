@@ -12,7 +12,7 @@ use ts_rs::TS;
 
 use crate::CoreError;
 
-pub const ENGINE_VERSION: &str = "0.16.22";
+pub const ENGINE_VERSION: &str = "0.17.1";
 const MAX_CURRENT_BYTES: u64 = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

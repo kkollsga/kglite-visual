@@ -273,7 +273,7 @@ fn presentation_is_atomic_preserves_channels_and_captures_legend_visibility() {
 }
 
 #[test]
-fn pinned_d3_reserved_relation_property_overwrites_topology_and_viewer_refuses_it() {
+fn engine_d3_keeps_topology_but_viewer_refuses_to_drop_reserved_properties() {
     let mut graph = DirGraph::new();
     execute_mut(&mut graph, "CREATE (a:P {id:1}) CREATE (b:P {id:2}) CREATE (a)-[:R {source:99,target:98,type:'WRONG'}]->(b)", &ExecuteOptions::eager(&Default::default())).unwrap();
     let mut selection = CurrentSelection::new();
@@ -283,9 +283,9 @@ fn pinned_d3_reserved_relation_property_overwrites_topology_and_viewer_refuses_i
         .add_selection(None, vec![NodeIndex::new(0), NodeIndex::new(1)]);
     let original = kglite::api::io::to_d3_json(&graph, Some(&selection)).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&original).unwrap();
-    assert_eq!(parsed["links"][0]["source"], 99);
-    assert_eq!(parsed["links"][0]["target"], 98);
-    assert_eq!(parsed["links"][0]["type"], "WRONG");
+    assert_eq!(parsed["links"][0]["source"], 0);
+    assert_eq!(parsed["links"][0]["target"], 1);
+    assert_eq!(parsed["links"][0]["type"], "R");
     assert!(kglite_visual_core::export::export_nodes(
         &graph,
         &[NodeIndex::new(0), NodeIndex::new(1)],

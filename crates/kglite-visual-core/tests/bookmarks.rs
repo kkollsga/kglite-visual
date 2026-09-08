@@ -349,6 +349,36 @@ fn failed_source_relation_and_version_restore_leave_content_and_history_unchange
 }
 
 #[test]
+fn durable_bookmark_from_an_older_engine_is_refused_without_changing_live_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("source.kgl");
+    write(&path, graph());
+    let source = open(&path);
+    load(&source);
+    let mut bookmark = source.capture_bookmark(None).unwrap().bookmark;
+    let BookmarkSource::Durable {
+        source: fingerprint,
+    } = &mut bookmark.source
+    else {
+        panic!("a verified file produces a durable bookmark")
+    };
+    fingerprint.engine_version = "0.16.22".into();
+    let before = source.snapshot_shared();
+
+    let error = match source.prepare_bookmark_restore(&bookmark, None, None, None) {
+        Ok(_) => panic!("the engine version is part of the source fingerprint"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("source fingerprint does not match"),
+        "unexpected refusal: {error}"
+    );
+    assert_eq!(source.snapshot_shared(), before);
+}
+
+#[test]
 fn stale_prepared_restore_cannot_replace_a_peer_change_or_its_history() {
     let source = Session::open(Arc::new(graph()), "memory");
     load(&source);

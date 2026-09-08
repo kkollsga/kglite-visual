@@ -955,6 +955,84 @@ mod tests {
         assert_eq!(uncapped.result.rows.len(), NODES);
     }
 
+    /// KGLite 0.17.1 fixed the unfused route: without `LIMIT`, `ORDER BY`
+    /// previously lost an alias made by `WITH` and returned insertion order.
+    #[test]
+    fn query_route_orders_by_an_alias_from_with() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        execute_mut(
+            &mut graph,
+            "CREATE (:Person {name: 'A', age: 10})\n\
+             CREATE (:Person {name: 'C', age: 30})\n\
+             CREATE (:Person {name: 'B', age: 20})",
+            &ExecuteOptions::eager(&empty),
+        )
+        .expect("fixture builds");
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (p:Person) WITH p, p.age AS a RETURN p.name AS n ORDER BY a DESC"
+                    .to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("query runs");
+
+        assert_eq!(table.columns, ["n"]);
+        assert_eq!(
+            table.data[0],
+            [
+                serde_json::json!("C"),
+                serde_json::json!("B"),
+                serde_json::json!("A")
+            ]
+        );
+    }
+
+    /// KGLite 0.17.1 fixed the top-K route: a starred return used to become a
+    /// literal `*` column containing `1` rather than the row's bindings.
+    #[test]
+    fn query_route_expands_return_star_with_order_by_limit() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        execute_mut(
+            &mut graph,
+            "CREATE (:Person {name: 'A', age: 10})\n\
+             CREATE (:Person {name: 'C', age: 30})\n\
+             CREATE (:Person {name: 'B', age: 20})",
+            &ExecuteOptions::eager(&empty),
+        )
+        .expect("fixture builds");
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (p:Person) RETURN * ORDER BY p.age DESC LIMIT 2".to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("query runs");
+
+        assert_eq!(table.columns, ["p"]);
+        assert_eq!(table.bound.returned, 2);
+        assert_eq!(table.data[0][0]["properties"]["name"], "C");
+        assert_eq!(table.data[0][1]["properties"]["name"], "B");
+    }
+
     /// The bug this file's warning forwarding exists to fix.
     ///
     /// Before it, this query answered `200` with an empty table and nothing

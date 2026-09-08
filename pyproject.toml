@@ -17,7 +17,7 @@ authors = [
     {name = "Kristian dF Kollsgård", email = "kkollsg@gmail.com"},
 ]
 keywords = ["graph", "knowledge-graph", "visualization", "webgl", "kglite"]
-# The operating systems below are exactly the platforms build_wheels.yml
+# The operating systems below are exactly the platforms release.yml
 # builds a release-blocking wheel for; the best-effort aarch64-Linux legs are
 # covered by the POSIX :: Linux line either way. A classifier is a claim about
 # what ships, so it moves when the matrix moves.
@@ -47,7 +47,7 @@ dependencies = []
 # file has nothing to bump — the enumeration in CLAUDE.md counts four sites,
 # and this deliberately is not one of them. Neither is anything added in P6:
 # README.md carries an unpinned install line, CHANGELOG.md's top section is
-# `[Unreleased]`, and build_wheels.yml *reads* the number out of Cargo.toml
+# `[Unreleased]`, and release.yml *reads* the number out of Cargo.toml
 # rather than restating it. The count after P6 is still four, re-grepped.
 dynamic = ["version"]
 
@@ -95,6 +95,6 @@ python-source = "python"
 #
 # The bundle is built into the tarball, so an sdist built from a stale or
 # empty `frontend/dist` silently ships a broken app. `make check-bundle`
-# refuses a bundle older than `frontend/src`, and build_wheels.yml's sdist job
+# refuses a bundle older than `frontend/src`, and release.yml's sdist job
 # runs the production frontend build immediately before `maturin sdist`.
 include = [{ path = "frontend/dist/**/*", format = "sdist" }]
