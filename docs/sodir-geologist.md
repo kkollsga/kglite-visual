@@ -59,13 +59,14 @@ clustered names matter.
 
 The notebook also includes two chart recipes. The production query returns
 flat monthly rows that can be charted directly in Visual. The NJU-1 curve uses
-one generated `Discovery → Play` assignment per assigned discovery. Published
-field/play examples take priority; other assignments use the designated
-well's hydrocarbon-bearing ages in HC1, HC2, then HC3 order and geometry.
-Same-rank ties remain unassigned, while `CANDIDATE_PLAY` edges preserve
-rejected alternatives for review. The coverage tables report assignment
-method, source wellbore, age evidence, distance, rejected candidates, and
-unassigned discoveries.
+the supported `Discovery → Play` memberships for each discovery. Published
+discovery/play examples are authoritative; otherwise every compatible play
+containing the designated discovery well is retained using its age evidence
+and polygon geometry. Field membership alone does not supply a play. A
+discovery can occur in more than one play, so each selected-play curve counts
+distinct discovery IDs and curves for different plays can overlap. Their
+subtotals must not be added together. The coverage tables report membership
+source, source wellbore, age evidence, and distance.
 
 The oil creaming curve orders events by exact designated-well completion date
 and keeps the reported discovery year for comparison. It combines reported
@@ -82,15 +83,15 @@ historical estimate or a complete play-volume allocation.
 src="_static/sodir-nju1-creaming-qc.png"
 alt="Partial NJU-1 recoverable-oil creaming curve ordered by designated discovery-well completion date"></a>
 
-This 2026-09-08 quality-control snapshot shows 15 of 41 assigned discoveries
-with usable oil estimates and leaves 26 missing or unresolved. Its 322.034
+This 2026-09-08 quality-control snapshot shows 12 of 41 supported discoveries
+with usable oil estimates and leaves 29 missing or unresolved. Its 322.034
 million Sm³ oil subtotal includes 11.609 from reported observations, 10.829 from
 single-discovery field reserves, and 299.596 from Troll West. Troll East's
 generated zero remains distinct from missing data. Troll still contributes
 about 93% of the known oil subtotal. The QC figure uses a 290–330 million Sm³
 y-axis to show later additions; the initial Troll step is truncated.
 
-[Download the 26 discoveries without allocated or reported oil volumes](_static/sodir-nju1-discoveries-without-oil-volumes.csv).
+[Download the 29 discoveries without allocated or reported oil volumes](_static/sodir-nju1-discoveries-without-oil-volumes.csv).
 The dated QC list includes discovery names and IDs, discovery wells, completion
 dates, hydrocarbon type, field and resource-inclusion links, and FactPages URLs.
 Field reserve figures in that list are field totals, not allocated discovery

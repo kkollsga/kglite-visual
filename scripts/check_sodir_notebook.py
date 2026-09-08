@@ -15,7 +15,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "docs" / "_static" / "notebooks" / "sodir-geologist.ipynb"
 RUNTIME_REVISION = "61e0534a89057535ba5a638dc9a83e2e0281cd78"
-DATASETS_REVISION = "8d190236e36df3e324faa445d641a75c8abd14df"
+DATASETS_REVISION = "4db84882a853060f61f0b27f9665a145b0b74bd3"
 PIN_PATTERNS = {
     "kglite==0.17.1": r"(?<![\w-])kglite==0[.]17[.]1(?![\w.])",
     DATASETS_REVISION: re.escape(DATASETS_REVISION),
@@ -99,12 +99,14 @@ def check_pins_and_paths(sources: list[str]) -> None:
         "DISCOVERED_BY",
         "wlbCompletionDate",
         "CANDIDATE_PLAY",
-        "HC1, then HC2, then HC3",
+        "count(DISTINCT d)",
         "known discovery-oil subtotal",
         "Missing, conflicted, and unresolved estimates remain gaps",
     ):
         assert phrase in text, f"notebook is missing creaming-curve contract {phrase!r}"
-    assert "recoverable_oe AS discovery_recoverable" not in text, (
+    for retired in ("assigned to at most one play", "have one assigned play", "HC1, then HC2, then HC3"):
+        assert retired not in text, f"notebook retains retired single-play contract {retired!r}"
+    assert "recoverable_oe AS discovery_recoverable_mill_sm3_oil" not in text, (
         "oil-only curve must not read the oil-equivalent volume component"
     )
     assert "NJU1_EXAMPLE_DISCOVERY_IDS" not in text, (
@@ -181,7 +183,7 @@ def check_discovery_asset_helper(cells: list[dict]) -> None:
     prepare = namespace[DISCOVERY_ASSET_HELPER]
 
     def row(
-        discovery_id, resource_class, value, snapshot="2025-12-31", *,
+        discovery_id, resource_class, value, snapshot="2025-12-31", *, oe_value=None,
         basis="discovery_reserves", method="reported_observation", generated=False,
         usable=True, conflict=False, identity=None,
     ):
@@ -189,7 +191,9 @@ def check_discovery_asset_helper(cells: list[dict]) -> None:
             "discovery_id": discovery_id, "reported_discovery_year": 2000 + discovery_id,
             "discovery_well_completion_date": f"{2000 + discovery_id}-06-01",
             "discovery": f"D{discovery_id}", "discovery_resource_class": resource_class,
-            "discovery_recoverable_mill_sm3_oil": value, "resource_snapshot": snapshot,
+            "discovery_recoverable_mill_sm3_oil": value,
+            "discovery_recoverable_mill_sm3_oe": oe_value,
+            "resource_snapshot": snapshot,
             "volume_generated": generated, "volume_usable": usable, "volume_method": method,
             "volume_coverage": "reported", "volume_basis": basis,
             "volume_source_discovery_id": discovery_id,
@@ -208,11 +212,25 @@ def check_discovery_asset_helper(cells: list[dict]) -> None:
         row(5, "4F", 13.0, conflict=True),
         row(6, None, 0.0, basis="latest_original_recoverable",
             method="troll_published_component_allocation", generated=True),
+        row(7, None, 0.0, method="reported_observation", usable=False),
+        row(8, None, None, snapshot="2022-05-12", oe_value=2.8,
+            basis="newest_applicable_published_discovery_estimate",
+            method="published_resource_range_midpoint", generated=True),
     ])
-    assert [item["value"] for item in assets] == [5.0, 7.0, None, None, None, 0.0], (
+    assert [item["value"] for item in assets] == [5.0, 7.0, None, None, None, 0.0, None, None], (
         "discovery assets must deduplicate reported classes, admit single-discovery field estimates, "
-        "preserve a generated Troll East zero, and gap different-basis, unusable, "
+        "preserve a usable generated Troll East zero, and gap different-basis, unusable "
+        "zeros such as redirected resources, "
         "or conflicted observations"
+    )
+    oe_assets = prepare([
+        row(8, None, None, snapshot="2022-05-12", oe_value=2.8,
+            basis="newest_applicable_published_discovery_estimate",
+            method="published_resource_range_midpoint", generated=True),
+    ], value_field="discovery_recoverable_mill_sm3_oe",
+       accepted_bases={"newest_applicable_published_discovery_estimate"})
+    assert oe_assets[0]["value"] == 2.8, (
+        "published OE midpoint must remain available only through explicit OE selection"
     )
 
 

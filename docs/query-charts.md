@@ -53,11 +53,13 @@ points to arrive as ordinary rows with explicit columns.
 A play creaming curve needs discovery-to-play membership and a stated resource
 basis. SODIR's source discovery and play tables do not contain a direct
 foreign key. The [SODIR notebook](sodir-geologist.md) uses the datasets
-preview's single assigned `Discovery -[:IN_PLAY]-> Play` edge: published
-field examples take precedence, followed by designated-well HC ages and
-polygon geometry. Same-rank ties remain unassigned and available as
-`CANDIDATE_PLAY` diagnostics. Geographic overlap alone is insufficient because
-plays can overlap vertically.
+preview's supported `Discovery -[:IN_PLAY]-> Play` edges. Published
+discovery/play examples are authoritative; otherwise the graph retains every
+compatible play containing the designated discovery well using age and polygon
+evidence. Field membership alone does not assign a play. Count distinct
+discovery IDs within a selected play. Cross-play results can overlap and must
+not be summed. Geographic overlap alone is insufficient because plays can
+overlap vertically.
 
 The notebook plots `DiscoveryVolume.recoverable_oil` in million Sm³ and
 distinguishes reported resources, field-derived volumes for single-discovery fields, and
@@ -67,3 +69,29 @@ current-estimate curve and does not add field totals again. Missing or
 unresolved estimates remain visible in coverage, never zero. The result is a
 partial recoverable-oil subtotal; current estimates ordered by designated
 well completion date do not reconstruct the estimates available at discovery.
+
+A zero component and an unavailable volume are different. The generated Troll
+East allocation has a usable zero recoverable-oil component. Gjøa Nord reports its resources as included in the parent Gjøa discovery. The
+generated sourced-estimate fallback uses the newest catalogued whole-discovery
+drilling-report estimate and never sums estimates from separate wells. The current bounded catalog contains four verified reports and does not cover
+every discovery announcement. It includes Gjøa Nord's published 2022 range as
+a dated 2.8 million Sm³ oil-equivalent midpoint and Duva's 2016 discovery-report range as 7.65
+million Sm³ oil equivalent. Neither publishes an oil component, so recoverable
+oil remains unavailable, and
+field-reserve increments are not substituted. The oil-only curve uses only a
+usable explicitly sourced or generated oil component; oil equivalent does not silently become oil or
+zero.
+
+<a href="_static/sodir-nkl2-oil-creaming-qc.png"><img
+src="_static/sodir-nkl2-oil-creaming-qc.png"
+alt="NKL-2 recoverable-oil creaming curve with named missing-volume discoveries"></a>
+
+<a href="_static/sodir-nkl2-oe-creaming-qc.png"><img
+src="_static/sodir-nkl2-oe-creaming-qc.png"
+alt="NKL-2 oil-equivalent creaming curve including the dated Gjøa Nord appraisal midpoint"></a>
+
+Both views count each discovery once within NKL-2. A named × marks a
+discovery's completion date at the running known subtotal while leaving its
+source volume missing. Gjøa Nord and Duva therefore appear as missing in oil and as dated 2.8 and
+7.65 million Sm³ oil-equivalent midpoints in the OE view. Estimates are
+ordered by discovery-well completion, not by when a later estimate was known.
