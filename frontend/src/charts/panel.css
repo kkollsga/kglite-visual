@@ -4,7 +4,7 @@
 .kglv-chart-field { display: grid; gap: 5px; color: #b9c8d6; font-size: 12px; }
 .kglv-chart-suggestions, .kglv-chart-series, .kglv-chart-transform { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .kglv-chart-suggestion { text-align: left; }
-.kglv-chart-picture { overflow-x: auto; margin-top: 12px; background: #fff; border-radius: 8px; }
+.kglv-chart-picture { overflow-x: auto; margin-top: 12px; background: #0d141b; border: 1px solid #314355; border-radius: 8px; }
 .kglv-chart-picture svg { display: block; width: 100%; min-width: 480px; height: auto; }
 .kglv-chart-series { margin: 12px 0; }
 .kglv-chart-series label, .kglv-chart-transform label { color: #cbd6e0; font-size: 12px; }

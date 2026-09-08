@@ -215,9 +215,10 @@ export class QueryChartPanel {
     }
   }
 
-  private renderOptions() {
+  private renderOptions(theme: 'light' | 'dark' = 'light') {
     return {
       title: this.renderTitle,
+      theme,
       hiddenSeries: this.hiddenSeries,
       source: this.source === null ? {label: 'Source query unavailable (external result)'} : {query: this.source.query, params: this.source.params, label: `request ${this.source.requestId}`},
     }
@@ -226,7 +227,7 @@ export class QueryChartPanel {
   private paintChart(): void {
     const model = this.model
     if (model === null) { this.picture.replaceChildren(); this.seriesControls.replaceChildren(); return }
-    this.picture.innerHTML = renderChartSvg(model, this.renderOptions())
+    this.picture.innerHTML = renderChartSvg(model, this.renderOptions('dark'))
     this.seriesControls.replaceChildren(...model.series.map(series => {
       const input = el('input'); input.type = 'checkbox'; input.checked = !this.hiddenSeries.has(series.key)
       input.onchange = () => { if (input.checked) this.hiddenSeries.delete(series.key); else this.hiddenSeries.add(series.key); this.paintChart() }

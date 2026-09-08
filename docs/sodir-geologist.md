@@ -75,13 +75,13 @@ src="_static/sodir-notebook-well-evidence-app.png"
 alt="KGLite Visual radial graph of well 16/2-6 linked to formation tops, core records, and a drill-stem test"></a>
 
 4. **Production comparison.** Show three fields and their packed monthly
-   `ProductionProfile` values, then compare JOHAN SVERDRUP, TROLL, and EKOFISK over the
-   intentionally complete common 2024 window. Oil and gas use separate axes
-   because the source scales differ. The graph contains no invented month nodes.
+   `ProductionProfile` values, then compare GULLFAKS, OSEBERG, and DRAUGEN from
+   January 2000 through the latest source month using monthly-average oil rate.
+   The graph contains no invented month nodes.
 
 <a href="_static/sodir-notebook-production-graph-app.png"><img
 src="_static/sodir-notebook-production-graph-app.png"
-alt="KGLite Visual showing Ekofisk, Troll, and Johan Sverdrup connected to their production-profile records"></a>
+alt="KGLite Visual showing Gullfaks, Oseberg, and Draugen connected to their production-profile records"></a>
 
 5. **Handoff.** Save and export an exact visible GraphML slice for the
    reviewable 16/2-6 formation-top, core, and DST neighborhood.
@@ -93,7 +93,7 @@ interpretation boundaries.
 
 <a href="_static/sodir-notebook-production-chart-app.png"><img
 src="_static/sodir-notebook-production-chart-app.png"
-alt="KGLite Visual Data workspace charting 36 monthly oil-production rows for Ekofisk, Johan Sverdrup, and Troll during 2024"></a>
+alt="KGLite Visual Data workspace charting monthly-average oil rates for Gullfaks, Oseberg, and Draugen from 2000 through the latest source month"></a>
 
 The combined well-evidence query returns 24 ordered source rows: twenty
 formation-top records, three cores, and one DST. The notebook checks both node
@@ -117,7 +117,7 @@ They show where numeric ranges overlap and stop there.
 
 The notebook uses type-aware Cypher `ts_series(...)` expressions on matched
 `ProductionProfile` nodes while the builder graph is open, then writes only
-three fields, two channels, and twelve months to a small provenance sidecar.
+three fields and the oil channel from 2000 through the current year to a small provenance sidecar.
 It releases that Python graph before starting the file-backed viewer.
 
 For every source month it calculates:
@@ -126,19 +126,20 @@ For every source month it calculates:
 monthly-average calendar-day rate = monthly aggregate / days in that month
 ```
 
-February 2024 uses 29 days. Missing input remains missing. These curves are
-derived from monthly aggregates and are not day-by-day measurements.
+Leap-year February uses 29 days. Missing input remains missing. These curves
+are derived from monthly aggregates and are not day-by-day measurements. The
+end year follows the notebook run date, while the curves stop at the latest
+month actually present in the source.
 
-<a href="_static/sodir-production-2024.png"><img
-src="_static/sodir-production-2024.png"
-alt="Monthly-average calendar-day oil and gas production rates for Johan Sverdrup, Troll, and Ekofisk during 2024"></a>
+<a href="_static/sodir-production-2000-latest.png"><img
+src="_static/sodir-production-2000-latest.png"
+alt="Monthly-average calendar-day oil rates for Gullfaks, Oseberg, and Draugen from 2000 through the latest source month"></a>
 
-Oil is sourced in million Sm³ and gas in billion Sm³, then converted to Sm³
-per calendar day for the separately labelled axes. In the validated 2026-09-08 snapshot, the January Johan Sverdrup
-oil value is 3.488082 million Sm³, or 112,518.77 Sm³/day as a monthly average.
-In that snapshot, across 2024, Johan Sverdrup is oil-led at 41.561593 million Sm³ while Troll is
-gas-led at 43.754389 billion Sm³. September gas lows identify a useful month
-for comparison with other years; the graph and chart do not establish a cause.
+Oil is sourced in million Sm³ and converted to Sm³ per calendar day. In the validated 2026-09-08
+snapshot, all three series contain 318 monthly observations from January 2000
+through June 2026. Over that interval Oseberg reports 132.330082 million Sm³
+oil, Gullfaks 118.673975, and Draugen 93.967819. The long view makes decline,
+plateaus, and interruptions visible; the graph and chart do not establish their causes.
 
 The primary sources are SODIR's
 [monthly field production table](https://factpages.sodir.no/en/field/TableView/Production/Saleable/TotalNcsMonth)

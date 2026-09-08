@@ -32,12 +32,16 @@ test('a bounded query result becomes an inspectable chart without changing graph
     await page.getByTestId('chart-x').selectOption('person')
     await page.getByTestId('chart-y').selectOption('age')
     await page.getByTestId('chart-title').fill('Fixture ages')
+    await page.getByTestId('chart-x-label').fill('Person')
+    await page.getByTestId('chart-y-label').fill('Age')
     await page.getByTestId('chart-unit').fill('years')
     await page.getByTestId('chart-build').click()
 
     const svg = page.getByTestId('chart-picture').locator('svg')
     await expect(svg).toBeVisible()
     await expect(svg.locator('#chart-title')).toHaveText('Fixture ages')
+    await expect(svg.locator(':scope > rect').first()).toHaveAttribute('fill', '#0d141b')
+    await expect(svg.locator('.axis-label')).toHaveText(['Person', 'Age (years)'])
     await expect(page.getByTestId('chart-values')).toContainText('12 visible')
     expect(await page.evaluate(() => window.__kglv?.selectedCount)).toBe(selectedBefore)
 
@@ -50,6 +54,7 @@ test('a bounded query result becomes an inspectable chart without changing graph
     const exported = readFileSync(savedPath!, 'utf8')
     expect(exported).toContain(query)
     expect(exported).toContain('&quot;resultRowsReturned&quot;:12')
+    expect(exported).toContain('fill="#ffffff"')
 
     await page.getByTestId('chart-table-view').click()
     await expect(page.getByTestId('query-table')).toBeVisible()

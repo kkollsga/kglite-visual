@@ -1,6 +1,7 @@
 import type { ChartKind, ChartModel, ChartPoint, ChartSeries } from './types'
 
 const PALETTE = ['#2563eb', '#dc2626', '#059669', '#7c3aed', '#d97706', '#0891b2', '#be185d', '#4f46e5', '#65a30d', '#9333ea', '#ea580c', '#0f766e', '#b91c1c', '#0369a1', '#6d28d9', '#15803d', '#c2410c', '#4338ca', '#a21caf', '#047857']
+const DARK_PALETTE = ['#60a5fa', '#fb7185', '#34d399', '#c084fc', '#fbbf24', '#22d3ee', '#f472b6', '#818cf8', '#a3e635', '#d8b4fe', '#fb923c', '#2dd4bf', '#f87171', '#38bdf8', '#a78bfa', '#4ade80', '#fdba74', '#a5b4fc', '#e879f9', '#6ee7b7']
 
 export interface ChartSource {
   query?: string
@@ -13,6 +14,7 @@ export interface ChartRenderOptions {
   height?: number
   title?: string
   background?: string
+  theme?: 'light' | 'dark'
   hiddenSeries?: ReadonlySet<string>
   source?: ChartSource
 }
@@ -98,9 +100,12 @@ function provenance(model: ChartModel, source: ChartSource | undefined, series: 
   }).replace(/</g, '\\u003c')
 }
 
-function seriesColor(model: ChartModel, series: ChartSeries): string { return PALETTE[Math.max(0, model.series.indexOf(series)) % PALETTE.length]! }
+function seriesColor(model: ChartModel, series: ChartSeries, theme: 'light' | 'dark'): string {
+  const palette = theme === 'dark' ? DARK_PALETTE : PALETTE
+  return palette[Math.max(0, model.series.indexOf(series)) % palette.length]!
+}
 
-function marks(kind: ChartKind, model: ChartModel, series: ChartSeries[], frame: Frame, xd: Domain, yd: Domain): string {
+function marks(kind: ChartKind, model: ChartModel, series: ChartSeries[], frame: Frame, xd: Domain, yd: Domain, theme: 'light' | 'dark'): string {
   const sx = (x: number) => scale(x, xd, frame.left, frame.right)
   const sy = (y: number) => scale(y, yd, frame.bottom, frame.top)
   if (kind === 'line') return series.map(s => {
@@ -108,20 +113,25 @@ function marks(kind: ChartKind, model: ChartModel, series: ChartSeries[], frame:
     for (const p of s.points) { if (p.y === null) { if (run.length) runs.push(run); run = [] } else run.push(p) }
     if (run.length) runs.push(run)
     return runs.map(points => points.length === 1
-      ? `<circle class="series-single" data-series="${escapeSvg(s.key)}" cx="${sx(points[0]!.x).toFixed(2)}" cy="${sy(points[0]!.y!).toFixed(2)}" r="3.5" fill="${seriesColor(model,s)}"><title>${escapeSvg(`${s.label}: ${xText(model, points[0]!)}, ${fmt(points[0]!.y!)}`)}</title></circle>`
-      : `<path class="series-line" data-series="${escapeSvg(s.key)}" d="${points.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(2)},${sy(p.y!).toFixed(2)}`).join(' ')}" stroke="${seriesColor(model,s)}"/>`).join('')
+      ? `<circle class="series-single" data-series="${escapeSvg(s.key)}" cx="${sx(points[0]!.x).toFixed(2)}" cy="${sy(points[0]!.y!).toFixed(2)}" r="3.5" fill="${seriesColor(model,s,theme)}"><title>${escapeSvg(`${s.label}: ${xText(model, points[0]!)}, ${fmt(points[0]!.y!)}`)}</title></circle>`
+      : `<path class="series-line" data-series="${escapeSvg(s.key)}" d="${points.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(2)},${sy(p.y!).toFixed(2)}`).join(' ')}" stroke="${seriesColor(model,s,theme)}"/>`).join('')
   }).join('')
-  if (kind === 'scatter') return series.map(s => s.points.filter(p => p.y !== null).map(p => `<circle class="point" cx="${sx(p.x).toFixed(2)}" cy="${sy(p.y!).toFixed(2)}" r="3" fill="${seriesColor(model,s)}"><title>${escapeSvg(`${s.label}: ${xText(model, p)}, ${fmt(p.y!)}`)}</title></circle>`).join('')).join('')
+  if (kind === 'scatter') return series.map(s => s.points.filter(p => p.y !== null).map(p => `<circle class="point" cx="${sx(p.x).toFixed(2)}" cy="${sy(p.y!).toFixed(2)}" r="3" fill="${seriesColor(model,s,theme)}"><title>${escapeSvg(`${s.label}: ${xText(model, p)}, ${fmt(p.y!)}`)}</title></circle>`).join('')).join('')
   const all = series.flatMap((s, si) => s.points.filter(p => p.y !== null).map(p => ({s, si, p})))
   const categories = [...new Set(all.map(v => v.p.x))].sort((a, b) => a - b)
   const band = frame.width / Math.max(1, categories.length); const bar = Math.max(1, band * 0.8 / Math.max(1, series.length)); const zero = sy(0)
-  return all.map(({s, si, p}) => { const ci = categories.indexOf(p.x); const x = frame.left + ci * band + band * 0.1 + si * bar; const y = sy(p.y!); return `<rect class="bar" x="${x.toFixed(2)}" y="${Math.min(y, zero).toFixed(2)}" width="${bar.toFixed(2)}" height="${Math.max(1, Math.abs(zero-y)).toFixed(2)}" fill="${seriesColor(model,s)}"><title>${escapeSvg(`${s.label}: ${xText(model, p)}, ${fmt(p.y!)}`)}</title></rect>` }).join('')
+  return all.map(({s, si, p}) => { const ci = categories.indexOf(p.x); const x = frame.left + ci * band + band * 0.1 + si * bar; const y = sy(p.y!); return `<rect class="bar" x="${x.toFixed(2)}" y="${Math.min(y, zero).toFixed(2)}" width="${bar.toFixed(2)}" height="${Math.max(1, Math.abs(zero-y)).toFixed(2)}" fill="${seriesColor(model,s,theme)}"><title>${escapeSvg(`${s.label}: ${xText(model, p)}, ${fmt(p.y!)}`)}</title></rect>` }).join('')
 }
 
 export function renderChartSvg(model: ChartModel, options: ChartRenderOptions = {}): string {
   const {width, height} = chartDimensions(model, options)
   const title = options.title?.trim() || `${model.kind.charAt(0).toUpperCase()}${model.kind.slice(1)} chart`
-  const background = options.background ?? '#ffffff'; const series = visibleChartSeries(model, options.hiddenSeries)
+  const theme = options.theme ?? 'light'
+  const background = options.background ?? (theme === 'dark' ? '#0d141b' : '#ffffff')
+  const foreground = theme === 'dark' ? '#dce6ef' : '#334155'
+  const axisColor = theme === 'dark' ? '#71869a' : '#334155'
+  const gridColor = theme === 'dark' ? '#263746' : '#e2e8f0'
+  const series = visibleChartSeries(model, options.hiddenSeries)
   const values = series.flatMap(s => s.points); const xs = values.map(p => p.x); const ys = values.flatMap(p => p.y === null ? [] : [p.y])
   const xd = finiteDomain(xs); const yd = finiteDomain(ys, model.kind === 'bar')
   const legendColumns = Math.max(1, Math.min(4, Math.floor((width - 112) / 180))); const legendRows = Math.max(1, Math.ceil(series.length / legendColumns))
@@ -129,15 +139,15 @@ export function renderChartSvg(model: ChartModel, options: ChartRenderOptions = 
   const categories = [...new Set(xs)].sort((a,b) => a-b); const xTicks = model.kind === 'bar' ? categories.slice(0, 8) : model.xKind === 'category' ? categories.slice(0, 8) : ticks(xd)
   const yTicks = ticks(yd)
   const axis = [
-    `<path d="M${frame.left},${frame.top}V${frame.bottom}H${frame.right}" fill="none" stroke="#334155"/>`,
-    ...yTicks.map(v => `<g><path d="M${frame.left},${scale(v,yd,frame.bottom,frame.top).toFixed(2)}H${frame.right}" stroke="#e2e8f0"/><text x="${frame.left-10}" y="${(scale(v,yd,frame.bottom,frame.top)+4).toFixed(2)}" text-anchor="end">${escapeSvg(fmt(v))}</text></g>`),
+    `<path d="M${frame.left},${frame.top}V${frame.bottom}H${frame.right}" fill="none" stroke="${axisColor}"/>`,
+    ...yTicks.map(v => `<g><path d="M${frame.left},${scale(v,yd,frame.bottom,frame.top).toFixed(2)}H${frame.right}" stroke="${gridColor}"/><text x="${frame.left-10}" y="${(scale(v,yd,frame.bottom,frame.top)+4).toFixed(2)}" text-anchor="end">${escapeSvg(fmt(v))}</text></g>`),
     ...xTicks.map((v,index) => `<text x="${(model.kind === 'bar' ? frame.left + (categories.indexOf(v)+0.5)*frame.width/categories.length : scale(v,xd,frame.left,frame.right)).toFixed(2)}" y="${frame.bottom+24}" text-anchor="${model.kind !== 'bar' && index === 0 ? 'start' : model.kind !== 'bar' && index === xTicks.length-1 ? 'end' : 'middle'}">${escapeSvg(xText(model,{x:v,y:0,sourceRow:0}))}</text>`),
   ].join('')
   const legendWidth = frame.width / legendColumns
-  const legend = series.map((s,i) => `<g transform="translate(${frame.left + (i%legendColumns)*legendWidth},${48+Math.floor(i/legendColumns)*18})"><rect width="12" height="12" fill="${seriesColor(model,s)}"/><text x="18" y="11">${escapeSvg(s.label.length > 24 ? `${s.label.slice(0,23)}…` : s.label)}</text></g>`).join('')
+  const legend = series.map((s,i) => `<g transform="translate(${frame.left + (i%legendColumns)*legendWidth},${48+Math.floor(i/legendColumns)*18})"><rect width="12" height="12" fill="${seriesColor(model,s,theme)}"/><text x="18" y="11">${escapeSvg(s.label.length > 24 ? `${s.label.slice(0,23)}…` : s.label)}</text></g>`).join('')
   const visiblePoints = series.flatMap(item => item.points); const visiblePlotted = visiblePoints.filter(point => point.y !== null).length; const visibleMissing = visiblePoints.length - visiblePlotted
   const coverage = `${visiblePlotted} visible plotted of ${model.coverage.plottedPoints} plotted points; ${visibleMissing} visible missing y; ${model.coverage.rejectedPoints} rejected.`
   const source = options.source?.query ? `Source query: ${options.source.query}` : (options.source?.label ?? 'Source query unavailable')
   const transform = model.transform ? `Transformation: monthly-average calendar-day rate; source scale ${fmt(model.transform.scale)} before division by actual month length.` : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="chart-title chart-desc" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><title id="chart-title">${escapeSvg(title)}</title><desc id="chart-desc">${escapeSvg(`${model.kind} chart. ${coverage} ${transform} ${source}`)}</desc><metadata>${escapeSvg(provenance(model, options.source, series))}</metadata><style>text{font:12px system-ui,sans-serif;fill:#334155}.series-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}.axis-label{font-size:13px;font-weight:600}.chart-title{font-size:19px;font-weight:700}</style><rect width="100%" height="100%" fill="${escapeSvg(background)}"/><text class="chart-title" x="${frame.left}" y="28">${escapeSvg(title)}</text>${axis}${marks(model.kind,model,series,frame,xd,yd)}<text class="axis-label" x="${(frame.left+frame.right)/2}" y="${frame.bottom+48}" text-anchor="middle">${escapeSvg(model.xLabel ?? 'x')}</text><text class="axis-label" transform="translate(22 ${(frame.top+frame.bottom)/2}) rotate(-90)" text-anchor="middle">${escapeSvg(`${model.yLabel ?? 'y'}${model.unit ? ` (${model.unit})` : ''}`)}</text>${legend}${transform ? `<text x="${frame.left}" y="${height-48}">${escapeSvg(transform)}</text>` : ''}<text x="${frame.left}" y="${height-30}">${escapeSvg(coverage)}</text><text x="${frame.left}" y="${height-12}">${escapeSvg(source.length > 135 ? `${source.slice(0,132)}…` : source)}</text></svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="chart-title chart-desc" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><title id="chart-title">${escapeSvg(title)}</title><desc id="chart-desc">${escapeSvg(`${model.kind} chart. ${coverage} ${transform} ${source}`)}</desc><metadata>${escapeSvg(provenance(model, options.source, series))}</metadata><style>text{font:12px system-ui,sans-serif;fill:${foreground}}.series-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}.axis-label{font-size:13px;font-weight:600}.chart-title{font-size:19px;font-weight:700}</style><rect width="100%" height="100%" fill="${escapeSvg(background)}"/><text class="chart-title" x="${frame.left}" y="28">${escapeSvg(title)}</text>${axis}${marks(model.kind,model,series,frame,xd,yd,theme)}<text class="axis-label" x="${(frame.left+frame.right)/2}" y="${frame.bottom+48}" text-anchor="middle">${escapeSvg(model.xLabel ?? 'x')}</text><text class="axis-label" transform="translate(22 ${(frame.top+frame.bottom)/2}) rotate(-90)" text-anchor="middle">${escapeSvg(`${model.yLabel ?? 'y'}${model.unit ? ` (${model.unit})` : ''}`)}</text>${legend}${transform ? `<text x="${frame.left}" y="${height-48}">${escapeSvg(transform)}</text>` : ''}<text x="${frame.left}" y="${height-30}">${escapeSvg(coverage)}</text><text x="${frame.left}" y="${height-12}">${escapeSvg(source.length > 135 ? `${source.slice(0,132)}…` : source)}</text></svg>`
 }

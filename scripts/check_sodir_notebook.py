@@ -23,7 +23,7 @@ PIN_PATTERNS = {
 }
 RATE_HELPER = "monthly_average_daily_rate"
 CACHE_HELPER = "graph_cache_is_reusable"
-MAX_QUERY_LIMIT = 1_000
+MAX_QUERY_LIMIT = 2_000
 
 
 def source_text(cell: dict) -> str:
@@ -83,6 +83,8 @@ def check_pins_and_paths(sources: list[str]) -> None:
         "notebook contains a machine-local absolute path"
     )
     for phrase in (
+        'FIELDS = ["GULLFAKS", "OSEBERG", "DRAUGEN"]',
+        "PRODUCTION_START_YEAR = 2000",
         "ProductionProfile",
         "ts_series",
         "monthly-average calendar-day rate",
