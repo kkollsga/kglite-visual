@@ -59,10 +59,11 @@ polygon geometry. Same-rank ties remain unassigned and available as
 `CANDIDATE_PLAY` diagnostics. Geographic overlap alone is insufficient because
 plays can overlap vertically.
 
-The notebook consumes `DiscoveryVolume` observations and distinguishes reported
-resources, strict single-discovery field copies, and the approximate Troll
-East/West allocation. It excludes inclusion-window reserve deltas from the
+The notebook plots `DiscoveryVolume.recoverable_oil` in million Sm³ and
+distinguishes reported resources, strict single-discovery field copies, and
+the generated Troll oil allocation. Gas, NGL and condensate are excluded;
+the allocation assigns all Troll oil to West and a known zero to East. It excludes inclusion-window reserve deltas from the
 current-estimate curve and does not add field totals again. Missing or
 unresolved estimates remain visible in coverage, never zero. The result is a
-partial discovery-resource subtotal; current estimates ordered by designated
+partial recoverable-oil subtotal; current estimates ordered by designated
 well completion date do not reconstruct the estimates available at discovery.

@@ -67,27 +67,27 @@ rejected alternatives for review. The coverage tables report assignment
 method, source wellbore, age evidence, distance, rejected candidates, and
 unassigned discoveries.
 
-The curve orders events by exact designated-well completion date and keeps the
-reported discovery year for comparison. It combines reported
-`DiscoveryVolume` observations, conservative single-discovery field copies,
-and an approximate Troll East/West allocation generated from SODIR's published gas proportion plus explicit oil/liquids assumptions. The two Troll
-components sum to the dated Troll field total and appear at their separate
-completion dates. Other field totals remain separate context. Missing,
-conflicted, and unresolved observations remain gaps; inclusion-window deltas
-are excluded because they have a different dated basis. The result is a
-partial current discovery-resource subtotal, not a historical estimate or a
-complete play-volume allocation.
+The oil creaming curve orders events by exact designated-well completion date
+and keeps the reported discovery year for comparison. It combines reported
+`DiscoveryVolume.recoverable_oil` observations, conservative single-discovery
+field copies, and the generated Troll oil allocation. Under that allocation's
+explicit assumption, all Troll oil belongs to West and East has a zero-oil
+estimate. Gas, NGL and condensate are excluded from this chart. Other field
+totals remain separate context. Missing, conflicted, and unresolved observations
+remain gaps; inclusion-window deltas are excluded because they have a different
+dated basis. The result is a partial current recoverable-oil subtotal, not a
+historical estimate or a complete play-volume allocation.
 
 <a href="_static/sodir-nju1-creaming-qc.png"><img
 src="_static/sodir-nju1-creaming-qc.png"
-alt="Partial NJU-1 creaming curve ordered by designated discovery-well completion date"></a>
+alt="Partial NJU-1 recoverable-oil creaming curve ordered by designated discovery-well completion date"></a>
 
 This 2026-09-08 quality-control snapshot shows 15 of 41 assigned discoveries
-with usable estimates and leaves 26 missing or unresolved. Its 1,854.9 million
-Sm³ oil-equivalent subtotal includes 22.952 reported observations, 15.974 in
-strict single-discovery field copies, and the approximate 1,815.948 Troll
-allocation described above. It excludes inclusion-window deltas and does not
-allocate other field totals. See [Charts from query
+with usable oil estimates and leaves 26 missing or unresolved. Its 322.034
+million Sm³ oil subtotal includes 11.609 from reported observations, 10.829 from
+strict single-discovery field copies, and 299.596 from Troll West. Troll East's
+generated zero remains distinct from missing data. Troll still contributes
+about 93% of the known oil subtotal. See [Charts from query
 results](query-charts.md) for the controls and interpretation boundaries.
 
 The combined well-evidence query returns 24 ordered source rows: twenty
@@ -140,7 +140,7 @@ The primary sources are SODIR's
 and [16/2-6 wellbore record and attributes](https://factpages.sodir.no/en/wellbore/PageView/Exploration/All/6374).
 SODIR's [field resource table](https://factpages.sodir.no/en/field/TableView/Resources)
 and [discovery resource table](https://factpages.sodir.no/en/discovery/TableView/Resources)
-define the recoverable oil-equivalent values used by the creaming recipe.
+define the recoverable oil values used by the creaming recipe.
 FactPages content is published under the Norwegian Licence for Open
 Government Data.
 

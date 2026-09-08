@@ -91,14 +91,20 @@ def check_pins_and_paths(sources: list[str]) -> None:
         "matched_ages",
         "candidate_tie_count",
         "DiscoveryVolume",
+        "volume.recoverable_oil AS discovery_recoverable_mill_sm3_oil",
+        "latest.fldRecoverableOil AS field_original_recoverable_mill_sm3_oil",
+        "cumulative_mill_sm3_oil",
         "DISCOVERED_BY",
         "wlbCompletionDate",
         "CANDIDATE_PLAY",
         "HC1, then HC2, then HC3",
-        "reported-resource subtotal",
+        "known discovery-oil subtotal",
         "Missing, conflicted, and unresolved estimates remain gaps",
     ):
         assert phrase in text, f"notebook is missing creaming-curve contract {phrase!r}"
+    assert "recoverable_oe AS discovery_recoverable" not in text, (
+        "oil-only curve must not read the oil-equivalent volume component"
+    )
     assert "NJU1_EXAMPLE_DISCOVERY_IDS" not in text, (
         "notebook must not embed an unrefreshable NJU-1 membership list"
     )
@@ -181,7 +187,7 @@ def check_discovery_asset_helper(cells: list[dict]) -> None:
             "discovery_id": discovery_id, "reported_discovery_year": 2000 + discovery_id,
             "discovery_well_completion_date": f"{2000 + discovery_id}-06-01",
             "discovery": f"D{discovery_id}", "discovery_resource_class": resource_class,
-            "discovery_recoverable_mill_sm3_oe": value, "resource_snapshot": snapshot,
+            "discovery_recoverable_mill_sm3_oil": value, "resource_snapshot": snapshot,
             "volume_generated": generated, "volume_usable": usable, "volume_method": method,
             "volume_coverage": "reported", "volume_basis": basis,
             "volume_source_discovery_id": discovery_id,
@@ -198,12 +204,12 @@ def check_discovery_asset_helper(cells: list[dict]) -> None:
             method="inclusion_delta", generated=True),
         row(4, None, None, snapshot=None, usable=False),
         row(5, "4F", 13.0, conflict=True),
-        row(6, None, 1010.9, basis="latest_original_recoverable",
+        row(6, None, 0.0, basis="latest_original_recoverable",
             method="troll_published_component_allocation", generated=True),
     ])
-    assert [item["value"] for item in assets] == [5.0, 7.0, None, None, None, 1010.9], (
+    assert [item["value"] for item in assets] == [5.0, 7.0, None, None, None, 0.0], (
         "discovery assets must deduplicate reported classes, admit strict singleton copies, "
-        "admit the generated Troll allocation, and gap different-basis, unusable, "
+        "preserve a generated Troll East zero, and gap different-basis, unusable, "
         "or conflicted observations"
     )
 
