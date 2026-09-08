@@ -69,8 +69,8 @@ unassigned discoveries.
 
 The oil creaming curve orders events by exact designated-well completion date
 and keeps the reported discovery year for comparison. It combines reported
-`DiscoveryVolume.recoverable_oil` observations, conservative single-discovery
-field copies, and the generated Troll oil allocation. Under that allocation's
+`DiscoveryVolume.recoverable_oil` observations, field-derived volumes for
+single-discovery fields, and the generated Troll oil allocation. Under that allocation's
 explicit assumption, all Troll oil belongs to West and East has a zero-oil
 estimate. Gas, NGL and condensate are excluded from this chart. Other field
 totals remain separate context. Missing, conflicted, and unresolved observations
@@ -85,9 +85,16 @@ alt="Partial NJU-1 recoverable-oil creaming curve ordered by designated discover
 This 2026-09-08 quality-control snapshot shows 15 of 41 assigned discoveries
 with usable oil estimates and leaves 26 missing or unresolved. Its 322.034
 million Sm³ oil subtotal includes 11.609 from reported observations, 10.829 from
-strict single-discovery field copies, and 299.596 from Troll West. Troll East's
+single-discovery field reserves, and 299.596 from Troll West. Troll East's
 generated zero remains distinct from missing data. Troll still contributes
-about 93% of the known oil subtotal. See [Charts from query
+about 93% of the known oil subtotal. The QC figure uses a 290–330 million Sm³
+y-axis to show later additions; the initial Troll step is truncated.
+
+[Download the 26 discoveries without allocated or reported oil volumes](_static/sodir-nju1-discoveries-without-oil-volumes.csv).
+The dated QC list includes discovery names and IDs, discovery wells, completion
+dates, hydrocarbon type, field and resource-inclusion links, and FactPages URLs.
+Field reserve figures in that list are field totals, not allocated discovery
+volumes. See [Charts from query
 results](query-charts.md) for the controls and interpretation boundaries.
 
 The combined well-evidence query returns 24 ordered source rows: twenty

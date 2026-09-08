@@ -94,6 +94,8 @@ def check_pins_and_paths(sources: list[str]) -> None:
         "volume.recoverable_oil AS discovery_recoverable_mill_sm3_oil",
         "latest.fldRecoverableOil AS field_original_recoverable_mill_sm3_oil",
         "cumulative_mill_sm3_oil",
+        "coalesce(d.dscName, d.title) AS discovery",
+        "single-discovery field estimates",
         "DISCOVERED_BY",
         "wlbCompletionDate",
         "CANDIDATE_PLAY",
@@ -208,7 +210,7 @@ def check_discovery_asset_helper(cells: list[dict]) -> None:
             method="troll_published_component_allocation", generated=True),
     ])
     assert [item["value"] for item in assets] == [5.0, 7.0, None, None, None, 0.0], (
-        "discovery assets must deduplicate reported classes, admit strict singleton copies, "
+        "discovery assets must deduplicate reported classes, admit single-discovery field estimates, "
         "preserve a generated Troll East zero, and gap different-basis, unusable, "
         "or conflicted observations"
     )

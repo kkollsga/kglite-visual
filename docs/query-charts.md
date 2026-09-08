@@ -60,7 +60,7 @@ polygon geometry. Same-rank ties remain unassigned and available as
 plays can overlap vertically.
 
 The notebook plots `DiscoveryVolume.recoverable_oil` in million Sm³ and
-distinguishes reported resources, strict single-discovery field copies, and
+distinguishes reported resources, field-derived volumes for single-discovery fields, and
 the generated Troll oil allocation. Gas, NGL and condensate are excluded;
 the allocation assigns all Troll oil to West and a known zero to East. It excludes inclusion-window reserve deltas from the
 current-estimate curve and does not add field totals again. Missing or
