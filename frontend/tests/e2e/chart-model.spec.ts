@@ -124,7 +124,7 @@ test('line suggestions include a compatible scalar group and coverage counts vis
 })
 
 test('numeric cumulative series suggest grouped lines and scatter while duplicate x excludes only the line', () => {
-  const creaming = table(['reported_asset_order', 'cumulative_mill_sm3_oe', 'series'], [
+  const cumulative = table(['period_order', 'cumulative_total', 'series'], [
     [tv.int('1'), tv.float(10), tv.string('reported subtotal')],
     [tv.int('1'), tv.float(8), tv.string('fields')],
     [tv.int('2'), tv.null(), tv.string('reported subtotal')],
@@ -132,12 +132,12 @@ test('numeric cumulative series suggest grouped lines and scatter while duplicat
     [tv.int('3'), tv.float(14), tv.string('reported subtotal')],
     [tv.int('3'), tv.float(12), tv.string('fields')],
   ])
-  const suggestions = analyzeQueryResult(creaming).suggestions
+  const suggestions = analyzeQueryResult(cumulative).suggestions
   expect(suggestions.find((suggestion) => suggestion.kind === 'line')?.mapping).toEqual({
-    kind: 'line', shape: 'rows', x: 'reported_asset_order', y: 'cumulative_mill_sm3_oe', series: 'series',
+    kind: 'line', shape: 'rows', x: 'period_order', y: 'cumulative_total', series: 'series',
   })
   expect(suggestions.find((suggestion) => suggestion.kind === 'scatter')?.mapping).toEqual({
-    kind: 'scatter', shape: 'rows', x: 'reported_asset_order', y: 'cumulative_mill_sm3_oe', series: 'series',
+    kind: 'scatter', shape: 'rows', x: 'period_order', y: 'cumulative_total', series: 'series',
   })
 
   const duplicate = table(['order', 'resource', 'series'], [

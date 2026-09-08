@@ -22,11 +22,8 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 - Add a downloadable, rerunnable SODIR geologist notebook and rendered guide
   that build a file-backed graph, drive bounded geological views in the live
-  workspace, and compare honestly labelled monthly production rates. The
-  notebook also provides NJU-1 and NKL-2 creaming recipes over supported play
-  memberships. Each current field resource is counted once within a play,
-  discovery reserves are used only when no field snapshot exists,
-  and included or missing discoveries remain named in the chronology.
+  workspace, and compare honestly labelled monthly production rates in both a
+  Python figure and the interactive query-chart workspace.
 
 - A reproducible, downloadable 17-node team graph now supports a complete
   first-use tour through browsing, records, queries, filters, calculations,

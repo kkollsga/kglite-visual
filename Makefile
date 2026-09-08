@@ -396,7 +396,7 @@ wheel: py-venv  ## Build a wheel into target/wheels (WHEEL_PROFILE=--release for
 # Installs into a throwaway venv and probes from outside the repo root, so the
 # source tree cannot shadow the package being tested.
 check-packaged-consumer: wheel  ## Install the built wheel elsewhere and drive it
-	@$(PYTHON) scripts/check_wheel.py
+	@$(VENV)/bin/python scripts/check_wheel.py
 
 $(DOCS_VENV_STAMP): docs/requirements.txt
 	@test -x $(DOCS_VENV)/bin/python || $(PYTHON) -m venv $(DOCS_VENV)
@@ -462,7 +462,7 @@ self-test: wheel  ## Prove the gate's checks can actually fail
 	@$(PYTHON) scripts/check_bans.py --self-test
 	@$(PYTHON) scripts/check_licenses.py --self-test
 	@$(PYTHON) scripts/check_bundle.py --self-test
-	@$(PYTHON) scripts/check_wheel.py --self-test
+	@$(VENV)/bin/python scripts/check_wheel.py --self-test
 	@$(PYTHON) scripts/prune.py --self-test
 
 # Size-gated target prune (doctrine 0.1.9): a bound checked only at

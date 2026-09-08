@@ -10,7 +10,7 @@ rerun and adapt, with a live workspace as the main result.
 The published `kglite-visual 0.1.7` wheel does not contain this workspace. The
 notebook's one-time setup installs the reviewed source revision
 `61e0534a89057535ba5a638dc9a83e2e0281cd78`, `kglite==0.17.1`, and
-`kglite-datasets` from `dfd638f0d3068c2514cc930db5ee62b8aac764e6`. Run that setup before choosing the notebook kernel.
+`kglite-datasets` from `18e27a3e27ba894bb6927115f2419c72daf1a6cc`. Run that setup before choosing the notebook kernel.
 ```
 
 The loader owns a project directory containing its downloaded source cache,
@@ -18,9 +18,10 @@ the generated graph, small derived artifacts, and exports. A validated
 2026-09-08 preview graph was about 115 MB. SODIR is a changing source, so a
 later refresh can change its size and counts. A normal rerun reuses the graph
 only when its build record matches the pinned datasets revision and live
-capability queries confirm the play assignments and discovery volumes. Set the
-documented `SODIR_FORCE_REBUILD=1` only when you intend to refresh the source
-under the loader's cache cooldowns.
+capability queries confirm the fields, discoveries, production profiles,
+formation tops, cores, and drill-stem-test records used below. Set the documented
+`SODIR_FORCE_REBUILD=1` only when you intend to refresh the source under the
+loader's cache cooldowns.
 
 To inspect the normalized public source tables without building a graph, the
 published `kglite-datasets 0.1.16` supports
@@ -28,7 +29,8 @@ published `kglite-datasets 0.1.16` supports
 `sodir-review/csv/` and the source manifest to
 `sodir-review/sodir_index.json`; the upstream API payloads are normalized to
 CSV rather than retained as raw JSON. The derived play and discovery-volume
-enhancements used by this demo still require the pinned source revision above.
+tables are not required by this demo; the pinned source revision keeps the
+documented graph build reproducible.
 
 ## The geological journey
 
@@ -65,32 +67,10 @@ clustered names matter.
 5. **Handoff.** Save and export an exact visible GraphML slice for the
    reviewable 16/2-6 formation-top, core, and DST neighborhood.
 
-The notebook also includes two chart recipes. The production query returns
-flat monthly rows that can be charted directly in Visual. The NJU-1 curve uses
-the supported `Discovery → Play` memberships for each discovery. Published
-discovery/play examples are authoritative; otherwise every compatible play
-containing the designated discovery well is retained using its age evidence
-and polygon geometry. Field membership alone does not supply a play. A
-discovery can occur in more than one play, so each selected-play curve counts
-distinct discovery IDs and curves for different plays can overlap. Their
-subtotals must not be added together. The coverage tables report membership
-source, source wellbore, age evidence, and distance.
-
-The oil creaming curve orders events by exact designated-well completion date and keeps the reported discovery year for comparison. For each selected component, the newest structured field reserve is primary and contributes once per play using its stable source key. The earliest completed covered discovery matched to that play carries the contribution; later covered discoveries remain named **included in counted source** markers. A structured discovery-resource pool is secondary only when no field snapshot exists. Missing source values remain named × markers, while a numeric zero remains zero.
-
-The result is a current field/discovery resource subtotal within the matched play. It is not a geological allocation of every field to that play, and estimates from overlapping play curves must not be added. The NJU-1 chart uses million Sm³ recoverable oil and excludes gas, NGL and condensate. The NKL-2 examples apply the same hierarchy separately to oil and oil equivalent.
-
-<a href="_static/sodir-nju1-creaming-qc.png"><img
-src="_static/sodir-nju1-creaming-qc.png"
-alt="NJU-1 field-first recoverable-oil creaming curve ordered by designated discovery-well completion date"></a>
-
-In this 2026-09-08 source snapshot, NJU-1 has 10 field contributions, 6
-discovery contributions, 14 included-discovery markers and 11 unavailable
-oil values across 41 discoveries. The field/discovery subtotal is 536.391
-million Sm³ recoverable oil.
-
-[Download discoveries without either structured oil source](_static/sodir-nju1-discoveries-without-oil-volumes.csv).
-The QC list retains discovery names and IDs, wells, completion dates, fields, resource-inclusion links and FactPages URLs. See [Charts from query results](query-charts.md) for chart controls and interpretation boundaries.
+The notebook also includes a production chart recipe. Its query returns flat
+monthly rows that can be charted directly in Visual. See
+[Charts from query results](query-charts.md) for chart controls and
+interpretation boundaries.
 
 The combined well-evidence query returns 24 ordered source rows: twenty
 formation-top records, three cores, and one DST. The notebook checks both node
@@ -140,9 +120,6 @@ for comparison with other years; the graph and chart do not establish a cause.
 The primary sources are SODIR's
 [monthly field production table](https://factpages.sodir.no/en/field/TableView/Production/Saleable/TotalNcsMonth)
 and [16/2-6 wellbore record and attributes](https://factpages.sodir.no/en/wellbore/PageView/Exploration/All/6374).
-SODIR's [field resource table](https://factpages.sodir.no/en/field/TableView/Resources)
-and [discovery resource table](https://factpages.sodir.no/en/discovery/TableView/Resources)
-define the recoverable oil values used by the creaming recipe.
 FactPages content is published under the Norwegian Licence for Open
 Government Data.
 

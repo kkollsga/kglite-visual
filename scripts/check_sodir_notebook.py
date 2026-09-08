@@ -15,14 +15,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "docs" / "_static" / "notebooks" / "sodir-geologist.ipynb"
 RUNTIME_REVISION = "61e0534a89057535ba5a638dc9a83e2e0281cd78"
-DATASETS_REVISION = "dfd638f0d3068c2514cc930db5ee62b8aac764e6"
+DATASETS_REVISION = "18e27a3e27ba894bb6927115f2419c72daf1a6cc"
 PIN_PATTERNS = {
     "kglite==0.17.1": r"(?<![\w-])kglite==0[.]17[.]1(?![\w.])",
     DATASETS_REVISION: re.escape(DATASETS_REVISION),
     RUNTIME_REVISION: re.escape(RUNTIME_REVISION),
 }
 RATE_HELPER = "monthly_average_daily_rate"
-DISCOVERY_ASSET_HELPER = "prepare_discovery_assets"
 CACHE_HELPER = "graph_cache_is_reusable"
 MAX_QUERY_LIMIT = 1_000
 
@@ -84,36 +83,18 @@ def check_pins_and_paths(sources: list[str]) -> None:
         "notebook contains a machine-local absolute path"
     )
     for phrase in (
-        "Discovery -[:IN_PLAY]-> Play",
-        "match_method",
-        "distance_m",
-        "age_compatibility",
-        "matched_ages",
-        "candidate_tie_count",
-        "DiscoveryVolume",
-        "volume.recoverable_oil AS discovery_recoverable_mill_sm3_oil",
-        "latest.fldRecoverableOil AS field_original_recoverable_mill_sm3_oil",
-        "cumulative_mill_sm3_oil",
-        "coalesce(d.dscName, d.title) AS discovery",
-        '"field_reserves_primary"',
-        '"discovery_reserves_secondary"',
-        "included in {group_name}",
-        "DISCOVERED_BY",
+        "ProductionProfile",
+        "ts_series",
+        "monthly-average calendar-day rate",
+        "HAS_FORMATION_TOP",
+        "WellboreCore",
+        "WellboreDST",
         "wlbCompletionDate",
-        "CANDIDATE_PLAY",
-        "count(DISTINCT d)",
-        "current field/discovery resource subtotal",
-        "A discovery without a usable value for the selected component stays a named × marker",
+        "/api/views/save",
+        "/api/export/preview",
+        "/api/export/download",
     ):
-        assert phrase in text, f"notebook is missing creaming-curve contract {phrase!r}"
-    for retired in ("assigned to at most one play", "have one assigned play", "HC1, then HC2, then HC3"):
-        assert retired not in text, f"notebook retains retired single-play contract {retired!r}"
-    assert "recoverable_oe AS discovery_recoverable_mill_sm3_oil" not in text, (
-        "oil-only curve must not read the oil-equivalent volume component"
-    )
-    assert "NJU1_EXAMPLE_DISCOVERY_IDS" not in text, (
-        "notebook must not embed an unrefreshable NJU-1 membership list"
-    )
+        assert phrase in text, f"notebook is missing public demo contract {phrase!r}"
 
 
 def check_query_bounds(cells: list[dict]) -> int:
@@ -168,80 +149,6 @@ def check_rate_helper(cells: list[dict]) -> None:
     assert rate(math.nan, 2024, 2, 1_000_000) is None, "non-finite monthly values must remain missing"
 
 
-def check_discovery_asset_helper(cells: list[dict]) -> None:
-    definitions = []
-    for index, cell in enumerate(cells):
-        if cell.get("cell_type") != "code":
-            continue
-        tree = ast.parse(source_text(cell), filename=f"notebook cell {index}")
-        definitions.extend(
-            node for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == DISCOVERY_ASSET_HELPER
-        )
-    assert len(definitions) == 1, f"notebook must define {DISCOVERY_ASSET_HELPER} exactly once"
-    namespace = {"math": math}
-    module = ast.fix_missing_locations(ast.Module(body=definitions, type_ignores=[]))
-    exec(compile(module, "notebook discovery asset helper", "exec"), namespace)
-    prepare = namespace[DISCOVERY_ASSET_HELPER]
-
-    def row(
-        discovery_id, value, *, field=None, method="discovery_reserves_secondary",
-        scope="individual", key=None, covered=None, snapshot="2025-12-31",
-        resource_class=None, usable=True, conflict=False, identity=None, source_id=None,
-    ):
-        return {
-            "discovery_id": discovery_id, "reported_discovery_year": 2000 + discovery_id,
-            "discovery_well_completion_date": f"{2000 + discovery_id}-06-01",
-            "hydrocarbon_type": "OIL", "activity_status": "Producing",
-            "resources_included_in_discovery": None,
-            "discovery": f"D{discovery_id}", "discovery_resource_class": resource_class,
-            "field": field,
-            "discovery_recoverable_mill_sm3_oil": value,
-            "discovery_recoverable_mill_sm3_oe": value,
-            "resource_snapshot": snapshot,
-            "volume_generated": False, "volume_usable": usable, "volume_method": method,
-            "volume_coverage": "field_total" if scope == "shared_field" else "individual",
-            "volume_basis": "latest_original_recoverable_field_snapshot",
-            "volume_scope": scope,
-            "volume_aggregation_key": key or f"discovery:{discovery_id}:{snapshot}",
-            "volume_covered_discovery_ids": covered or [str(discovery_id)],
-            "volume_source_discovery_id": source_id or discovery_id,
-            "volume_source_identity": identity or f"{discovery_id}-{resource_class}-{snapshot}",
-            "volume_conflict": conflict, "volume_unresolved_reason": None,
-        }
-
-    assets = prepare([
-        row(1, 100.0, field="FIELD A", method="field_reserves_primary",
-            scope="shared_field", key="field:1:2025", covered=["1", "2"]),
-        row(2, 100.0, field="FIELD A", method="field_reserves_primary",
-            scope="shared_field", key="field:1:2025", covered=["1", "2"]),
-        row(1, 999.0), row(2, 999.0),
-        row(3, 5.0),
-        row(4, None, field="FIELD B", method="field_reserves_primary",
-            scope="shared_field", key="field:2:2025", covered=["4"]),
-        row(4, 50.0),
-        row(5, 0.0),
-        row(6, None, usable=False),
-        row(7, 2.24, scope="reporting_group", key="discovery:7:2025",
-            covered=["7", "8"], source_id=7),
-        row(8, 2.24, scope="reporting_group", key="discovery:7:2025",
-            covered=["7", "8"], source_id=7),
-    ])
-    assert [item["value"] for item in assets] == [100.0, None, 5.0, None, 0.0, None, 2.24, None], (
-        "play assets must count a shared field once, mark later field discoveries without volume, "
-        "fall back to structured discovery resources only when field data is absent, preserve zero, "
-        "and retain missing values"
-    )
-    assert assets[1]["marker_label"] == "included in FIELD A"
-    assert assets[3]["volume_source"] == "field" and assets[3]["value"] is None, (
-        "a field snapshot missing the selected component must not mix in discovery fallback"
-    )
-    assert assets[7]["marker_label"] == "included in D7", (
-        "a replicated discovery reporting group must contribute once and retain its child marker"
-    )
-
-
-
 def check_cache_helper(cells: list[dict]) -> None:
     definitions = []
     capability_assignment = None
@@ -264,18 +171,17 @@ def check_cache_helper(cells: list[dict]) -> None:
     namespace: dict = {}
     exec(compile(module, "notebook cache helper", "exec"), namespace)
     reusable = namespace[CACHE_HELPER]
-    expected = {"kglite_datasets_revision": DATASETS_REVISION,
-                "default_discovery_play_enhancement": True}
+    expected = {"kglite_datasets_revision": DATASETS_REVISION}
     capabilities = {name: 1 for name in namespace["REQUIRED_GRAPH_CAPABILITIES"]}
     record = {**expected, "capabilities": capabilities}
     assert reusable(record, expected, capabilities), "matching capable graph must be reusable"
     stale = {**record, "kglite_datasets_revision": "0" * 40}
     assert not reusable(stale, expected, capabilities), "stale datasets revision must rebuild"
-    missing = {**capabilities, "discovery_volumes": 0}
+    missing = {**capabilities, "production_profiles": 0}
     assert not reusable({**record, "capabilities": missing}, expected, missing), (
-        "graph without discovery volumes must rebuild"
+        "graph without production profiles must rebuild"
     )
-    changed = {**capabilities, "assigned_discoveries": capabilities["assigned_discoveries"] + 1}
+    changed = {**capabilities, "formation_tops": capabilities["formation_tops"] + 1}
     assert not reusable(record, expected, changed), "graph/build capability drift must rebuild"
 
 
@@ -287,11 +193,10 @@ def main() -> None:
     check_pins_and_paths(sources)
     query_count = check_query_bounds(cells)
     check_rate_helper(cells)
-    check_discovery_asset_helper(cells)
     check_cache_helper(cells)
     print(
         "SODIR notebook: valid nbformat, clean outputs, compilable source, "
-        f"exact pins, {query_count} bounded queries and executable rate, resource, and cache semantics verified"
+        f"exact pins, {query_count} bounded queries and executable rate and cache semantics verified"
     )
 
 
