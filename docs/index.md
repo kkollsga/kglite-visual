@@ -30,6 +30,9 @@ Select a screenshot to open it at its full 1440 × 900 resolution.
 **[Download `team.kgl`](_static/team.kgl)** ·
 **[Start the walkthrough](first-exploration.md)**
 
+For a production-scale example, [explore the public SODIR graph as an NCS
+geologist](sodir-geologist.md) with the downloadable notebook.
+
 ## What the workspace does
 
 | Destination | Use it for |
@@ -67,6 +70,7 @@ server and engine ship together; there is no database service to configure.
 
 getting-started
 first-exploration
+sodir-geologist
 ```
 
 ```{toctree}

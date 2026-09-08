@@ -170,6 +170,11 @@ install, which no paraphrase of it would.
 (jupyter)=
 ## Jupyter
 
+For a complete real-data project, download the
+[SODIR geologist notebook](sodir-geologist.md). It builds a file-backed graph,
+drives bounded results into the shared workspace, charts monthly production,
+and leaves the app open after Run All.
+
 In a notebook, `show()` opens no tab and the returned object renders itself in
 the cell. Which rendering you get depends on where the kernel is, and the rule
 the module obeys is: **never render a silently-blank iframe.**
