@@ -71,6 +71,7 @@ server and engine ship together; there is no database service to configure.
 getting-started
 first-exploration
 sodir-geologist
+query-charts
 ```
 
 ```{toctree}

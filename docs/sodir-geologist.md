@@ -9,7 +9,7 @@ rerun and adapt, with a live workspace as the main result.
 :class: warning
 The published `kglite-visual 0.1.7` wheel does not contain this workspace. The
 notebook's one-time setup installs the reviewed source revision
-`1c4406e68398d2e7407f9c219f6be990a83fa4e6`, `kglite==0.17.1`, and
+`61e0534a89057535ba5a638dc9a83e2e0281cd78`, `kglite==0.17.1`, and
 `kglite-datasets==0.1.16`. Run that setup before choosing the notebook kernel.
 ```
 
@@ -55,6 +55,18 @@ clustered names matter.
    because the source scales differ. The graph contains no invented month nodes.
 5. **Handoff.** Save and export an exact visible GraphML slice for the
    reviewable 16/2-6 formation-top, core, and DST neighborhood.
+
+The notebook also includes two chart recipes. The production query returns
+flat monthly rows that can be charted directly in Visual. An optional NJU-1
+creaming curve requires an enriched graph with explicit
+`Discovery → Prospect → Play` relationships; the standard
+`kglite-datasets==0.1.16` graph does not contain that bridge. The recipe never
+replaces the public workspace: it opens a separately owned enriched workspace
+for this section. It never uses polygon overlap as a substitute. It
+deduplicates discoveries converted
+to the same field, reports missing resource estimates, and labels the result
+as a current reported-resource subtotal. See [Charts from query
+results](query-charts.md) for the controls and interpretation boundaries.
 
 The combined well-evidence query returns 24 ordered source rows: twenty
 formation-top records, three cores, and one DST. The notebook checks both node
@@ -104,6 +116,11 @@ for comparison with other years; the graph and chart do not establish a cause.
 The primary sources are SODIR's
 [monthly field production table](https://factpages.sodir.no/en/field/TableView/Production/Saleable/TotalNcsMonth)
 and [16/2-6 wellbore record and attributes](https://factpages.sodir.no/en/wellbore/PageView/Exploration/All/6374).
+SODIR's [field resource table](https://factpages.sodir.no/en/field/TableView/Resources)
+and [discovery resource table](https://factpages.sodir.no/en/discovery/TableView/Resources)
+define the recoverable oil-equivalent values used by the optional creaming
+recipe. FactPages content is published under the Norwegian Licence for Open
+Government Data.
 
 ## Run and continue
 

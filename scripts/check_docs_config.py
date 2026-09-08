@@ -20,6 +20,8 @@ REQUIRED_ASSETS = (
     "sodir-depth-context-16-2-6.png",
     "sodir-notebook-data.png",
     "sodir-production-2024.png",
+    "query-production.png",
+    "query-chart-workspace.png",
 )
 
 

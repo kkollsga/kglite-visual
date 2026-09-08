@@ -22,7 +22,9 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 - Add a downloadable, rerunnable SODIR geologist notebook and rendered guide
   that build a file-backed graph, drive bounded geological views in the live
-  workspace, and compare honestly labelled monthly production rates.
+  workspace, and compare honestly labelled monthly production rates. The
+  notebook also provides an optional NJU-1 creaming recipe for an enriched
+  graph, with converted fields counted once and missing estimates preserved.
 
 - A reproducible, downloadable 17-node team graph now supports a complete
   first-use tour through browsing, records, queries, filters, calculations,

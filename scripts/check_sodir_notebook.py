@@ -14,7 +14,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "docs" / "_static" / "notebooks" / "sodir-geologist.ipynb"
-RUNTIME_REVISION = "1c4406e68398d2e7407f9c219f6be990a83fa4e6"
+RUNTIME_REVISION = "61e0534a89057535ba5a638dc9a83e2e0281cd78"
 PIN_PATTERNS = {
     "kglite==0.17.1": r"(?<![\w-])kglite==0[.]17[.]1(?![\w.])",
     "kglite-datasets==0.1.16": r"(?<![\w-])kglite-datasets==0[.]1[.]16(?![\w.])",
@@ -79,6 +79,16 @@ def check_pins_and_paths(sources: list[str]) -> None:
         assert re.search(pattern, text), f"notebook does not contain exact setup pin {pin!r}"
     assert not re.search(r"/(?:Users|Volumes)/[^\s'\"`)]+", text), (
         "notebook contains a machine-local absolute path"
+    )
+    for phrase in (
+        "SODIR_ENRICHED_GRAPH",
+        "HAS_DEPOSIT_PROSPECT",
+        "reported-resource subtotal",
+        "Missing estimates remain missing",
+    ):
+        assert phrase in text, f"notebook is missing creaming-curve contract {phrase!r}"
+    assert "NJU1_EXAMPLE_DISCOVERY_IDS" not in text, (
+        "notebook must not embed an unrefreshable NJU-1 membership list"
     )
 
 

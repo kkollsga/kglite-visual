@@ -15,7 +15,7 @@ frontend that the Rust binary embeds, then open the included sample:
 git clone https://github.com/kkollsga/kglite-visual.git
 cd kglite-visual
 git fetch origin pull/4/head
-git checkout 8870e9643bb12c930475619fe0ffe6f3291ad40f
+git checkout 61e0534a89057535ba5a638dc9a83e2e0281cd78
 npm --prefix frontend ci
 npm --prefix frontend run build
 cargo run -p kglite-visual-cli -- docs/_static/team.kgl
