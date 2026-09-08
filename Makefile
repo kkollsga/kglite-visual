@@ -7,12 +7,12 @@
 
 # Size ceiling for the gitignored dev-docs/ working folder. dev-docs/ never
 # reaches CI, so a local gate is the only thing that can ever see it growing
-# (doctrine R4: every file accumulation has a bound and an owner). 200 MB is a
-# starting value for a repo whose bench/out/ will hold generated .kgl fixtures
-# and protocol captures; raise it deliberately, with a reason, not because a
-# run went red.
-# Real public-dataset validation retains a compressed SODIR capture plus one probe-ready graph.
-DEV_DOCS_MAX_MB ?= 1024
+# (doctrine R4: every file accumulation has a bound and an owner). The public
+# SODIR validation needs 802 MB of cached sources/disk graph, a 110 MB portable
+# graph, a 187 MB source archive and an 862 MB recoverable archive of superseded
+# stages during its retention period. Measured total after archiving: 2534 MB.
+# 3 GiB preserves this evidence within a finite, locally enforced bound.
+DEV_DOCS_MAX_MB ?= 3072
 
 # Advisory ceilings for the two build directories cargo and npm never garbage
 # collect. WARN, not FAIL: a legitimately large target/ mid-refactor is not a

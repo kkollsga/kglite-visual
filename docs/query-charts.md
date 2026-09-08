@@ -50,48 +50,24 @@ points to arrive as ordinary rows with explicit columns.
 
 ## Creaming curves need membership and volume provenance
 
-A play creaming curve needs discovery-to-play membership and a stated resource
-basis. SODIR's source discovery and play tables do not contain a direct
-foreign key. The [SODIR notebook](sodir-geologist.md) uses the datasets
-preview's supported `Discovery -[:IN_PLAY]-> Play` edges. Published
-discovery/play examples are authoritative; otherwise the graph retains every
-compatible play containing the designated discovery well using age and polygon
-evidence. Field membership alone does not assign a play. Count distinct
-discovery IDs within a selected play. Cross-play results can overlap and must
-not be summed. Geographic overlap alone is insufficient because plays can
-overlap vertically.
+A play creaming curve needs discovery-to-play membership and a stated resource basis. The [SODIR notebook](sodir-geologist.md) uses supported `Discovery -[:IN_PLAY]-> Play` edges from published examples or compatible well age and polygon evidence. Field membership alone does not assign a play. Count distinct discovery IDs within a selected play. Cross-play results can overlap and must not be summed.
 
-The notebook plots `DiscoveryVolume.recoverable_oil` in million Sm³ and
-distinguishes reported resources, field-derived volumes for single-discovery fields, and
-the generated Troll oil allocation. Gas, NGL and condensate are excluded;
-the allocation assigns all Troll oil to West and a known zero to East. It excludes inclusion-window reserve deltas from the
-current-estimate curve and does not add field totals again. Missing or
-unresolved estimates remain visible in coverage, never zero. The result is a
-partial recoverable-oil subtotal; current estimates ordered by designated
-well completion date do not reconstruct the estimates available at discovery.
+The resource rule is field first. For a selected component, the newest structured field-reserve observation contributes once within the play, deduplicated by its stable aggregation key and dated to the earliest completed covered discovery matched to that play. Later discoveries covered by that source remain named **included in counted source** timing markers. Only when no field snapshot exists may a structured discovery-resource pool contribute, also once per aggregation key. If the chosen field source lacks the requested component, the value stays missing rather than mixing bases. Numeric zero remains distinct from missing data.
 
-A zero component and an unavailable volume are different. The generated Troll
-East allocation has a usable zero recoverable-oil component. Gjøa Nord reports its resources as included in the parent Gjøa discovery. The
-generated sourced-estimate fallback uses the newest catalogued whole-discovery
-drilling-report estimate and never sums estimates from separate wells. The current bounded catalog contains four verified reports and does not cover
-every discovery announcement. It includes Gjøa Nord's published 2022 range as
-a dated 2.8 million Sm³ oil-equivalent midpoint and Duva's 2016 discovery-report range as 7.65
-million Sm³ oil equivalent. Neither publishes an oil component, so recoverable
-oil remains unavailable, and
-field-reserve increments are not substituted. The oil-only curve uses only a
-usable explicitly sourced or generated oil component; oil equivalent does not silently become oil or
-zero.
+These are current field and discovery resource estimates ordered by designated discovery-well completion. A field total shown in a play is context for the matched discoveries, not a geological allocation of the whole field to that play. The same field can appear in more than one play, so play subtotals must never be added together. Named × markers identify discoveries without a usable value for the selected component without inserting zero.
 
 <a href="_static/sodir-nkl2-oil-creaming-qc.png"><img
 src="_static/sodir-nkl2-oil-creaming-qc.png"
-alt="NKL-2 recoverable-oil creaming curve with named missing-volume discoveries"></a>
+alt="NKL-2 recoverable-oil creaming curve using field-first resources"></a>
 
 <a href="_static/sodir-nkl2-oe-creaming-qc.png"><img
 src="_static/sodir-nkl2-oe-creaming-qc.png"
-alt="NKL-2 oil-equivalent creaming curve including the dated Gjøa Nord appraisal midpoint"></a>
+alt="NKL-2 oil-equivalent creaming curve using field-first resources"></a>
 
-Both views count each discovery once within NKL-2. A named × marks a
-discovery's completion date at the running known subtotal while leaving its
-source volume missing. Gjøa Nord and Duva therefore appear as missing in oil and as dated 2.8 and
-7.65 million Sm³ oil-equivalent midpoints in the OE view. Estimates are
-ordered by discovery-well completion, not by when a later estimate was known.
+The 2026-09-08 NKL-2 snapshot has three field contributions, one discovery
+contribution, four included-discovery markers and three unavailable values.
+Its oil subtotal is 414.057 million Sm³ and its oil-equivalent subtotal is
+517.409 million Sm³. The whole Gullfaks field contributes 391.148 million Sm³
+oil and 419.602 million Sm³ oil equivalent because the matched discovery
+34/10-45 S belongs to that field. Those figures are field-total proxies within
+the selected play view, not a geological allocation of Gullfaks to NKL-2.

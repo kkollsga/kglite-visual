@@ -10,7 +10,7 @@ rerun and adapt, with a live workspace as the main result.
 The published `kglite-visual 0.1.7` wheel does not contain this workspace. The
 notebook's one-time setup installs the reviewed source revision
 `61e0534a89057535ba5a638dc9a83e2e0281cd78`, `kglite==0.17.1`, and
-`kglite-datasets` from `8d190236e36df3e324faa445d641a75c8abd14df`. Run that setup before choosing the notebook kernel.
+`kglite-datasets` from `dfd638f0d3068c2514cc930db5ee62b8aac764e6`. Run that setup before choosing the notebook kernel.
 ```
 
 The loader owns a project directory containing its downloaded source cache,
@@ -21,6 +21,14 @@ only when its build record matches the pinned datasets revision and live
 capability queries confirm the play assignments and discovery volumes. Set the
 documented `SODIR_FORCE_REBUILD=1` only when you intend to refresh the source
 under the loader's cache cooldowns.
+
+To inspect the normalized public source tables without building a graph, the
+published `kglite-datasets 0.1.16` supports
+`sodir.fetch_all(Path("sodir-review"))`. It writes normalized CSV files under
+`sodir-review/csv/` and the source manifest to
+`sodir-review/sodir_index.json`; the upstream API payloads are normalized to
+CSV rather than retained as raw JSON. The derived play and discovery-volume
+enhancements used by this demo still require the pinned source revision above.
 
 ## The geological journey
 
@@ -68,35 +76,21 @@ distinct discovery IDs and curves for different plays can overlap. Their
 subtotals must not be added together. The coverage tables report membership
 source, source wellbore, age evidence, and distance.
 
-The oil creaming curve orders events by exact designated-well completion date
-and keeps the reported discovery year for comparison. It combines reported
-`DiscoveryVolume.recoverable_oil` observations, field-derived volumes for
-single-discovery fields, and the generated Troll oil allocation. Under that allocation's
-explicit assumption, all Troll oil belongs to West and East has a zero-oil
-estimate. Gas, NGL and condensate are excluded from this chart. Other field
-totals remain separate context. Missing, conflicted, and unresolved observations
-remain gaps; inclusion-window deltas are excluded because they have a different
-dated basis. The result is a partial current recoverable-oil subtotal, not a
-historical estimate or a complete play-volume allocation.
+The oil creaming curve orders events by exact designated-well completion date and keeps the reported discovery year for comparison. For each selected component, the newest structured field reserve is primary and contributes once per play using its stable source key. The earliest completed covered discovery matched to that play carries the contribution; later covered discoveries remain named **included in counted source** markers. A structured discovery-resource pool is secondary only when no field snapshot exists. Missing source values remain named × markers, while a numeric zero remains zero.
+
+The result is a current field/discovery resource subtotal within the matched play. It is not a geological allocation of every field to that play, and estimates from overlapping play curves must not be added. The NJU-1 chart uses million Sm³ recoverable oil and excludes gas, NGL and condensate. The NKL-2 examples apply the same hierarchy separately to oil and oil equivalent.
 
 <a href="_static/sodir-nju1-creaming-qc.png"><img
 src="_static/sodir-nju1-creaming-qc.png"
-alt="Partial NJU-1 recoverable-oil creaming curve ordered by designated discovery-well completion date"></a>
+alt="NJU-1 field-first recoverable-oil creaming curve ordered by designated discovery-well completion date"></a>
 
-This 2026-09-08 quality-control snapshot shows 12 of 41 supported discoveries
-with usable oil estimates and leaves 29 missing or unresolved. Its 322.034
-million Sm³ oil subtotal includes 11.609 from reported observations, 10.829 from
-single-discovery field reserves, and 299.596 from Troll West. Troll East's
-generated zero remains distinct from missing data. Troll still contributes
-about 93% of the known oil subtotal. The QC figure uses a 290–330 million Sm³
-y-axis to show later additions; the initial Troll step is truncated.
+In this 2026-09-08 source snapshot, NJU-1 has 10 field contributions, 6
+discovery contributions, 14 included-discovery markers and 11 unavailable
+oil values across 41 discoveries. The field/discovery subtotal is 536.391
+million Sm³ recoverable oil.
 
-[Download the 29 discoveries without allocated or reported oil volumes](_static/sodir-nju1-discoveries-without-oil-volumes.csv).
-The dated QC list includes discovery names and IDs, discovery wells, completion
-dates, hydrocarbon type, field and resource-inclusion links, and FactPages URLs.
-Field reserve figures in that list are field totals, not allocated discovery
-volumes. See [Charts from query
-results](query-charts.md) for the controls and interpretation boundaries.
+[Download discoveries without either structured oil source](_static/sodir-nju1-discoveries-without-oil-volumes.csv).
+The QC list retains discovery names and IDs, wells, completion dates, fields, resource-inclusion links and FactPages URLs. See [Charts from query results](query-charts.md) for chart controls and interpretation boundaries.
 
 The combined well-evidence query returns 24 ordered source rows: twenty
 formation-top records, three cores, and one DST. The notebook checks both node

@@ -15,7 +15,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "docs" / "_static" / "notebooks" / "sodir-geologist.ipynb"
 RUNTIME_REVISION = "61e0534a89057535ba5a638dc9a83e2e0281cd78"
-DATASETS_REVISION = "4db84882a853060f61f0b27f9665a145b0b74bd3"
+DATASETS_REVISION = "dfd638f0d3068c2514cc930db5ee62b8aac764e6"
 PIN_PATTERNS = {
     "kglite==0.17.1": r"(?<![\w-])kglite==0[.]17[.]1(?![\w.])",
     DATASETS_REVISION: re.escape(DATASETS_REVISION),
@@ -95,13 +95,15 @@ def check_pins_and_paths(sources: list[str]) -> None:
         "latest.fldRecoverableOil AS field_original_recoverable_mill_sm3_oil",
         "cumulative_mill_sm3_oil",
         "coalesce(d.dscName, d.title) AS discovery",
-        "single-discovery field estimates",
+        '"field_reserves_primary"',
+        '"discovery_reserves_secondary"',
+        "included in {group_name}",
         "DISCOVERED_BY",
         "wlbCompletionDate",
         "CANDIDATE_PLAY",
         "count(DISTINCT d)",
-        "known discovery-oil subtotal",
-        "Missing, conflicted, and unresolved estimates remain gaps",
+        "current field/discovery resource subtotal",
+        "A discovery without a usable value for the selected component stays a named × marker",
     ):
         assert phrase in text, f"notebook is missing creaming-curve contract {phrase!r}"
     for retired in ("assigned to at most one play", "have one assigned play", "HC1, then HC2, then HC3"):
@@ -183,54 +185,59 @@ def check_discovery_asset_helper(cells: list[dict]) -> None:
     prepare = namespace[DISCOVERY_ASSET_HELPER]
 
     def row(
-        discovery_id, resource_class, value, snapshot="2025-12-31", *, oe_value=None,
-        basis="discovery_reserves", method="reported_observation", generated=False,
-        usable=True, conflict=False, identity=None,
+        discovery_id, value, *, field=None, method="discovery_reserves_secondary",
+        scope="individual", key=None, covered=None, snapshot="2025-12-31",
+        resource_class=None, usable=True, conflict=False, identity=None, source_id=None,
     ):
         return {
             "discovery_id": discovery_id, "reported_discovery_year": 2000 + discovery_id,
             "discovery_well_completion_date": f"{2000 + discovery_id}-06-01",
+            "hydrocarbon_type": "OIL", "activity_status": "Producing",
+            "resources_included_in_discovery": None,
             "discovery": f"D{discovery_id}", "discovery_resource_class": resource_class,
+            "field": field,
             "discovery_recoverable_mill_sm3_oil": value,
-            "discovery_recoverable_mill_sm3_oe": oe_value,
+            "discovery_recoverable_mill_sm3_oe": value,
             "resource_snapshot": snapshot,
-            "volume_generated": generated, "volume_usable": usable, "volume_method": method,
-            "volume_coverage": "reported", "volume_basis": basis,
-            "volume_source_discovery_id": discovery_id,
+            "volume_generated": False, "volume_usable": usable, "volume_method": method,
+            "volume_coverage": "field_total" if scope == "shared_field" else "individual",
+            "volume_basis": "latest_original_recoverable_field_snapshot",
+            "volume_scope": scope,
+            "volume_aggregation_key": key or f"discovery:{discovery_id}:{snapshot}",
+            "volume_covered_discovery_ids": covered or [str(discovery_id)],
+            "volume_source_discovery_id": source_id or discovery_id,
             "volume_source_identity": identity or f"{discovery_id}-{resource_class}-{snapshot}",
             "volume_conflict": conflict, "volume_unresolved_reason": None,
         }
 
     assets = prepare([
-        row(1, "4F", 2.0), row(1, "4F", 2.0), row(1, "5F", 3.0),
-        row(1, "7F", 99.0, snapshot="2024-12-31"),
-        row(2, None, 7.0, basis="latest_original_recoverable_field_snapshot",
-            method="singleton_field_copy", generated=True),
-        row(3, None, 11.0, basis="field_inclusion_window_delta",
-            method="inclusion_delta", generated=True),
-        row(4, None, None, snapshot=None, usable=False),
-        row(5, "4F", 13.0, conflict=True),
-        row(6, None, 0.0, basis="latest_original_recoverable",
-            method="troll_published_component_allocation", generated=True),
-        row(7, None, 0.0, method="reported_observation", usable=False),
-        row(8, None, None, snapshot="2022-05-12", oe_value=2.8,
-            basis="newest_applicable_published_discovery_estimate",
-            method="published_resource_range_midpoint", generated=True),
+        row(1, 100.0, field="FIELD A", method="field_reserves_primary",
+            scope="shared_field", key="field:1:2025", covered=["1", "2"]),
+        row(2, 100.0, field="FIELD A", method="field_reserves_primary",
+            scope="shared_field", key="field:1:2025", covered=["1", "2"]),
+        row(1, 999.0), row(2, 999.0),
+        row(3, 5.0),
+        row(4, None, field="FIELD B", method="field_reserves_primary",
+            scope="shared_field", key="field:2:2025", covered=["4"]),
+        row(4, 50.0),
+        row(5, 0.0),
+        row(6, None, usable=False),
+        row(7, 2.24, scope="reporting_group", key="discovery:7:2025",
+            covered=["7", "8"], source_id=7),
+        row(8, 2.24, scope="reporting_group", key="discovery:7:2025",
+            covered=["7", "8"], source_id=7),
     ])
-    assert [item["value"] for item in assets] == [5.0, 7.0, None, None, None, 0.0, None, None], (
-        "discovery assets must deduplicate reported classes, admit single-discovery field estimates, "
-        "preserve a usable generated Troll East zero, and gap different-basis, unusable "
-        "zeros such as redirected resources, "
-        "or conflicted observations"
+    assert [item["value"] for item in assets] == [100.0, None, 5.0, None, 0.0, None, 2.24, None], (
+        "play assets must count a shared field once, mark later field discoveries without volume, "
+        "fall back to structured discovery resources only when field data is absent, preserve zero, "
+        "and retain missing values"
     )
-    oe_assets = prepare([
-        row(8, None, None, snapshot="2022-05-12", oe_value=2.8,
-            basis="newest_applicable_published_discovery_estimate",
-            method="published_resource_range_midpoint", generated=True),
-    ], value_field="discovery_recoverable_mill_sm3_oe",
-       accepted_bases={"newest_applicable_published_discovery_estimate"})
-    assert oe_assets[0]["value"] == 2.8, (
-        "published OE midpoint must remain available only through explicit OE selection"
+    assert assets[1]["marker_label"] == "included in FIELD A"
+    assert assets[3]["volume_source"] == "field" and assets[3]["value"] is None, (
+        "a field snapshot missing the selected component must not mix in discovery fallback"
+    )
+    assert assets[7]["marker_label"] == "included in D7", (
+        "a replicated discovery reporting group must contribute once and retain its child marker"
     )
 
 

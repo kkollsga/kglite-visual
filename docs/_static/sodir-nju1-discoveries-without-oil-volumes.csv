@@ -1,30 +1,12 @@
-discovery,discovery_id,discovery_well,well_completion_date,hydrocarbon_type,field,activity_status,resources_included_in_discovery,latest_field_recoverable_oil_million_sm3,field_reserves_year,discovery_volume_status,factpage
-31/4-3 Brage,44546,31/4-3,1980-05-11,OIL,BRAGE,Producing,,64.321,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/44546
-35/9-1 Gjøa,44786,35/9-1,1989-05-07,OIL/GAS,GJØA,Producing,,15.938,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/44786
-30/9-10 Oseberg Sør,44468,30/9-10,1990-09-21,OIL,OSEBERG SØR,Included in other discovery,30/9-3 Oseberg Sør,73.329,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/44468
-35/11-4 Fram,44750,35/11-4,1990-12-29,OIL/GAS,FRAM,Producing,,59.472,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/44750
-35/9-2,2449421,35/9-2,1991-04-03,OIL/GAS,GJØA,Included in other discovery,35/9-1 Gjøa,15.938,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/2449421
-35/11-5,20460562,35/11-5,1991-11-03,OIL/GAS,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/20460562
-35/11-7,44756,35/11-7,1992-09-29,OIL/GAS,FRAM,Included in other discovery,35/11-4 Fram,59.472,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/44756
-6204/11-1,44816,6204/11-1,1994-11-14,GAS,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/44816
-36/7-1,44792,36/7-1,1996-05-07,OIL/GAS,GJØA,Included in other discovery,35/9-1 Gjøa,15.938,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/44792
-35/11-8 S,44762,35/11-8 S,1996-05-11,OIL/GAS,FRAM,Included in other discovery,35/11-4 Fram,59.472,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/44762
-36/7-2 (Ulven),44798,36/7-2,1997-09-22,OIL,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/44798
-31/4-11,1626899,31/4-11,2000-09-12,OIL,BRAGE,Included in other discovery,31/4-3 Brage,64.321,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/1626899
-31/4-A-30 B,2820014,31/4-A-30 B,2004-04-04,OIL,BRAGE,Included in other discovery,31/4-3 Brage,64.321,2025,multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/2820014
-30/9-21 A,5010058,30/9-21 A,2008-06-15,OIL,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/5010058
-30/5-3 A,5490728,30/5-3 A,2009-05-30,GAS,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/5490728
-35/9-6 S,18449542,35/9-6 S,2010-12-07,OIL/GAS,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/18449542
-30/9-28 S,28123140,30/9-28 S,2016-02-26,GAS,OSEBERG SØR,Included in other discovery,30/9-3 Oseberg Sør,73.329,2025,multiple_historical_constituents; resource_redirect,https://factpages.sodir.no/discovery/pageview/all/28123140
-35/8-6 A (Robbins),28183437,35/8-6 A,2016-05-14,OIL,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/28183437
-35/11-20 S (Orion),28543142,35/11-20 S,2016-06-19,OIL,,Included in other discovery,35/11-18 (Syrah),,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/28543142
-35/11-20 B (Beaujolais),28543133,35/11-20 B,2016-09-15,OIL,,Included in other discovery,35/11-18 (Syrah),,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/28543133
-35/12-6 S (Kallåsen),32036437,35/12-6 S,2018-06-14,OIL,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/32036437
-35/10-4 A (Gnomoria),33362751,35/10-4 A,2018-11-12,OIL,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/33362751
-35/11-22 S (Bergand),34353155,35/11-22 S,2019-02-02,OIL,,Production is unlikely,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/34353155
-35/11-23 (Echino Sør),35318442,35/11-23,2019-11-06,OIL/GAS,FRAM,Included in other discovery,35/11-4 Fram,59.472,2025,multiple_historical_constituents; resource_redirect,https://factpages.sodir.no/discovery/pageview/all/35318442
-31/2-22 S (Blasto),38653521,31/2-22 S,2021-03-03,OIL,FRAM,Included in other discovery,35/11-4 Fram,59.472,2025,multiple_historical_constituents; resource_redirect,https://factpages.sodir.no/discovery/pageview/all/38653521
-35/11-30 S (Rhombi),42002506,35/11-30 S,2024-10-09,GAS,FRAM,Included in other discovery,35/11-4 Fram,59.472,2025,multiple_entrants; multiple_historical_constituents; resources_reported_with_parent,https://factpages.sodir.no/discovery/pageview/all/42002506
-35/11-30 A,42002509,35/11-30 A,2024-11-04,OIL,FRAM,Included in other discovery,35/11-4 Fram,59.472,2025,multiple_entrants; multiple_historical_constituents; resources_reported_with_parent,https://factpages.sodir.no/discovery/pageview/all/42002509
-31/4-A-23 G (Prince Sør),42002517,31/4-A-23 G,2025-04-11,OIL,BRAGE,Included in other discovery,31/4-3 Brage,64.321,2025,multiple_entrants; multiple_historical_constituents,https://factpages.sodir.no/discovery/pageview/all/42002517
-35/11-32 S (Byrding C),42002540,35/11-32 S,2026-03-07,OIL,,Production not evaluated,,,,No usable recoverable-oil observation,https://factpages.sodir.no/discovery/pageview/all/42002540
+discovery,discovery_id,well_completion_date,hydrocarbon_type,field,activity_status,resources_included_in_discovery,factpage
+35/11-5,20460562,1991-11-03,OIL/GAS,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/20460562
+6204/11-1,44816,1994-11-14,GAS,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/44816
+36/7-2 (Ulven),44798,1997-09-22,OIL,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/44798
+30/9-21 A,5010058,2008-06-15,OIL,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/5010058
+30/5-3 A,5490728,2009-05-30,GAS,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/5490728
+35/9-6 S,18449542,2010-12-07,OIL/GAS,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/18449542
+35/8-6 A (Robbins),28183437,2016-05-14,OIL,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/28183437
+35/12-6 S (Kallåsen),32036437,2018-06-14,OIL,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/32036437
+35/10-4 A (Gnomoria),33362751,2018-11-12,OIL,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/33362751
+35/11-22 S (Bergand),34353155,2019-02-02,OIL,,Production is unlikely,,https://factpages.sodir.no/discovery/pageview/all/34353155
+35/11-32 S (Byrding C),42002540,2026-03-07,OIL,,Production not evaluated,,https://factpages.sodir.no/discovery/pageview/all/42002540
