@@ -131,7 +131,11 @@ export function analyzeQueryResult(table: QueryTable): ChartAnalysis {
   const y = numeric[0]
   const date = temporal[0]
   if (date && y && date.name !== y.name) suggestions.push({ kind: 'line', mapping: { kind: 'line', shape: 'rows', x: date.name, y: y.name, ...(categorical[0] ? { series: categorical[0].name } : {}) }, reason: 'A complete date column and numeric value support a time series.' })
-  if (numeric.length >= 2) suggestions.push({ kind: 'scatter', mapping: { kind: 'scatter', shape: 'rows', x: numeric[0]!.name, y: numeric[1]!.name }, reason: 'Two numeric columns support a scatter plot.' })
+  if (numeric.length >= 2) {
+    const series = categorical[0]?.name
+    suggestions.push({ kind: 'line', mapping: { kind: 'line', shape: 'rows', x: numeric[0]!.name, y: numeric[1]!.name, ...(series ? { series } : {}) }, reason: 'Distinct numeric x values and a numeric value support an ordered line.' })
+    suggestions.push({ kind: 'scatter', mapping: { kind: 'scatter', shape: 'rows', x: numeric[0]!.name, y: numeric[1]!.name, ...(series ? { series } : {}) }, reason: 'Two numeric columns support a scatter plot.' })
+  }
   if (categorical[0] && y) suggestions.push({ kind: 'bar', mapping: { kind: 'bar', shape: 'rows', x: categorical[0].name, y: y.name }, reason: 'A category and numeric value support bars.' })
   const nested = pointMapSuggestion(table, columns)
   if (nested) suggestions.push(nested)

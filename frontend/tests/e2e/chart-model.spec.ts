@@ -123,6 +123,31 @@ test('line suggestions include a compatible scalar group and coverage counts vis
   expect(chart.coverage).toMatchObject({ expandedPoints: 3, plottedPoints: 2, missingY: 1 })
 })
 
+test('numeric cumulative series suggest grouped lines and scatter while duplicate x excludes only the line', () => {
+  const creaming = table(['reported_asset_order', 'cumulative_mill_sm3_oe', 'series'], [
+    [tv.int('1'), tv.float(10), tv.string('reported subtotal')],
+    [tv.int('1'), tv.float(8), tv.string('fields')],
+    [tv.int('2'), tv.null(), tv.string('reported subtotal')],
+    [tv.int('2'), tv.null(), tv.string('fields')],
+    [tv.int('3'), tv.float(14), tv.string('reported subtotal')],
+    [tv.int('3'), tv.float(12), tv.string('fields')],
+  ])
+  const suggestions = analyzeQueryResult(creaming).suggestions
+  expect(suggestions.find((suggestion) => suggestion.kind === 'line')?.mapping).toEqual({
+    kind: 'line', shape: 'rows', x: 'reported_asset_order', y: 'cumulative_mill_sm3_oe', series: 'series',
+  })
+  expect(suggestions.find((suggestion) => suggestion.kind === 'scatter')?.mapping).toEqual({
+    kind: 'scatter', shape: 'rows', x: 'reported_asset_order', y: 'cumulative_mill_sm3_oe', series: 'series',
+  })
+
+  const duplicate = table(['order', 'resource', 'series'], [
+    [tv.int('1'), tv.float(10), tv.string('same')],
+    [tv.int('1'), tv.float(11), tv.string('same')],
+  ])
+  expect(analyzeQueryResult(duplicate).suggestions.some((suggestion) => suggestion.kind === 'line')).toBe(false)
+  expect(analyzeQueryResult(duplicate).suggestions.find((suggestion) => suggestion.kind === 'scatter')?.mapping.series).toBe('series')
+})
+
 test('calendar expansion and transformed overflow fail before creating an unbounded model', () => {
   const distant = table(['month', 'volume'], [
     [tv.date('1000-01-01'), tv.float(1)],
