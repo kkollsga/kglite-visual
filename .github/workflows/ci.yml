@@ -39,9 +39,9 @@ jobs:
   #   check-dev-docs      — bounds `dev-docs/`, which is gitignored and never
   #                         reaches a checkout. A CI copy would scan an empty
   #                         directory and pass vacuously (R1).
-  #   check-skill-mirrors — compares `.agents/` against `.claude/skills/`.
-  #                         `.agents/` and `AGENTS.md` are generated adapters
-  #                         and are not tracked, so CI has nothing to compare.
+  #   check-skill-mirrors — compares the two machine-local skill trees.
+  #                         Neither tree reaches a checkout, so CI has nothing
+  #                         to compare; the check refuses an empty authority.
   #
   # Both are local-only by construction, not by omission. If either ever
   # becomes checkable in CI, it gets a job here in the same change.

@@ -2,8 +2,8 @@
 """Assert the two agent-instruction trees have not drifted apart (doctrine R7).
 
 This repo keeps agent instructions twice: ``CLAUDE.md`` + ``.claude/skills/``
-(the tracked **authority**) and ``AGENTS.md`` + ``.agents/skills/`` (gitignored
-**generated adapters**). A stale adapter does not merely lag — it teaches a
+(the **authority**; its skill tree is machine-local) and ``AGENTS.md`` +
+``.agents/skills/`` (gitignored **generated adapters**). A stale adapter teaches a
 procedure the live copy warns against. In this estate one adapter was 194 lines
 behind and still instructed its reader that the version bump is "one line …
 there is no per-manifest bump", the exact belief that broke a release, sitting

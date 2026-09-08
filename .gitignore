@@ -44,13 +44,13 @@ __pycache__/
 # exact bytes.
 !/crates/kglite-visual-core/tests/fixtures/*.kgl
 
-# Codex conventions and skills are generated adapters of the tracked
-# CLAUDE.md / .claude/skills/ authority (see the Authority line in CLAUDE.md).
+# Codex conventions and skills are generated adapters of the CLAUDE.md plus
+# machine-local .claude/skills/ authority (see the Authority line in CLAUDE.md).
 # Regenerate them with `make sync-agents`; never hand-edit or stage them.
 /.agents/
 /AGENTS.md
-# Claude Code machine-local state (settings.local.json, worktree bookkeeping).
-# `.claude/skills/` is deliberately NOT ignored — see the note below.
+# Claude Code machine-local state (skills, settings, worktree bookkeeping).
+/.claude/skills/
 /.claude/settings.local.json
 /.claude/worktrees/
 

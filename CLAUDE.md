@@ -897,9 +897,7 @@ have open — the adapter is generated, never edited. Never adapt from a local
 copy you have not compared against the oracle; that is how stale text
 propagates.
 
-This repo was adopted from **doctrine 0.1.8 on 2026-08-29**, and unlike most
-of the estate it **tracks** its doctrine layer (`CLAUDE.md`, `.claude/skills/`,
-`Makefile`, `scripts/`). `doctrine/snapshot.sh` mirrors KGLite only, so
-tracking is the only thing that would ever give this repo's conventions a
-history, a review trail, or a copy that survives a working-tree accident —
-which is the reason the doctrine repo exists in the first place.
+This repo was adopted from **doctrine 0.1.8 on 2026-08-29**. It tracks its
+durable doctrine layer (`CLAUDE.md`, `Makefile`, `scripts/`) while both skill
+trees stay machine-local. The shared durable skill sources live in doctrine's
+`reference/skills/`; project tailoring stays in the local authority tree.
