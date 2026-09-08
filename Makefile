@@ -11,7 +11,8 @@
 # starting value for a repo whose bench/out/ will hold generated .kgl fixtures
 # and protocol captures; raise it deliberately, with a reason, not because a
 # run went red.
-DEV_DOCS_MAX_MB ?= 200
+# Real public-dataset validation retains a compressed SODIR capture plus one probe-ready graph.
+DEV_DOCS_MAX_MB ?= 1024
 
 # Advisory ceilings for the two build directories cargo and npm never garbage
 # collect. WARN, not FAIL: a legitimately large target/ mid-refactor is not a
