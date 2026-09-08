@@ -14,12 +14,14 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "docs" / "_static" / "notebooks" / "sodir-geologist.ipynb"
-RUNTIME_REVISION = "61e0534a89057535ba5a638dc9a83e2e0281cd78"
+VIEWER_VERSION = "0.1.8"
 DATASETS_REVISION = "95794a2879143f305511e60db315cc61a1c319bd"
 PIN_PATTERNS = {
     "kglite==0.17.1": r"(?<![\w-])kglite==0[.]17[.]1(?![\w.])",
     DATASETS_REVISION: re.escape(DATASETS_REVISION),
-    RUNTIME_REVISION: re.escape(RUNTIME_REVISION),
+    f"kglite-visual=={VIEWER_VERSION}": (
+        rf"(?<![\w-])kglite-visual=={re.escape(VIEWER_VERSION)}(?![\w.])"
+    ),
 }
 RATE_HELPER = "monthly_average_daily_rate"
 CACHE_HELPER = "graph_cache_is_reusable"

@@ -7,16 +7,6 @@ you need, and keep every partial answer visibly bounded.
 <a href="_static/team-overview.png"><img src="_static/team-overview.png"
 alt="The kglite-visual workspace showing the team sample"></a>
 
-```{admonition} This workspace is an unreleased preview
-:class: warning
-The Explore, Data and Query walkthrough on this site describes
-[PR 4](https://github.com/kkollsga/kglite-visual/pull/4). The
-published `kglite-visual 0.1.7` package does not contain this workspace yet.
-Use the [preview source checkout](getting-started.md#preview-the-workspace) to
-follow the tour. For the released package, use the
-[stable documentation](https://kglite-visual.readthedocs.io/en/stable/).
-```
-
 ## Take the tour
 
 The [first exploration](first-exploration.md) uses a 17-node team graph and
@@ -26,7 +16,7 @@ every count in the guide is checked against the real app.
 
 Select a screenshot to open it at its full 1440 × 900 resolution.
 
-**[Set up the preview](getting-started.md)** ·
+**[Install the viewer](getting-started.md)** ·
 **[Download `team.kgl`](_static/team.kgl)** ·
 **[Start the walkthrough](first-exploration.md)**
 

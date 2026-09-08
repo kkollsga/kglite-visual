@@ -23,28 +23,18 @@ The Python wheel has no required runtime dependencies: the graph engine, the
 HTTP server and the WebGL frontend bundle are all inside one compiled
 extension. No Node, no separate server process, no database service.
 
-> **Workspace preview:** Explore, Data, filters, calculations, saved views and
-> scoped export are currently unreleased work in
-> [PR 4](https://github.com/kkollsga/kglite-visual/pull/4). PyPI `0.1.7` does not
-> contain that workspace. Follow the
-> [source-preview setup](https://kglite-visual--4.org.readthedocs.build/en/4/getting-started.html#preview-the-workspace)
-> for the interface described below; use the
-> [stable documentation](https://kglite-visual.readthedocs.io/en/stable/) with
-> the published package.
-
 ## Quick Start
 
 The released package:
 
 ```bash
-pip install kglite-visual==0.1.7
+pip install kglite-visual==0.1.8
 kglite-visual graph.kgl
 ```
 
-To try the unreleased workspace, build the pinned source revision in
-[Getting started](https://kglite-visual--4.org.readthedocs.build/en/4/getting-started.html),
-then open the included 17-node team sample. The
-[first exploration](https://kglite-visual--4.org.readthedocs.build/en/4/first-exploration.html)
+Open the downloadable 17-node team sample from
+[Getting started](https://kglite-visual.readthedocs.io/en/stable/getting-started.html). The
+[first exploration](https://kglite-visual.readthedocs.io/en/stable/first-exploration.html)
 takes it through browse, inspect, query, filter, calculate, save and export.
 
 <p align="center">
@@ -181,8 +171,8 @@ prebuilt frontend, so neither needs Node at install time.
 
 Full docs at **[kglite-visual.readthedocs.io](https://kglite-visual.readthedocs.io)**.
 
-- **[Getting started](https://kglite-visual--4.org.readthedocs.build/en/4/getting-started.html)** — choose the published or preview path and open the sample.
-- **[Your first exploration](https://kglite-visual--4.org.readthedocs.build/en/4/first-exploration.html)** — browse, inspect, query, filter, calculate, save and export one graph.
+- **[Getting started](https://kglite-visual.readthedocs.io/en/stable/getting-started.html)** — install the package and open the sample.
+- **[Your first exploration](https://kglite-visual.readthedocs.io/en/stable/first-exploration.html)** — browse, inspect, query, filter, calculate, save and export one graph.
 - **[The viewer](https://kglite-visual.readthedocs.io/en/latest/viewer/index.html)** — the app in full:
   [the honesty model](https://kglite-visual.readthedocs.io/en/latest/viewer/honesty.html) ·
   [layouts](https://kglite-visual.readthedocs.io/en/latest/viewer/layouts.html) ·

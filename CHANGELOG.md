@@ -11,6 +11,8 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-08
+
 ### Added
 
 - Visualize complete query results as line, bar or scatter charts, with

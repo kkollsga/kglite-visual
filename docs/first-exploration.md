@@ -1,8 +1,8 @@
 # Your first exploration
 
 This tour uses [`team.kgl`](_static/team.kgl): nine people, three projects and
-five skills connected by 34 relationships. Start the source preview as shown in
-[Getting started](getting-started.md#preview-the-workspace).
+five skills connected by 34 relationships. Install the viewer and open the sample as shown in
+[Getting started](getting-started.md).
 
 The scope line is your checkpoint throughout the tour. It distinguishes the 17
 instances and 34 relationships in the source from what is currently loaded,
