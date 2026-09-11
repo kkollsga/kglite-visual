@@ -117,10 +117,10 @@ help:  ## List the targets
 gate: check-dev-docs check-skill-mirrors check-bans check-build-dirs \
       check-licenses frontend-typecheck frontend-build check-bundle \
       rust-fmt rust-clippy rust-test check-generated-ts check-protocol-baseline \
-      check-render-baseline \
+      check-render-baseline check-docs-sample \
       e2e pytest check-packaged-consumer frontend-audit  ## Local pre-push gate
 	@echo ""
-	@echo "gate: 18 checks ran, 0 absent."
+	@echo "gate: 19 checks ran, 0 absent."
 
 lint: check-dev-docs check-skill-mirrors check-bans check-licenses rust-fmt rust-clippy frontend-typecheck  ## Static checks only — no test execution
 
