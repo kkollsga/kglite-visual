@@ -3,7 +3,7 @@
 Install the released viewer, download the small sample, and open it:
 
 ```bash
-python -m pip install kglite-visual==0.1.8
+python -m pip install kglite-visual==0.1.9
 curl -L https://kglite-visual.readthedocs.io/en/stable/_static/team.kgl -o team.kgl
 kglite-visual team.kgl
 ```

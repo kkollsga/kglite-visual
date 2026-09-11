@@ -14,7 +14,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "docs" / "_static" / "notebooks" / "sodir-geologist.ipynb"
-VIEWER_VERSION = "0.1.8"
+VIEWER_VERSION = "0.1.9"
 DATASETS_REVISION = "95794a2879143f305511e60db315cc61a1c319bd"
 PIN_PATTERNS = {
     "kglite==0.17.3": r"(?<![\w-])kglite==0[.]17[.]3(?![\w.])",

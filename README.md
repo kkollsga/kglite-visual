@@ -28,7 +28,7 @@ extension. No Node, no separate server process, no database service.
 The released package:
 
 ```bash
-pip install kglite-visual==0.1.8
+pip install kglite-visual==0.1.9
 kglite-visual graph.kgl
 ```
 

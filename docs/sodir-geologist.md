@@ -5,7 +5,7 @@ builds the public SODIR knowledge graph, opens its saved `.kgl` file in KGLite
 Visual, and drives five bounded geological investigations. It is a test project you can
 rerun and adapt, with a live workspace as the main result.
 
-The notebook's one-time setup installs `kglite-visual==0.1.8`,
+The notebook's one-time setup installs `kglite-visual==0.1.9`,
 `kglite==0.17.3`, and `kglite-datasets` from
 `95794a2879143f305511e60db315cc61a1c319bd`. Run that setup before choosing
 the notebook kernel.
