@@ -1033,6 +1033,65 @@ mod tests {
         assert_eq!(table.data[0][1]["properties"]["name"], "B");
     }
 
+    /// KGLite 0.17.2 added explicit imports and set composition to read
+    /// subqueries. This checks the viewer's bounded table route, not only the
+    /// engine API in isolation.
+    #[test]
+    fn query_route_executes_scoped_read_subqueries() {
+        use kglite::api::DirGraph;
+
+        let graph = DirGraph::new();
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "UNWIND [1, 2] AS x CALL (x) { RETURN x AS n UNION ALL RETURN x + 10 AS n } RETURN x, n ORDER BY x, n".to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("scoped subquery runs");
+
+        assert_eq!(table.columns, ["x", "n"]);
+        assert_eq!(table.data[0], [1, 1, 2, 2]);
+        assert_eq!(table.data[1], [1, 11, 2, 12]);
+    }
+
+    /// KGLite 0.17.3 fixed the incident-edge fast path so constraints repeated
+    /// on an already-bound endpoint cannot be replaced by "has any edge".
+    #[test]
+    fn query_route_preserves_correlated_exists_endpoint_constraints() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        execute_mut(
+            &mut graph,
+            "CREATE (:A {id: 1})\n\
+             CREATE (:A {id: 2})\n\
+             MATCH (a:A {id: 1}), (b:A {id: 2}) CREATE (a)-[:R]->(b)",
+            &ExecuteOptions::eager(&empty),
+        )
+        .expect("fixture builds");
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (a:A {id: 1}) RETURN EXISTS { (a:B)-[:R]-() } AS present".to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("correlated EXISTS runs");
+
+        assert_eq!(table.columns, ["present"]);
+        assert_eq!(table.data[0], [false]);
+    }
+
     /// The bug this file's warning forwarding exists to fix.
     ///
     /// Before it, this query answered `200` with an empty table and nothing

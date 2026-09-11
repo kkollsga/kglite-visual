@@ -17,7 +17,7 @@ NOTEBOOK = ROOT / "docs" / "_static" / "notebooks" / "sodir-geologist.ipynb"
 VIEWER_VERSION = "0.1.8"
 DATASETS_REVISION = "95794a2879143f305511e60db315cc61a1c319bd"
 PIN_PATTERNS = {
-    "kglite==0.17.1": r"(?<![\w-])kglite==0[.]17[.]1(?![\w.])",
+    "kglite==0.17.3": r"(?<![\w-])kglite==0[.]17[.]3(?![\w.])",
     DATASETS_REVISION: re.escape(DATASETS_REVISION),
     f"kglite-visual=={VIEWER_VERSION}": (
         rf"(?<![\w-])kglite-visual=={re.escape(VIEWER_VERSION)}(?![\w.])"

@@ -11,6 +11,14 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.17.3**, exactly pinned (was 0.17.1). The query
+  surface gains scoped read subqueries and Cypher 25 clause spellings, plus
+  corrected correlated `EXISTS` and aggregate paths. The portable `.kgl`
+  checkpoint format is unchanged. Saved views record the engine version, so
+  durable views created by 0.17.1 must be recreated and saved again.
+
 ## [0.1.8] - 2026-09-08
 
 ### Added

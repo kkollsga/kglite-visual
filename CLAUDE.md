@@ -843,6 +843,15 @@ with `ORDER BY … LIMIT`; the migration gate exercises both shapes through this
 viewer rather than inferring their behavior from a successful compile. No
 upstream capability or workaround is added in this move.
 
+The floor moved to `=0.17.3` on 2026-09-11, from `=0.17.1` in one step,
+carrying 0.17.2 and 0.17.3. The one documented Rust break makes the internal
+planner `PassCtx` non-constructible outside KGLite; this workspace never names
+it. The query route adopts scoped read subqueries, Cypher 25 clause spellings,
+and corrections for correlated `EXISTS`/count paths. The loader,
+introspection, export and `GraphRead` APIs used here are unchanged, as is the
+portable `.kgl` checkpoint format. Existing fixture and handover checks remain
+the compatibility proof; no viewer workaround is added or retired.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves

@@ -29,6 +29,6 @@ calculate degree, save the result and export it.
 For your own data, replace `team.kgl` with any compatible graph path. A `.kgl`
 file must use a format supported by the embedded
 kglite reader; it need not come from the exact same release. The current source
-tree pins kglite 0.17.1 and reads compatible files written by older releases.
+tree pins kglite 0.17.3 and reads compatible files written by older releases.
 Packaging details, in-memory graph handoff and notebooks live in the
 [Python API](python.md).
