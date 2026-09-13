@@ -852,6 +852,15 @@ introspection, export and `GraphRead` APIs used here are unchanged, as is the
 portable `.kgl` checkpoint format. Existing fixture and handover checks remain
 the compatibility proof; no viewer workaround is added or retired.
 
+The floor moved to `=0.17.4` on 2026-09-13. Its bounded response envelope,
+retained-result expansion and response cache belong to KGLite's standalone CLI
+and MCP server, which this viewer neither embeds nor spawns; duplicating them in
+the viewer's 27-tool shared-view MCP surface would cross the declared product
+boundary. The library fixes do reach viewer-submitted Cypher: missing parameters
+are rejected before an empty match, subquery or mutation can hide them, and
+declared-schema changes invalidate cached diagnostics. No viewer-used Rust API
+or portable checkpoint contract changed.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves

@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
 
 [dependencies]
-# The engine, from crates.io. `=0.17.3` is EXACT on purpose (D11): kglite is
+# The engine, from crates.io. `=0.17.4` is EXACT on purpose (D11): kglite is
 # pre-1.0 and ships documented breaking changes in patch releases, so a caret
 # range would let a routine `cargo update` swap the engine under us. Moving
 # this floor means reading kglite's CHANGELOG and re-greping every declaration
@@ -117,6 +117,15 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Neither release changes the portable `.kgl` checkpoint format or the loader,
 # introspection, export, and GraphRead APIs used here.
 #
+# Re-checked 2026-09-13: `0.17.4` is published and not yanked. Its bounded
+# agent-response envelope and retained-result expansion belong to KGLite's own
+# CLI and MCP server, which this viewer neither embeds nor spawns. The library
+# fixes do reach arbitrary Cypher submitted through the viewer: a missing
+# parameter is now rejected even when an empty match, subquery, or mutation
+# would previously have hidden it, and declared-schema changes invalidate
+# cached diagnostics. The loader, portable checkpoint format, introspection,
+# export, and GraphRead APIs used here are unchanged.
+#
 # NO `path` component, and its removal (P6) fixed a shipped defect rather than
 # tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
 # maturin vendors an out-of-workspace path dependency into the source
@@ -133,7 +142,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.17.3"
+kglite = "=0.17.4"
 
 # The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
 # MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest

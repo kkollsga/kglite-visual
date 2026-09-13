@@ -11,6 +11,13 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.17.4**, exactly pinned (was 0.17.3). Viewer
+  queries now reject missing parameters even when an empty branch would have
+  hidden them, and schema changes refresh cached diagnostics. The portable
+  `.kgl` checkpoint format and the viewer's engine-facing APIs are unchanged.
+
 ## [0.1.9] - 2026-09-11
 
 ### Changed
