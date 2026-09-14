@@ -733,7 +733,11 @@ list still said five), not assumed**:
 4. `docs/getting-started.md` — the same sentence on the install page.
 5. `crates/kglite-visual-core/src/source_identity.rs` — `ENGINE_VERSION` in
    saved source fingerprints. The pinned library exports no version constant;
-   a parity test checks this declaration against the manifest requirement.
+   a parity test checks this declaration against the manifest requirement, and
+   a second one (`every_prose_kglite_declaration_names_the_pinned_engine`,
+   proven red on a stale site) holds sites 2, 3, 4 and 6-9 to it. **That test
+   is this list's executable half: a site added here without an entry there is
+   a site nothing enforces.**
 6. `docs/sodir-geologist.md` — the guide's setup paragraph naming
    `kglite==X.Y.Z`.
 7. `docs/_static/notebooks/sodir-geologist.ipynb` — the setup cell's
@@ -755,7 +759,7 @@ them, this list did not. Sites 6-9 repeated the failure and went further: the
 notifier only sees the two it can pattern-match (`docs/sodir-geologist.md` and
 the validator), so the notebook's own install line and `KGLITE_VERSION`
 assertion were moving on each adopter's grep alone, with nothing enumerating
-them. A user-facing "this version pins" sentence is a declaration, not a
+them — which is why the 2026-09-14 move also made the list executable. A user-facing "this version pins" sentence is a declaration, not a
 citation; a doc page, notebook cell or validator pattern that states the pin
 joins this list in the same change that adds the sentence.
 

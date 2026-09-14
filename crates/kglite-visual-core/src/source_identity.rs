@@ -179,6 +179,65 @@ mod tests {
     }
 
     #[test]
+    fn every_prose_kglite_declaration_names_the_pinned_engine() {
+        // R16: the floor's declaration sites are enumerated in CLAUDE.md, and an
+        // enumeration nothing executes is how four of them drifted unlisted for
+        // four releases — KGLite's ecosystem notifier pattern-matches two, and
+        // nothing at all held the notebook's own install line or its
+        // KGLITE_VERSION assertion. The test above covers the manifest pin and
+        // ENGINE_VERSION; these are the seven prose and validator sites. The
+        // last entry states the pinned engine's CURRENT behaviour, so the
+        // release that adopts an upstream fix for that warning deletes the
+        // sentence and this entry together, deliberately.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let escaped_dots = ENGINE_VERSION.replace('.', "[.]");
+        let sites = [
+            (
+                "README.md",
+                format!("this version pins `kglite {ENGINE_VERSION}`"),
+            ),
+            (
+                "docs/getting-started.md",
+                format!("tree pins kglite {ENGINE_VERSION}"),
+            ),
+            (
+                "docs/sodir-geologist.md",
+                format!("`kglite=={ENGINE_VERSION}`"),
+            ),
+            (
+                "tests/test_handover.py",
+                format!("pip install kglite=={ENGINE_VERSION}"),
+            ),
+            (
+                "scripts/check_sodir_notebook.py",
+                format!("\"kglite=={ENGINE_VERSION}\": r\"(?<![\\w-])kglite=={escaped_dots}(?![\\w.])\""),
+            ),
+            (
+                "docs/_static/notebooks/sodir-geologist.ipynb",
+                format!("'kglite=={ENGINE_VERSION}'"),
+            ),
+            (
+                "docs/_static/notebooks/sodir-geologist.ipynb",
+                format!("KGLITE_VERSION = \\\"{ENGINE_VERSION}\\\""),
+            ),
+            (
+                "docs/_static/notebooks/sodir-geologist.ipynb",
+                format!("KGLite {ENGINE_VERSION} still records a false static schema warning"),
+            ),
+        ];
+        assert_eq!(sites.len(), 8, "the enumeration lost a site");
+        for (relative, expected) in &sites {
+            let path = root.join(relative);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("cannot read declaration site {relative}: {error}"));
+            assert!(
+                text.contains(expected.as_str()),
+                "{relative} does not declare the pinned engine: expected to find {expected:?}"
+            );
+        }
+    }
+
+    #[test]
     fn file_fingerprint_streams_and_detects_changed_source() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("graph.kgl");
