@@ -713,11 +713,12 @@ rewrites every site and verifies with a **resolving** `cargo metadata`
 above and run the resolving `cargo metadata` by hand.)*
 
 **The `kglite` floor is a second version surface, enumerated separately**
-(`R16`). It has **five declarations, counted by grepping on 2026-08-31 (re-verified
-at the 0.16.18 move the same day, at the 0.16.19 move on 2026-09-01, at the
-0.16.20 move on 2026-09-02, at the 0.16.22 move on 2026-09-03, and when
-bookmark source verification added the fifth site on 2026-09-06), not
-assumed**:
+(`R16`). It has **nine declarations, counted by grepping on 2026-09-14
+(previously counted as five on 2026-08-31 and re-verified at the 0.16.18,
+0.16.19, 0.16.20 and 0.16.22 moves and when bookmark source verification added
+a site on 2026-09-06; the 2026-09-14 re-count found the four SODIR-notebook
+declarations below had been moving with every floor since 0.17.1 while this
+list still said five), not assumed**:
 
 1. `crates/kglite-visual-core/Cargo.toml` — the `kglite = "=X.Y.Z"` line,
    exact-pinned because kglite is pre-1.0 and ships documented breaking
@@ -733,12 +734,30 @@ assumed**:
 5. `crates/kglite-visual-core/src/source_identity.rs` — `ENGINE_VERSION` in
    saved source fingerprints. The pinned library exports no version constant;
    a parity test checks this declaration against the manifest requirement.
+6. `docs/sodir-geologist.md` — the guide's setup paragraph naming
+   `kglite==X.Y.Z`.
+7. `docs/_static/notebooks/sodir-geologist.ipynb` — the setup cell's
+   `pip install … 'kglite==X.Y.Z'` line.
+8. The same notebook's `KGLITE_VERSION` constant, which an
+   `importlib.metadata.version("kglite")` assertion enforces at runtime and
+   which is copied into the production sidecar's provenance block — so a stale
+   number here does not merely mislead, it fails the notebook or mislabels its
+   output. The adjacent markdown cell's "KGLite X.Y.Z still records a false
+   static schema warning" sentence states the pinned engine's *current*
+   behaviour and moves with it.
+9. `scripts/check_sodir_notebook.py` — the `PIN_PATTERNS` entry, the gate that
+   holds sites 7 and 8 to an exact pin. It is the checker, so it cannot catch
+   its own staleness: bump it in the same edit as the notebook.
 
 Sites 3 and 4 arrived with the 0.1.2 docs release and were **missing from
 this enumeration for two floor moves** — KGLite's ecosystem notifier caught
-them, this list did not. A user-facing "this version pins" sentence is a
-declaration, not a citation; a doc page that states the pin joins this list
-in the same change that adds the sentence.
+them, this list did not. Sites 6-9 repeated the failure and went further: the
+notifier only sees the two it can pattern-match (`docs/sodir-geologist.md` and
+the validator), so the notebook's own install line and `KGLITE_VERSION`
+assertion were moving on each adopter's grep alone, with nothing enumerating
+them. A user-facing "this version pins" sentence is a declaration, not a
+citation; a doc page, notebook cell or validator pattern that states the pin
+joins this list in the same change that adds the sentence.
 
 The `path` component was **removed in P6** and its removal fixed a shipped
 defect, not a preference: the sibling checkout sits outside this workspace,
@@ -860,6 +879,17 @@ boundary. The library fixes do reach viewer-submitted Cypher: missing parameters
 are rejected before an empty match, subquery or mutation can hide them, and
 declared-schema changes invalidate cached diagnostics. No viewer-used Rust API
 or portable checkpoint contract changed.
+
+The floor moved to `=0.17.5` on 2026-09-14. The whole release is KGLite's own
+MCP server — relative workspace sandbox paths resolving from the manifest
+directory, and a workspace watcher that no longer rebuilds a graph when a
+source file is merely read (mcp-methods 0.4.10). This viewer embeds the kglite
+*library* and serves its own MCP surface; it never spawns or parses KGLite's
+server, so nothing in the release reaches a code path here. `cargo-semver-checks`
+reported no update required across all 196 checks, the portable `.kgl`
+checkpoint format is unchanged, and no workaround is adopted or retired. The
+move exists so the declared engine is the current one, and it re-counted the
+declaration list above from five to nine.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the

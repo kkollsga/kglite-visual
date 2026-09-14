@@ -11,6 +11,14 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.17.5**, exactly pinned (was 0.17.4). The release
+  fixes KGLite's own MCP server — relative workspace sandbox paths and a
+  watcher that rebuilt on a plain source read — neither of which this viewer
+  spawns, so no viewer behaviour changes. The portable `.kgl` checkpoint
+  format and the viewer's engine-facing APIs are unchanged.
+
 ## [0.1.10] - 2026-09-13
 
 ### Changed
