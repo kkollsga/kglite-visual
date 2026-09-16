@@ -11,6 +11,18 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.17.7**, exactly pinned (was 0.17.5), which also
+  adopts 0.17.6. A graph can now carry its own agent methodology — skills and
+  named Cypher recipes — stored under the `KgliteSkill` and `KgliteRecipe`
+  system labels. Those nodes stay queryable and are carried by exports, but
+  they are not part of your model, so the viewer now hides them from the entry
+  screen's type list and from the node total beside it, exactly as the engine
+  hides them from `schema()` and `describe()`. Without this a graph carrying
+  one skill showed a type and a node count that its own schema view
+  contradicted. The portable `.kgl` checkpoint format is unchanged.
+
 ## [0.1.11] - 2026-09-14
 
 ### Changed

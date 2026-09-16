@@ -147,6 +147,10 @@ pub fn load_graph_with(
 
 /// Node counts per label, read from the persisted type index.
 ///
+/// System labels are omitted: this is an enumeration, and the engine hides
+/// `KgliteSkill` / `KgliteRecipe` from every one of its own (kglite 0.17.6).
+/// A caller wanting them names the type.
+///
 /// O(#types), not O(V): `type_indices` is maintained by the engine and
 /// restored on load, so this stays cheap on a 100M-node graph — the property
 /// the whole progressive-disclosure entry screen rests on.
@@ -154,6 +158,7 @@ pub fn node_counts_by_type(graph: &DirGraph) -> Vec<(String, usize)> {
     let mut counts: Vec<(String, usize)> = graph
         .type_indices
         .iter()
+        .filter(|(name, _)| !kglite::api::is_system_label(name))
         .map(|(name, nodes)| (name.to_string(), nodes.len()))
         .collect();
     counts.sort_unstable_by(|a, b| a.0.cmp(&b.0));

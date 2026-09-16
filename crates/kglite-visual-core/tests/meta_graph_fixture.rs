@@ -273,3 +273,60 @@ fn the_top_types_tier_truncates_and_reports_it() {
     assert_eq!(info.total, 300);
     assert!(info.truncated, "the UI must be told 250 types are missing");
 }
+
+/// kglite 0.17.6 introduced `KgliteSkill` / `KgliteRecipe` — ordinary nodes
+/// that every engine *enumeration* hides (`node_types()`, `schema()`,
+/// `describe()`, `db.labels()`) while Cypher still matches and counts them.
+/// The entry screen enumerates too, so it must hide them by the same rule:
+/// before this test, a graph carrying one of each listed three types and four
+/// nodes on the meta-graph while `describe()` — the same session, the same
+/// graph — reported one type and two nodes.
+#[test]
+fn system_labels_are_hidden_from_the_meta_graph_and_its_totals() {
+    use kglite::api::session::{execute_mut, ExecuteOptions};
+    use kglite::api::DirGraph;
+
+    let mut graph = DirGraph::new();
+    let params = std::collections::HashMap::new();
+    execute_mut(
+        &mut graph,
+        "CREATE (a:Person {id:1,title:'A'}) CREATE (b:Person {id:2,title:'B'}) \
+         CREATE (a)-[:KNOWS]->(b) \
+         CREATE (:KgliteSkill {id:'s1',title:'how-to'}) \
+         CREATE (:KgliteRecipe {id:'r1',title:'top-wells'})",
+        &ExecuteOptions::eager(&params),
+    )
+    .expect("build");
+
+    let mut view = View::new();
+    let meta = meta_graph::compute(&graph, &mut view);
+
+    let names: Vec<&str> = meta.meta.nodes.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["Person"], "system labels are not part of the model");
+    assert_eq!(meta.meta.stats.core_type_count, 1);
+
+    // The totals are the half that made the contradiction visible: they must
+    // agree with the engine's own visible count, not with `node_count()`.
+    let schema = kglite::api::introspection::compute_schema(&graph);
+    assert_eq!(
+        schema.node_count, 2,
+        "engine's visible count, for reference"
+    );
+    assert_eq!(
+        u64::from(meta.meta.stats.node_count),
+        schema.node_count as u64,
+        "the entry screen and describe() must report one number"
+    );
+    assert_eq!(meta.meta.stats.edge_count, 1);
+
+    // The other enumeration in this crate answers the same way. Unfiltered it
+    // returned [("KgliteRecipe", 1), ("KgliteSkill", 1), ("Person", 2)].
+    assert_eq!(
+        kglite_visual_core::node_counts_by_type(&graph),
+        vec![("Person".to_string(), 2)]
+    );
+
+    // A named lookup still reaches them — the engine keeps them queryable, so
+    // hiding must not become deleting.
+    assert!(graph.type_indices.contains_key("KgliteSkill"));
+}

@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
 
 [dependencies]
-# The engine, from crates.io. `=0.17.5` is EXACT on purpose (D11): kglite is
+# The engine, from crates.io. `=0.17.7` is EXACT on purpose (D11): kglite is
 # pre-1.0 and ships documented breaking changes in patch releases, so a caret
 # range would let a routine `cargo update` swap the engine under us. Moving
 # this floor means reading kglite's CHANGELOG and re-greping every declaration
@@ -136,6 +136,24 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # checkpoint format, loader, introspection, export, and GraphRead APIs used
 # here are unchanged.
 #
+# Re-checked 2026-09-16: `0.17.7` is published and not yanked, and this move
+# carries 0.17.6 with it. Unlike the last two, it DOES change the linked
+# library: 0.17.6 adds graph-carried skills and recipes as nodes under two
+# system labels, `KgliteSkill` and `KgliteRecipe`, which Cypher matches and
+# counts but which every engine enumeration hides (`node_types()`, `schema()`,
+# `describe()`, `db.labels()`, and `graph_scale` with them). `compute_schema`
+# — which this viewer calls for `describe()` — therefore drops them from both
+# its type list and its `node_count`. **That required a matching fix here**:
+# the entry screen enumerates from `type_indices` directly, so a graph with
+# one skill listed a type and counted a node that the same session's
+# `describe()` refused to, and `meta_graph::compute` now filters by the
+# engine's exported `is_system_label` rather than a copied list. Named lookups
+# and `export::all_nodes` deliberately do NOT filter: the engine keeps these
+# nodes queryable and carries them in exports. 0.17.7 itself is all
+# MCP-server-side (`ServerExtensions::with_skills` / `with_recipes`,
+# mcp-methods 0.4.11 lazy skill delivery), which this viewer neither embeds
+# nor spawns. The portable `.kgl` checkpoint format is unchanged.
+#
 # NO `path` component, and its removal (P6) fixed a shipped defect rather than
 # tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
 # maturin vendors an out-of-workspace path dependency into the source
@@ -152,7 +170,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.17.5"
+kglite = "=0.17.7"
 
 # The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
 # MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest

@@ -895,6 +895,33 @@ checkpoint format is unchanged, and no workaround is adopted or retired. The
 move exists so the declared engine is the current one, and it re-counted the
 declaration list above from five to nine.
 
+The floor moved to `=0.17.7` on 2026-09-16, from `=0.17.5` in one step,
+carrying 0.17.6. This is the first move since 0.17.3 whose diff reaches the
+linked library rather than only KGLite's own MCP server. 0.17.6 adds
+graph-carried skills and recipes, stored as ordinary nodes under two **system
+labels** — `KgliteSkill` and `KgliteRecipe` — which Cypher matches and counts,
+which exports and digests carry, and which **every engine enumeration hides**:
+`node_types()`, `db.labels()`, `schema()`, `describe()` and `graph_scale()`.
+`compute_schema`, the call behind this viewer's `describe()`, therefore drops
+them from both its type list and its `node_count`.
+
+**That opened a contradiction inside this viewer, and the move fixes it.** The
+entry screen enumerates `graph.type_indices` itself, so a graph carrying one
+skill and one recipe drew three types and four nodes while the same session's
+`describe()` reported one type and two — reproduced before the fix, and pinned
+by `system_labels_are_hidden_from_the_meta_graph_and_its_totals`.
+`meta_graph::compute` and `loader::node_counts_by_type` now filter through the
+engine's exported `is_system_label`, never a copied list, and the meta-graph's
+total is subtractive like the engine's own `visible_node_count`, so it stays
+byte-identical on every graph that carries no such node. **Named lookups and
+`export::all_nodes` deliberately do not filter**: the engine keeps these nodes
+queryable and carries them in exports, so hiding an enumeration must not become
+deleting data. 0.17.7 itself is entirely MCP-server-side — a producer skill and
+recipe layer (`ServerExtensions::with_skills` / `with_recipes`) and lazy skill
+delivery via mcp-methods 0.4.11 — and this viewer neither embeds nor spawns
+KGLite's server. The portable `.kgl` checkpoint format is unchanged and the
+nine declarations above were re-greped and confirmed complete.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves

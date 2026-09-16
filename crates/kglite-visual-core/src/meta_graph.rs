@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use kglite::api::introspection::{
     compute_type_capabilities_for, graph_scale, GraphScale, TypeCapabilities,
 };
-use kglite::api::{DirGraph, GraphRead};
+use kglite::api::{is_system_label, DirGraph, GraphRead};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -232,9 +232,17 @@ fn flag_names(caps: Option<&TypeCapabilities>) -> Vec<String> {
 /// that kept its links to itself would have them dropped by the first expansion
 /// (`setLinks` replaces the buffer whole).
 pub fn compute(graph: &DirGraph, view: &mut View) -> MetaGraphResponse {
+    // System labels (`KgliteSkill`, `KgliteRecipe`) are ordinary nodes that
+    // Cypher matches and counts, and that every engine *enumeration* hides —
+    // `node_types()`, `schema()`, `describe()`, `db.labels()` (kglite 0.17.6).
+    // The entry screen is an enumeration, so it hides them by the same rule
+    // and by the engine's own predicate rather than a copied list. Without
+    // this, one skill node put a type on the entry screen that `describe()`,
+    // reading the same graph in the same session, refused to list.
     let mut types: Vec<(String, u32, bool)> = graph
         .type_indices
         .iter()
+        .filter(|(name, _)| !is_system_label(name))
         .map(|(name, nodes)| {
             let name = name.to_string();
             let supporting = graph.parent_types.contains_key(&name);
@@ -247,7 +255,16 @@ pub fn compute(graph: &DirGraph, view: &mut View) -> MetaGraphResponse {
     // bound clips the type list or when the connectivity cache under-reports:
     // a stats panel that adds up the rows it displayed cannot tell the user
     // what it is not showing them.
-    let node_count = graph.graph.node_count() as u64;
+    // Subtractive, mirroring the engine's own `visible_node_count`: the number
+    // stays byte-identical to `node_count()` on every graph that carries no
+    // system-labelled node, which is all of them until a producer ships one.
+    let hidden_nodes: u64 = graph
+        .type_indices
+        .iter()
+        .filter(|(name, _)| is_system_label(name))
+        .map(|(_, nodes)| nodes.len() as u64)
+        .sum();
+    let node_count = (graph.graph.node_count() as u64).saturating_sub(hidden_nodes);
     let edge_count = graph.graph.edge_count() as u64;
     let core_type_count = types.iter().filter(|(_, _, s)| !s).count();
     // The tier comes from kglite's own classifier, never from a copy of its
