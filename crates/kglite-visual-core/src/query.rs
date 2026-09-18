@@ -1092,6 +1092,153 @@ mod tests {
         assert_eq!(table.data[0], [false]);
     }
 
+    /// Two `Part`s joined to parents of two different labels, built one
+    /// statement at a time: a second `MATCH … CREATE` sharing a variable name
+    /// with the first is silently dropped, which would make the tests below
+    /// pass vacuously.
+    #[cfg(test)]
+    fn two_parent_labels_fixture() -> kglite::api::DirGraph {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        for statement in [
+            "CREATE (:Software {id: 'lib'}) CREATE (:Doc {id: 'page'}) \
+             CREATE (:Part {id: 'p1'}) CREATE (:Part {id: 'p2'})",
+            "MATCH (c:Part {id: 'p1'}), (p:Software) CREATE (c)-[:CHILD_OF]->(p)",
+            "MATCH (c:Part {id: 'p2'}), (p:Doc) CREATE (c)-[:CHILD_OF]->(p)",
+            "MATCH (c:Part {id: 'p2'}), (p:Software) CREATE (c)-[:CHILD_OF]->(p)",
+        ] {
+            execute_mut(&mut graph, statement, &ExecuteOptions::eager(&empty))
+                .expect("fixture statement runs");
+        }
+
+        // Non-vacuity: both parent labels really carry a CHILD_OF, so an
+        // aggregate that ignores the group node's label has something wrong to
+        // report (R1).
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH ()-[r:CHILD_OF]->(p) RETURN labels(p)[0] AS l, count(r) AS k \
+                        ORDER BY l"
+                    .to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("fixture self-check runs");
+        assert_eq!(
+            table.data[0],
+            [serde_json::json!("Doc"), serde_json::json!("Software")],
+            "the fixture lost an edge"
+        );
+        assert_eq!(table.data[1], [serde_json::json!(1), serde_json::json!(2)]);
+
+        graph
+    }
+
+    /// KGLite 0.17.8 fixed the fused grouped aggregate, which answered from a
+    /// per-connection-type peer histogram that applied no filter for the group
+    /// node's own label — so `p` came back bound to peers of every label, each
+    /// with a count. A silent wrong answer, and the shape a viewer user types
+    /// to ask "how many children per parent".
+    #[test]
+    fn query_route_keeps_the_group_nodes_label_in_a_fused_aggregate() {
+        let graph = two_parent_labels_fixture();
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (c)-[:CHILD_OF]->(p:Software) WITH p, count(c) AS k \
+                        RETURN p.id AS id, k ORDER BY id"
+                    .to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("fused aggregate runs");
+
+        assert_eq!(table.columns, ["id", "k"]);
+        assert_eq!(
+            table.data[0],
+            [serde_json::json!("lib")],
+            "a parent of another label was counted"
+        );
+        assert_eq!(table.data[1], [serde_json::json!(2)]);
+    }
+
+    /// KGLite 0.17.8 fixed the two-`MATCH` fused aggregate, which deduplicated
+    /// the group keys the first pattern produced without keeping the rows they
+    /// stood for — reporting `count(r) / n` for a key bound `n` times.
+    #[test]
+    fn query_route_keeps_row_multiplicity_across_two_fused_matches() {
+        let graph = two_parent_labels_fixture();
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (c)-[:CHILD_OF]->(p:Software) MATCH (p)<-[r:CHILD_OF]-() \
+                        WITH p, count(r) AS k RETURN p.id AS id, k"
+                    .to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("two-MATCH fused aggregate runs");
+
+        assert_eq!(table.columns, ["id", "k"]);
+        // `lib` is bound twice by the first pattern and each row joins the two
+        // CHILD_OF edges the second pattern finds: 2 x 2.
+        assert_eq!(table.data[1], [serde_json::json!(4)]);
+    }
+
+    /// KGLite 0.17.8 made a parenthesised label check parse as the boolean
+    /// expression it is. The `(` lookahead committed to the MATCH-pattern
+    /// parser on `( <variable> :`, so this query failed outright with
+    /// "Unexpected token in MATCH pattern: OR" while its unparenthesised
+    /// spelling answered fine.
+    #[test]
+    fn query_route_parses_a_parenthesised_label_disjunction() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        execute_mut(
+            &mut graph,
+            "CREATE (:Software {id: 'lib'}) CREATE (:Api {id: 'iface'}) \
+             CREATE (:Doc {id: 'page'})",
+            &ExecuteOptions::eager(&empty),
+        )
+        .expect("fixture builds");
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (a) WHERE (a:Software OR a:Api) RETURN a.id AS id ORDER BY id"
+                    .to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("a parenthesised label disjunction parses");
+
+        assert_eq!(table.columns, ["id"]);
+        assert_eq!(
+            table.data[0],
+            [serde_json::json!("iface"), serde_json::json!("lib")]
+        );
+    }
+
     /// The bug this file's warning forwarding exists to fix.
     ///
     /// Before it, this query answered `200` with an empty table and nothing
