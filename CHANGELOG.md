@@ -11,6 +11,26 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.17.10**, exactly pinned (was 0.17.9). Two engine
+  corrections reach the Cypher you type in the viewer, and both were silent
+  wrong answers rather than errors. A `WITH` that does not aggregate is a scope
+  barrier again: it kept the node, edge and path variables its projection
+  dropped, so `MATCH (a:N {id: 'x'}) WITH 1 AS u MATCH (a:N {id: 'y'})` found
+  nothing at all — the second pattern re-used the first one's node instead of
+  scanning — and `RETURN *` behind such a `WITH` grew a column for a variable
+  the query no longer had. And a `*` written beside another projection item now
+  expands: `WITH *, a + 1 AS b` used to produce a column literally named `*`
+  holding `1` while every value-carrying name in scope came back null,
+  `WITH *, count(*)` folded the whole result into one row, and
+  `WITH DISTINCT *, k` reduced it to one. Two smaller repairs come with it —
+  `MATCH p = (a)-->(b) RETURN *` now returns the path `p`, which it never did,
+  and a name that is both bound and projected is listed once instead of twice.
+  The portable `.kgl` checkpoint format is unchanged; a file written by the new
+  engine differs from one written by the old only in the engine version it
+  records.
+
 ## [0.1.13] - 2026-09-18
 
 ### Changed

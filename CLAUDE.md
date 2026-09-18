@@ -944,6 +944,32 @@ and out of reach here: this viewer opens `.kgl` files and holds no directory
 lease across a spawn. The nine declarations above were re-greped and confirmed
 complete; the count stays at nine.
 
+The floor moved to `=0.17.10` on 2026-09-19, one release. It is a pure fix
+release — `cargo-semver-checks` reported no update required across all 196
+checks — so there is no Rust break to establish out of reach, and the portable
+`.kgl` checkpoint format is unchanged. Its entire diff is two Cypher executor
+wrong answers, and both reach Cypher a user types into this viewer, so the move
+adopts them and pins them through the query route rather than inferring them
+from a successful compile. A non-aggregating `WITH` is a **scope barrier**
+again: it projected the row's values but left node, edge and path *bindings* in
+place, so a name its projection dropped stayed silently bound and a later
+`MATCH` anchored on the stale node instead of scanning — and `RETURN *` behind
+such a barrier listed a column for an out-of-scope variable. And **`*` written
+beside another projection item now expands**: `WITH *, a + 1 AS b` used to
+project a literal column named `*` holding `1` while dropping every
+value-carrying name in scope, `WITH *, count(*)` folded the whole input into one
+group, and `WITH DISTINCT *, k` deduplicated every row down to one. Two smaller
+repairs arrive with it — `RETURN *` now lists a path variable
+(`MATCH p = (a)-->(b) RETURN *` returns `p`, which it never did) and a name
+that is both bound and projected is listed once — and one wrong answer becomes an error, where a
+`CALL { … }` body ending in `RETURN *, …` really does carry its import and
+re-exporting it is refused by name. This viewer generates no `WITH` or `*`
+projection of its own (the meta-graph, expansion and search routes all name
+their columns), so the reach is the query panel, the `--cypher` render route and
+the MCP `cypher` tool — every place a person's own query text runs. The nine
+declarations above were re-greped and confirmed complete; the count stays at
+nine.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves

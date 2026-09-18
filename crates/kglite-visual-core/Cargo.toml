@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
 
 [dependencies]
-# The engine, from crates.io. `=0.17.9` is EXACT on purpose (D11): kglite is
+# The engine, from crates.io. `=0.17.10` is EXACT on purpose (D11): kglite is
 # pre-1.0 and ships documented breaking changes in patch releases, so a caret
 # range would let a routine `cargo update` swap the engine under us. Moving
 # this floor means reading kglite's CHANGELOG and re-greping every declaration
@@ -176,6 +176,23 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # by closing the descriptor, which this viewer does not exercise (it opens
 # `.kgl` files read-only and spawns nothing while holding one).
 #
+# Re-checked 2026-09-19: `0.17.10` is published and not yanked, and this move is
+# one release. It is a pure fix release — `cargo-semver-checks` reported no
+# update required across all 196 checks, so there is no Rust break to be
+# unreachable from. Its whole diff is two Cypher executor wrong answers, both of
+# which reach viewer-submitted Cypher directly: a non-aggregating `WITH` is a
+# scope barrier again (a variable its projection drops now binds afresh in the
+# clauses after it, instead of staying silently bound so a later `MATCH`
+# anchored on the stale node), and `*` written beside another projection item
+# now expands (`WITH *, a + 1 AS b` used to project a literal column named `*`
+# holding `1` and drop every value-carrying name in scope; `WITH *, count(*)`
+# folded the input into one group and `WITH DISTINCT *, k` deduplicated it to
+# one row). Two smaller repairs come with the second: `RETURN *` now lists a
+# path variable, which it never did, and a name that is both bound and
+# projected is listed once. Both are silent-wrong-answer classes rather than
+# errors, so the floor move is adopted and pinned through this viewer's query
+# route rather than merely compiled. The `.kgl` checkpoint format is unchanged.
+#
 # NO `path` component, and its removal (P6) fixed a shipped defect rather than
 # tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
 # maturin vendors an out-of-workspace path dependency into the source
@@ -192,7 +209,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.17.9"
+kglite = "=0.17.10"
 
 # The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
 # MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest
