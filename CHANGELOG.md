@@ -11,6 +11,23 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.17.9**, exactly pinned (was 0.17.7), which also
+  adopts 0.17.8. Three engine corrections reach the Cypher you type in the
+  viewer. A grouped count over a pattern — `MATCH (c)-[:CHILD_OF]->(p:Software)
+  WITH p, count(c)` — now respects the group node's label; it previously
+  answered from a peer histogram that counted peers of every label, so rows for
+  nodes you never asked about came back with a count, in every storage mode.
+  The same shape over two `MATCH` clauses now keeps the row multiplicity the
+  first pattern produced instead of dividing the count by it. And a
+  parenthesised label check such as `WHERE (a:Software OR a:Api)` parses
+  instead of failing with "Unexpected token in MATCH pattern: OR". The rest of
+  both releases is KGLite's new markdown-vault format, which the viewer does
+  not use. The portable `.kgl` checkpoint format is unchanged — a file written
+  by the new engine differs from one written by the old only in the engine
+  version it records.
+
 ## [0.1.12] - 2026-09-16
 
 ### Changed

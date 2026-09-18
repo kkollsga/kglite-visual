@@ -922,6 +922,28 @@ delivery via mcp-methods 0.4.11 — and this viewer neither embeds nor spawns
 KGLite's server. The portable `.kgl` checkpoint format is unchanged and the
 nine declarations above were re-greped and confirmed complete.
 
+The floor moved to `=0.17.9` on 2026-09-18, from `=0.17.7` in one step,
+carrying 0.17.8. Both releases are overwhelmingly the new `kglite::okf` vault
+format — the Obsidian dialect, `okf.validate`/`export`/`fingerprint`, the
+`structure:` profile and `kglite-mcp-server --vault` — and this workspace names
+none of it (`okf`, `ExportOptions`, `ExportReport`, `Profile`: zero hits across
+the tracked tree), so all six documented Rust breaks are unreachable from here.
+Three engine fixes *do* reach viewer-submitted Cypher and are adopted rather
+than worked around: a fused `MATCH … WITH <group>, count(…)` now keeps the
+pattern's node labels (it answered from a per-connection-type peer histogram
+that applied no filter for the group node's own label — a silent wrong answer
+in every storage mode), a fused two-`MATCH` aggregate keeps the first pattern's
+row multiplicity, and a parenthesised label check such as
+`WHERE (a:Software OR a:Api)` parses as a boolean expression instead of failing
+with "Unexpected token in MATCH pattern: OR". The `.kgl` header gains additive
+`source_root` and `source_fingerprint` fields written only by a vault build, so
+a graph this viewer loads or writes is byte-identical to before — established
+by regenerating the committed fixtures under the new engine, not by the
+unchanged-format claim alone. The disk-directory lease's `LOCK_UN` fix is real
+and out of reach here: this viewer opens `.kgl` files and holds no directory
+lease across a spawn. The nine declarations above were re-greped and confirmed
+complete; the count stays at nine.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves
