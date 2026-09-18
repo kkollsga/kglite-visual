@@ -1239,6 +1239,207 @@ mod tests {
         );
     }
 
+    /// KGLite 0.17.10 made a non-aggregating `WITH` a scope barrier again. It
+    /// projected the row's values but left the node binding in place, so a name
+    /// the projection dropped stayed silently bound and the second `MATCH`
+    /// anchored on the stale node instead of scanning — answering nothing at
+    /// all for a query the user can read as obviously satisfiable.
+    #[test]
+    fn query_route_frees_a_binding_a_with_projection_drops() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        execute_mut(
+            &mut graph,
+            "CREATE (:N {id: 'x'}) CREATE (:N {id: 'y'})",
+            &ExecuteOptions::eager(&empty),
+        )
+        .expect("fixture builds");
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (a:N {id: 'x'}) WITH 1 AS u MATCH (a:N {id: 'y'}) \
+                        RETURN a.id AS id"
+                    .to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("the rebinding query runs");
+
+        assert_eq!(table.columns, ["id"]);
+        assert_eq!(
+            table.data[0],
+            [serde_json::json!("y")],
+            "the second MATCH anchored on the node the WITH should have freed"
+        );
+    }
+
+    /// The same barrier, through `RETURN *`: a variable the `WITH` dropped is
+    /// out of scope, so the star must not list a column for it. Before 0.17.10
+    /// the stale binding survived and the results table grew a column naming a
+    /// variable the query no longer has.
+    #[test]
+    fn query_route_keeps_an_out_of_scope_variable_out_of_return_star() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        execute_mut(
+            &mut graph,
+            "CREATE (:N {id: 'x'})",
+            &ExecuteOptions::eager(&empty),
+        )
+        .expect("fixture builds");
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (a:N) WITH 1 AS u RETURN *".to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("the starred query runs");
+
+        assert_eq!(
+            table.columns,
+            ["u"],
+            "RETURN * listed a column for a variable the WITH dropped"
+        );
+    }
+
+    /// KGLite 0.17.10 made `*` expand when it is written beside another
+    /// projection item. Before it, the `*` was projected like an ordinary
+    /// expression — a column literally named `*` holding `1` — and every
+    /// value-carrying name in scope was dropped with the projection it
+    /// replaced, so `a` came back null.
+    #[test]
+    fn query_route_expands_a_star_written_beside_another_item() {
+        use kglite::api::DirGraph;
+
+        let graph = DirGraph::new();
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "UNWIND [1] AS a WITH *, a + 1 AS b RETURN a, b".to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("the starred projection runs");
+
+        assert_eq!(table.columns, ["a", "b"]);
+        assert_eq!(
+            table.data[0],
+            [serde_json::json!(1)],
+            "the star dropped the value-carrying name it should have carried"
+        );
+        assert_eq!(table.data[1], [serde_json::json!(2)]);
+    }
+
+    /// The row-losing half of the same defect: `WITH *, count(*)` grouped by the
+    /// constant the mis-projected star produced and folded the whole input into
+    /// one group, so a per-row aggregate answered one row instead of one per
+    /// row-scope.
+    #[test]
+    fn query_route_groups_a_starred_aggregate_per_row_scope() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        execute_mut(
+            &mut graph,
+            "CREATE (:N {id: 'x'}) CREATE (:N {id: 'y'}) CREATE (:N {id: 'z'})",
+            &ExecuteOptions::eager(&empty),
+        )
+        .expect("fixture builds");
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH (n:N) WITH *, count(*) AS c RETURN n.id AS id, c ORDER BY id"
+                    .to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("the starred aggregate runs");
+
+        assert_eq!(table.columns, ["id", "c"]);
+        assert_eq!(
+            table.data[0],
+            [
+                serde_json::json!("x"),
+                serde_json::json!("y"),
+                serde_json::json!("z")
+            ],
+            "the starred aggregate folded every row into one group"
+        );
+        assert_eq!(table.data[1], [1, 1, 1]);
+    }
+
+    /// KGLite 0.17.10 also made `*` list a path variable, which it never did.
+    /// That reaches the results table as a new column whose cells are paths, so
+    /// this pins the column set *and* that the viewer's JSON conversion renders
+    /// the path rather than dropping it to null.
+    #[test]
+    fn query_route_lists_a_path_variable_in_return_star() {
+        use kglite::api::session::execute_mut;
+        use kglite::api::DirGraph;
+
+        let mut graph = DirGraph::new();
+        let empty = HashMap::new();
+        for statement in [
+            "CREATE (:N {id: 'a'}) CREATE (:N {id: 'b'})",
+            "MATCH (a:N {id: 'a'}), (b:N {id: 'b'}) CREATE (a)-[:R]->(b)",
+        ] {
+            execute_mut(&mut graph, statement, &ExecuteOptions::eager(&empty))
+                .expect("fixture statement runs");
+        }
+
+        let table = run_cypher(
+            &graph,
+            &CypherRequest {
+                query: "MATCH p = (a:N)-[:R]->(b:N) RETURN *".to_string(),
+                params: Default::default(),
+                limit: None,
+                as_graph: false,
+            },
+            QueryConfig::default(),
+        )
+        .expect("the path-starred query runs");
+
+        assert!(
+            table.columns.contains(&"p".to_string()),
+            "RETURN * dropped the path variable: {:?}",
+            table.columns
+        );
+        let path_column = table
+            .columns
+            .iter()
+            .position(|c| c == "p")
+            .expect("the path column is listed");
+        assert!(
+            !table.data[path_column][0].is_null(),
+            "the path column rendered as null: {:?}",
+            table.data[path_column][0]
+        );
+    }
+
     /// The bug this file's warning forwarding exists to fix.
     ///
     /// Before it, this query answered `200` with an empty table and nothing
