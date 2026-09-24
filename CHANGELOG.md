@@ -11,6 +11,8 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-09-24
+
 ### Changed
 
 - **The engine is `kglite` 0.18.0**, exactly pinned (was 0.17.10), which also
