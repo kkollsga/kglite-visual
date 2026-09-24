@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Engine-facing core for kglite-visual: graph loading, session state, and the transport-agnostic wire protocol."
 
 [dependencies]
-# The engine, from crates.io. `=0.17.10` is EXACT on purpose (D11): kglite is
+# The engine, from crates.io. `=0.18.0` is EXACT on purpose (D11): kglite is
 # pre-1.0 and ships documented breaking changes in patch releases, so a caret
 # range would let a routine `cargo update` swap the engine under us. Moving
 # this floor means reading kglite's CHANGELOG and re-greping every declaration
@@ -193,6 +193,27 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # errors, so the floor move is adopted and pinned through this viewer's query
 # route rather than merely compiled. The `.kgl` checkpoint format is unchanged.
 #
+# Re-checked 2026-09-24: `0.18.0` is published and not yanked, and this move
+# carries 0.17.11 and 0.17.12 with it. Of the release's documented Rust breaks
+# only one reaches this workspace: `RelValue` gained an `incarnation` field, so
+# the one struct literal here (a unit test in `query.rs`) now calls
+# `RelValue::new`. `RawOp`, `WalGroup`, `ImportStats`, `EdgeBinding`,
+# `TextScoreRewrite`, the embedding import/export functions and
+# `api::durable::resolve_ops` are never named here, and neither is 0.17.12's
+# `RecipeRecord`. What reaches viewer-submitted Cypher is a set of engine
+# corrections, pinned in `tests/query_route_engine_fixes.rs`: `r.id`,
+# `r.start` and `` r.`end` `` fall back to the relationship envelope,
+# `labels(x)[i]` and `type()` / `startNode()` read values as well as bindings,
+# `shortestPath` honours its hop bounds, a MATCH property map accepts any
+# expression, and (0.17.11) a `CALL { }` body counting through an imported
+# property map no longer answers 0. One reaches the appearance menu:
+# `compute_property_stats` reports `mixed` for a property holding two value
+# types instead of the last write's type, so such a column is no longer offered
+# as a numeric channel. The `.kgl` header gains nothing a viewer-written file
+# carries (0.17.12's `source_build_version` / `source_options` stamps are
+# skipped when absent); the committed fixtures regenerate byte-identical apart
+# from the recorded engine version.
+#
 # NO `path` component, and its removal (P6) fixed a shipped defect rather than
 # tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
 # maturin vendors an out-of-workspace path dependency into the source
@@ -209,7 +230,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.17.10"
+kglite = "=0.18.0"
 
 # The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
 # MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest

@@ -1569,13 +1569,7 @@ mod tests {
             labels: vec!["Person".into()],
             properties: Default::default(),
         };
-        let rel = RelValue {
-            id: 9,
-            start_id: 1,
-            end_id: 2,
-            rel_type: "KNOWS".into(),
-            properties: Default::default(),
-        };
+        let rel = RelValue::new(9, 1, 2, "KNOWS".into(), Default::default());
         let rows = vec![vec![
             Value::List(vec![Value::Node(Box::new(node(1)))]),
             Value::Path(Box::new(PathValue {

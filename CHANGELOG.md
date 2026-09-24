@@ -11,6 +11,27 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine is `kglite` 0.18.0**, exactly pinned (was 0.17.10), which also
+  adopts 0.17.11 and 0.17.12. Several engine corrections reach the Cypher you
+  type in the viewer. On a relationship matched without stored `id`, `start`
+  or `end` properties, `r.id`, `r.start` and `` r.`end` `` now give the
+  relationship's id and its endpoints' ids instead of null. `labels(x)[0]`,
+  `type(r)` and `startNode(r)` answer for a node or relationship carried as a
+  value — `WITH startNode(r) AS s`, `collect(r)[0]` — where they answered null.
+  `shortestPath` respects its hop bounds, so `[:R*..2]` no longer returns a
+  three-hop path. A `MATCH` property map accepts any expression, so
+  `UNWIND $rows AS row MATCH (d:Doc {id: row[0]})` runs instead of failing to
+  parse. A `CALL { WITH n MATCH (c:Chunk {note_id: n.id}) RETURN count(c) }`
+  body counts its rows instead of answering 0. And a property that holds two
+  value types — a text column one later write gave a number — is reported as
+  `mixed` rather than as the type of its last write, so the appearance menu no
+  longer offers it as a numeric size or colour channel (nor as a caption); it
+  is offered as a categorical one when it has few enough values. The portable
+  `.kgl` checkpoint format is unchanged; a file written by the new engine
+  differs from one written by the old only in the engine version it records.
+
 ## [0.1.14] - 2026-09-19
 
 ### Changed

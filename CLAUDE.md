@@ -970,6 +970,29 @@ the MCP `cypher` tool — every place a person's own query text runs. The nine
 declarations above were re-greped and confirmed complete; the count stays at
 nine.
 
+The floor moved to `=0.18.0` on 2026-09-24, carrying 0.17.11 and 0.17.12. It is
+a minor with four `cargo-semver-checks` majors, and one reaches this workspace:
+`RelValue` gained an `incarnation` field, so the single struct literal here (a
+`query.rs` unit test) now calls `RelValue::new`. Every other documented break —
+`RawOp`/`WalGroup`, `ImportStats`, `EdgeBinding`, `TextScoreRewrite`, the
+embedding import/export arities, `resolve_ops`, 0.17.12's `RecipeRecord.tool` —
+names a surface this viewer never touches. What reaches it is behaviour, and
+the move pins it in `crates/kglite-visual-core/tests/query_route_engine_fixes.rs`,
+each case run against 0.17.10 and seen red first: `r.id` / `r.start` /
+`` r.`end` `` fall back to the envelope on a MATCH variable, `labels(x)[i]` and
+`type()` / `startNode()` read values as well as bindings, `shortestPath`
+honours its hop bounds, a MATCH property map accepts any expression
+(`{id: row[0]}` failed to parse), a `CALL { }` body counting through an
+imported property map no longer answers 0 (0.17.11), and — the one outside the
+query route — `compute_property_stats` reports `mixed` for a property holding
+two value types instead of its last write's type, so a string column one `SET`
+gave an integer is no longer offered as a numeric appearance channel. A `mixed`
+column is also no longer a caption candidate, which the "strings only" caption
+rule already required. The committed `.kgl` fixtures regenerate byte-identical
+apart from the recorded engine version and the header length field that moves
+with it. The nine declarations above were re-greped and confirmed complete; the
+count stays at nine.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves
