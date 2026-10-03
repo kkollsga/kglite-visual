@@ -993,6 +993,19 @@ apart from the recorded engine version and the header length field that moves
 with it. The nine declarations above were re-greped and confirmed complete; the
 count stays at nine.
 
+The floor moved to `=0.19.1` on 2026-10-03, carrying 0.19.0. The documented
+Rust breaks — four structs gaining a field (`blueprint::Settings`,
+`MaterializedLabel`, `RdfStats`, `RdfConfig`), `DirGraph::save_disk` returning
+`SaveError`, and 0.19.0's removed fluent temporal helpers and filter-argument
+signatures — name surfaces this workspace never constructs or calls, and the
+tree compiled unchanged. The one change that reaches a file is the `.kgl`
+container, now v7: the committed fixtures and `docs/_static/team.kgl`
+regenerate differing from their predecessors in the container byte, its header
+length field and the recorded engine version, and `kglite` 0.19.0 or older
+refuses them. The viewer opens graphs and never saves one, and v7, v6 and v5
+all load. The nine declarations above were re-greped and confirmed complete;
+the count stays at nine.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves
