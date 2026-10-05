@@ -11,6 +11,22 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-10-05
+
+### Changed
+
+- **The engine is `kglite` 0.19.3**, exactly pinned (was 0.19.1), which also
+  adopts 0.19.2. The viewer only reads graphs, and nothing it does changes: no
+  file you already have stops loading. Two engine changes can reach a query you
+  type in the viewer. On a graph that declares validity, an unprefixed
+  statement reads as of today instead of every version, and `degree()`,
+  `indegree()`, `outdegree()` and `shortest_path_length()` are refused under
+  that default. Adding a `duration` with months or years to a date now moves by
+  calendar months, so `date('2024-01-15') + duration({months: 1})` is
+  `2024-02-15`.
+  The downloadable `team.kgl` sample is regenerated and records the new engine
+  version.
+
 ## [0.1.16] - 2026-10-03
 
 ### Changed
