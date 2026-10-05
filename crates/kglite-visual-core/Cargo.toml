@@ -225,6 +225,12 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # version, and `kglite` 0.19.0 and older refuse them. This viewer only reads
 # graphs, and v7, v6 and v5 containers all load.
 #
+# Re-checked 2026-10-05: `0.19.3` is published and not yanked (0.19.2 was
+# PyPI-only, so on crates.io it follows 0.19.1) and this move carries 0.19.2.
+# The structs that gained fields (`blueprint::Settings` with `strict` and
+# `valid_time_default`, the report structs' `diagnostics`) are never
+# constructed by this workspace, and the tree compiled unchanged.
+#
 # NO `path` component, and its removal (P6) fixed a shipped defect rather than
 # tidying a preference. The sibling checkout sits OUTSIDE this workspace, and
 # maturin vendors an out-of-workspace path dependency into the source
@@ -241,7 +247,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.19.1"
+kglite = "=0.19.3"
 
 # The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
 # MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest

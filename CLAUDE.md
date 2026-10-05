@@ -746,8 +746,8 @@ list still said five), not assumed**:
    `importlib.metadata.version("kglite")` assertion enforces at runtime and
    which is copied into the production sidecar's provenance block — so a stale
    number here does not merely mislead, it fails the notebook or mislabels its
-   output. The adjacent markdown cell's "KGLite X.Y.Z still records a false
-   static schema warning" sentence states the pinned engine's *current*
+   output. The adjacent markdown cell's "KGLite X.Y.Z reports no static schema warning"
+   sentence states the pinned engine's *current*
    behaviour and moves with it.
 9. `scripts/check_sodir_notebook.py` — the `PIN_PATTERNS` entry, the gate that
    holds sites 7 and 8 to an exact pin. It is the checker, so it cannot catch
@@ -1005,6 +1005,19 @@ length field and the recorded engine version, and `kglite` 0.19.0 or older
 refuses them. The viewer opens graphs and never saves one, and v7, v6 and v5
 all load. The nine declarations above were re-greped and confirmed complete;
 the count stays at nine.
+
+The floor moved to `=0.19.3` on 2026-10-05, carrying 0.19.2 (PyPI-only; on
+crates.io 0.19.3 follows 0.19.1). The exact pin was the only version constraint
+and no upper bound blocked the move. The documented Rust breaks (`Settings`
+gaining `strict` and `valid_time_default`, diagnostics fields on the report
+structs) name surfaces this workspace never constructs, and the tree compiled
+unchanged. The default-today read, the `OF_<PARENT>` rename, calendar-month
+date arithmetic and the grouped build warnings concern graph building and
+statements this viewer does not issue on its own. One declaration changed
+meaning rather than number: 0.19.2 stopped the static schema lint from
+reporting a `ts_*()` channel as missing, so the SODIR notebook sentence and its
+parity-test entry now say 0.19.3 reports no such warning. The nine declarations
+above were re-greped and confirmed complete.
 
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the

@@ -12,7 +12,7 @@ use ts_rs::TS;
 
 use crate::CoreError;
 
-pub const ENGINE_VERSION: &str = "0.19.1";
+pub const ENGINE_VERSION: &str = "0.19.3";
 const MAX_CURRENT_BYTES: u64 = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -222,7 +222,7 @@ mod tests {
             ),
             (
                 "docs/_static/notebooks/sodir-geologist.ipynb",
-                format!("KGLite {ENGINE_VERSION} still records a false static schema warning"),
+                format!("KGLite {ENGINE_VERSION} reports no static schema warning"),
             ),
         ];
         assert_eq!(sites.len(), 8, "the enumeration lost a site");
