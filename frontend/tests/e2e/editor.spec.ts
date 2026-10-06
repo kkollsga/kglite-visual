@@ -92,17 +92,25 @@ test('the query editor: CodeMirror replaces the textarea and keeps its contract'
   }
 })
 
-/** Type at the caret and read back whatever the completion list is offering. */
-async function offered(page: Page, typed: string): Promise<string[]> {
+/**
+ * Type at the caret and read back the completion list once it offers `expected`.
+ *
+ * The tooltip opens on the first token typed (a keyword such as `MATCH`) and the
+ * schema entries replace it only when the engine answers, so the first tooltip
+ * is not the list for the finished text. Waiting for the entry the finished
+ * text must produce reads the list that matches it, however slow the answer.
+ */
+async function offered(page: Page, typed: string, expected: string): Promise<string[]> {
   await fillQuery(page, '')
   await page.locator(`${HOST} .cm-content`).click()
   await page.keyboard.type(typed, { delay: 20 })
-  await page.locator('.cm-tooltip-autocomplete').waitFor({ timeout: 10_000 })
   // The label span, not the whole row: a property row also carries the type it
   // belongs to as detail text, so `li.textContent` reads "titlePerson".
-  return page
+  const labels = () => page
     .locator('.cm-tooltip-autocomplete li .cm-completionLabel')
     .evaluateAll((items) => items.map((item) => item.textContent ?? ''))
+  await expect.poll(labels, { timeout: 10_000 }).toContain(expected)
+  return labels()
 }
 
 test('completions come from this graph, not from a word list', async ({ page }) => {
@@ -115,14 +123,14 @@ test('completions come from this graph, not from a word list', async ({ page }) 
     await expect(page.locator(`${HOST} .cm-content`)).toBeVisible()
 
     // ── ':' in a node pattern offers the fixture's node labels ───────────
-    const labels = await offered(page, 'MATCH (p:Pe')
+    const labels = await offered(page, 'MATCH (p:Pe', 'Person')
     expect(labels).toContain('Person')
     // Never the relationship vocabulary: the two are different halves of the
     // schema and offering both would make the list useless in both positions.
     expect(labels).not.toContain('KNOWS')
 
     // ── ':' inside brackets offers relationship types ────────────────────
-    const relationships = await offered(page, 'MATCH (p)-[:KN')
+    const relationships = await offered(page, 'MATCH (p)-[:KN', 'KNOWS')
     expect(relationships).toContain('KNOWS')
     expect(relationships).not.toContain('Person')
 
@@ -131,7 +139,7 @@ test('completions come from this graph, not from a word list', async ({ page }) 
     // are fetched on the first ask, so this also proves the re-query that lets
     // a late answer reach an already-open list.
     await expect
-      .poll(() => offered(page, 'MATCH (p:Person) RETURN p.ti'), { timeout: 15_000 })
+      .poll(() => offered(page, 'MATCH (p:Person) RETURN p.ti', 'title'), { timeout: 15_000 })
       .toContain('title')
 
     // ── an alias the scan cannot bind offers nothing ─────────────────────
