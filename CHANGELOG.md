@@ -11,6 +11,20 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-10-06
+
+### Changed
+
+- **The engine is `kglite` 0.19.4**, exactly pinned (was 0.19.3). The viewer
+  only reads graphs, so nothing you do changes: no file you already have stops
+  loading, and the viewer shows each node's title as the engine reports it.
+  Two engine changes can reach a graph you built yourself. A node loaded with
+  a `title` column and no declared title field is now titled from that column
+  instead of its id, and a node created without a title is titled from its id
+  (`<Label>_<id>`, or the id itself on a type titled by its ids). The
+  downloadable `team.kgl` sample is regenerated and records the new engine
+  version.
+
 ## [0.1.17] - 2026-10-05
 
 ### Changed

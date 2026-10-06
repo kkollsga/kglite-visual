@@ -1457,9 +1457,9 @@ dependencies = [
 
 [[package]]
 name = "kglite"
-version = "0.19.3"
+version = "0.19.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d1e053544017101f3aa864f3ba148b87d728b63bed6309768fc8bc4b94009d3"
+checksum = "ca1baa53605d09f5e0df57a9fe54522794d8b5aa3627c4398385ec4e7ee42e5b"
 dependencies = [
  "bzip2",
  "chrono",
@@ -1493,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "kglite-visual-cli"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1516,7 +1516,7 @@ dependencies = [
 
 [[package]]
 name = "kglite-visual-core"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "flate2",
  "kglite",
@@ -1532,7 +1532,7 @@ dependencies = [
 
 [[package]]
 name = "kglite-visual-py"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "kglite-visual-cli",
  "kglite-visual-core",

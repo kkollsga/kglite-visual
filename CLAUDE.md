@@ -1019,6 +1019,19 @@ reporting a `ts_*()` channel as missing, so the SODIR notebook sentence and its
 parity-test entry now say 0.19.3 reports no such warning. The nine declarations
 above were re-greped and confirmed complete.
 
+The floor moved to `=0.19.4` on 2026-10-06. The exact pin was the only version
+constraint and no upper bound blocked the move. The documented Rust breaks
+(`DeclareReport` carrying `warnings`/`diagnostics` vectors, `Value::Int64` where
+`Value::UniqueId` read back, `update_node_properties` returning `Err` on a
+validity-interval breach) name surfaces this workspace never calls, and the tree
+compiled unchanged. The title change reaches the viewer only through the engine:
+`view.title()` is displayed as reported, the committed fixtures and tests load
+nodes through Cypher `CREATE` with `id`/`title` keys, and all 534 Rust tests and
+the 53 wheel tests passed with no edit. The three `.kgl` files that record the
+engine version (two test fixtures and `docs/_static/team.kgl`) regenerate
+differing by that one byte. The nine declarations above were re-greped and
+confirmed complete; the count stays at nine.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves
