@@ -247,7 +247,7 @@ description = "Engine-facing core for kglite-visual: graph loading, session stat
 # Cargo.lock's kglite entry to a sourceless path entry, so the committed
 # lockfile must be restored before committing — which is exactly why the patch
 # is opt-in and out of tree.
-kglite = "=0.19.4"
+kglite = "=0.19.6"
 
 # The rasteriser behind `RenderFormat::Png` (D13). Pure Rust, MIT/Apache-2.0,
 # MSRV 1.85 — below this workspace's 1.88. `tiny-skia` is NOT a second manifest

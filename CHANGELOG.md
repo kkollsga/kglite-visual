@@ -11,6 +11,19 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-10-10
+
+### Changed
+
+- **The engine is `kglite` 0.19.6**, exactly pinned (was 0.19.4), which also
+  adopts 0.19.5. The viewer only reads graphs, so no file you already have
+  stops loading. Two engine changes can reach what you type in the query
+  panel. A column you do not alias with `AS` is now headed by the text you
+  wrote (`RETURN toInteger('3')` shows `toInteger('3')`, where it showed
+  `tointeger(3)`). A graph whose ontology declares a rule at `warn` or `error`
+  now judges writes, so a mutating statement can be refused or report
+  violations. The downloadable `team.kgl` sample is regenerated.
+
 ## [0.1.18] - 2026-10-06
 
 ### Changed
