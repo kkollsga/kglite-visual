@@ -11,6 +11,27 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-10-12
+
+### Changed
+
+- **The engine is `kglite` 0.20.0**, exactly pinned (was 0.19.6). The viewer
+  only reads graphs, and it still opens `.kgl` files written by older
+  releases. Files written by 0.20.0 (`.kgl` v8) cannot be opened by an older
+  `kglite`, so upgrade `kglite` wherever you share one with this viewer. The
+  downloadable `team.kgl` sample is regenerated and records the new engine
+  version. `datetime()` in the query panel now returns a zoned datetime that
+  keeps its offset (`2024-03-15T10:30+02:00`), and `localtime()` and `time()`
+  return time values.
+
+### Fixed
+
+- **Results tables, record cells and the MCP `cypher` tool show the new
+  engine's temporal values.** A zoned datetime is a timestamp cell in ISO text
+  with its offset, a time of day is a text cell (`10:00+01:00`), and a duration
+  below one second shows its fraction (`0.5` seconds), where the engine's
+  sub-second durations had no way into a cell.
+
 ## [0.1.19] - 2026-10-10
 
 ### Changed

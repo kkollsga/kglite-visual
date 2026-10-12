@@ -284,6 +284,23 @@ fn truncated(value: &Value, reason: &str) -> RecordCell {
     }
 }
 
+/// Whole seconds as before; a sub-second duration carries its fraction as a
+/// signed decimal (`seconds: -1, nanos: 500_000_000` is `-0.5`).
+fn duration_seconds(seconds: i64, nanos: i32) -> String {
+    if nanos == 0 {
+        return seconds.to_string();
+    }
+    let total = i128::from(seconds) * 1_000_000_000 + i128::from(nanos);
+    let sign = if total < 0 { "-" } else { "" };
+    let magnitude = total.unsigned_abs();
+    let fraction = format!("{:09}", magnitude % 1_000_000_000);
+    format!(
+        "{sign}{}.{}",
+        magnitude / 1_000_000_000,
+        fraction.trim_end_matches('0')
+    )
+}
+
 /// Also used for source keys; a refused key remains inspectable through its handle.
 pub fn typed_value(value: &Value, depth: usize) -> Result<TypedValue, &'static str> {
     let mut budget = MAX_CELL_BYTES;
@@ -322,11 +339,22 @@ fn typed_with_budget(
             months,
             days,
             seconds,
+            nanos,
         } => TypedValue::Duration {
             months: *months,
             days: *days,
-            seconds: seconds.to_string(),
+            seconds: duration_seconds(*seconds, *nanos),
         },
+        // ISO text from the engine's own JSON converter, the spelling its
+        // `toString` prints. A zoned datetime is a point in time and rides the
+        // timestamp channel; a time of day has no date, so it stays text and
+        // is never read as a chart's time axis.
+        Value::ZonedDateTime { .. } => {
+            TypedValue::Timestamp(crate::values::value_to_display(value))
+        }
+        Value::LocalTime(_) | Value::Time { .. } => {
+            TypedValue::String(crate::values::value_to_display(value))
+        }
         Value::Null => TypedValue::Null,
         Value::List(items) if items.len() <= MAX_COLLECTION_ITEMS => TypedValue::List(
             items
