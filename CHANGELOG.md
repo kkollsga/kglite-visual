@@ -11,6 +11,15 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-10-24
+
+### Changed
+
+- **The engine is `kglite` 0.21.2**, exactly pinned (was 0.21.1). The viewer
+  only reads graphs, so no behaviour changes. The committed `.kgl` fixtures and
+  the downloadable `team.kgl` sample are regenerated and record the new engine
+  version.
+
 ## [0.1.21] - 2026-10-24
 
 ### Security

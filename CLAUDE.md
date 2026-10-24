@@ -1078,6 +1078,15 @@ it at 1,090 bytes on the spilling path. `meta.kgl` and `team.kgl` stay v8 and
 changed only in the recorded engine version. The nine declarations above were
 re-greped and confirmed complete; the count stays at nine.
 
+The floor moved to `=0.21.2` on 2026-10-24. Nothing needed a code edit: the
+viewer asserts no engine `format_version` (the `format_version` in `views.rs` is
+the view catalog's own), and `spill.kgl` stays on the compact layout so its
+load still spills. Fixtures and `team.kgl` regenerated with the new engine
+version only. The typed time-series warning the SODIR notebook silences no
+longer reproduces on 0.21.2 (a `ts_series` projection over configured channels
+returns its points with no warnings); the notebook's silencing guard is kept
+and still rejects any unexpected warning.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves
