@@ -77,9 +77,10 @@ pub struct LoadLimits {
 
 impl LoadLimits {
     fn to_options(self) -> LoadOptions {
-        LoadOptions {
-            max_load_bytes: self.max_load_mb.map(|mb| mb.saturating_mul(1024 * 1024)),
-            ..Default::default()
+        let options = LoadOptions::new();
+        match self.max_load_mb {
+            Some(mb) => options.with_max_load_bytes(Some(mb.saturating_mul(1024 * 1024))),
+            None => options,
         }
     }
 }

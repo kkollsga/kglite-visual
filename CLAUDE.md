@@ -1063,6 +1063,21 @@ the query panel, the `--cypher` route and the MCP `cypher` tool. The nine
 declarations above were re-greped and confirmed complete; the count stays at
 nine.
 
+The floor moved to `=0.21.1` on 2026-10-24, carrying 0.21.0. The exact pin was
+the only version constraint. The one compile break was `LoadOptions` becoming
+`#[non_exhaustive]`: `loader.rs::LoadLimits::to_options` now builds it with
+`LoadOptions::new()` and `with_max_load_bytes`. No exhaustive match over
+`GraphBackend`, `KgError` or `KgErrorCode`, no `GraphInfo` literal and no
+`Value` match needed an edit, and the viewer never writes to a graph, so
+`WriteBudgetExceeded` is unreachable here. A default save now writes container
+v9 for a column of 256 KB or more, and a v9 load maps that column instead of
+spilling it to `$TMPDIR`: `spill.kgl` regenerated at 329 KB and
+`tests/shutdown.rs` saw no spill directory (its non-vacuity guard fired).
+`examples/make_fixture.rs` now writes it with `SaveLayout::Compact`, which keeps
+it at 1,090 bytes on the spilling path. `meta.kgl` and `team.kgl` stay v8 and
+changed only in the recorded engine version. The nine declarations above were
+re-greped and confirmed complete; the count stays at nine.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves

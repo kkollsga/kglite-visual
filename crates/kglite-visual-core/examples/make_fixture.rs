@@ -36,7 +36,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use kglite::api::graphgen;
-use kglite::api::io::{load_file, prepare_kgl_write, write_kgl};
+use kglite::api::io::{
+    load_file, prepare_kgl_write, save_graph_with_layout, write_kgl, SaveLayout,
+};
 use kglite::api::session::{execute_mut, ExecuteOptions};
 use kglite::api::{DirGraph, GraphGenConfig, SpatialConfig, Value};
 use kglite_visual_core::{meta_graph, View};
@@ -213,7 +215,16 @@ fn write_spill_fixture(fixtures: &Path) -> Result<(), Box<dyn std::error::Error>
     let mut graph = Arc::new(graph);
     prepare_kgl_write(&mut graph);
     let path = fixtures.join("spill.kgl");
-    write_kgl(&graph, path.to_str().expect("ASCII fixture path"))?;
+    // `Compact` is load-bearing: the default layout writes a column this large
+    // raw (container v9), and a v9 load maps it from the file instead of
+    // spilling it, so the shutdown test would find no spill directory. Compact
+    // keeps the file at ~1 KB and the load on the spilling path.
+    save_graph_with_layout(
+        &mut graph,
+        path.to_str().expect("ASCII fixture path"),
+        false,
+        SaveLayout::Compact,
+    )?;
     eprintln!(
         "wrote {} ({} bytes, {} KiB payload column)",
         path.display(),

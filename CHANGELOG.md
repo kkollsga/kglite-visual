@@ -11,6 +11,18 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-10-24
+
+### Changed
+
+- **The engine is `kglite` 0.21.1**, exactly pinned (was 0.20.0). The viewer
+  only reads graphs, so none of the new write-budget behaviour reaches it. It
+  now opens `.kgl` v9 files, which `kglite` 0.21 writes by default for large
+  graphs and which a viewer on 0.20.0 or older refuses ("File uses .kgl
+  container version 9"). Older v8, v7, v6 and v5 files still load. The
+  downloadable `team.kgl` sample is regenerated and records the new engine
+  version.
+
 ## [0.1.20] - 2026-10-12
 
 ### Changed
