@@ -13,6 +13,12 @@ appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
 
 ## [0.1.21] - 2026-10-24
 
+### Security
+
+- **The bundled `dompurify` is 3.4.17** (was 3.4.16), which fixes three
+  advisories rated critical: GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr and
+  GHSA-c6gr-qvv4-5v3f. It reaches the viewer through `@cosmos.gl/graph`.
+
 ### Changed
 
 - **The engine is `kglite` 0.21.1**, exactly pinned (was 0.20.0). The viewer
