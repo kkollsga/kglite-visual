@@ -11,6 +11,26 @@ appear here (AGENTS.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-10-29
+
+### Breaking
+
+- **Python 3.12 or newer is required** (was 3.10). The wheel is now built for
+  `abi3-py312`, and CI tests it on 3.12, 3.13, 3.14 and 3.15. On Python 3.10 and
+  3.11 pip keeps installing kglite-visual 0.1.22, which pins `kglite` 0.21.2;
+  stay on it there.
+
+### Changed
+
+- **The engine is `kglite` 0.21.4**, exactly pinned (was 0.21.2). The viewer
+  only reads graphs, so no behaviour changes. The committed `.kgl` fixtures and
+  the downloadable `team.kgl` sample are regenerated and record the new engine
+  version.
+- **Dependencies are at their latest releases**: `pyo3` 0.30, `resvg` 0.49,
+  `rmcp` 3.8 and `base64` 0.23 on the Rust side, and `@cosmos.gl/graph` 3.5.1, the CodeMirror packages,
+  `vite` and `@playwright/test` on the frontend. Building from source needs Rust
+  1.89 (was 1.88).
+
 ## [0.1.22] - 2026-10-24
 
 ### Changed

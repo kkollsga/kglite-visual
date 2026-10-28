@@ -15,7 +15,7 @@ resolver = "2"
 # full enumeration, and why counting beats assuming, is in AGENTS.md →
 # "Commits & releases".
 [workspace.package]
-version = "0.1.22"
+version = "0.1.23"
 # 1.89 is the highest `rust-version` in the resolved tree (uuid 1.29, reached
 # through rmcp 3.8); kglite itself needs 1.88. A lower number here would be a
 # claim no build ever tests.
