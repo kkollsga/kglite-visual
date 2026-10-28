@@ -1087,6 +1087,13 @@ longer reproduces on 0.21.2 (a `ts_series` projection over configured channels
 returns its points with no warnings); the notebook's silencing guard is kept
 and still rejects any unexpected warning.
 
+The floor moved to `=0.21.3` on 2026-10-28. Nothing needed a code edit; the
+zstd floor (0.14.3) rides in through the engine. The fixtures and `team.kgl`
+were regenerated with the new engine version only, and `spill.kgl` stays on
+the compact layout. The nine declarations above were re-greped and confirmed
+complete; the count stays at nine. The same release made the engine wheel
+Python 3.12+, so this project's floor and abi3 target moved to 3.12 with it.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves
