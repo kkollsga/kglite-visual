@@ -45,7 +45,7 @@ futures-util = "0.3.34"
 #
 # `transport-io` is deliberately absent: there is no stdio mode here. This MCP
 # server exists to steer a RUNNING view, and a stdio process has no view.
-rmcp = { version = "3.1.1", features = [
+rmcp = { version = "3.8.0", features = [
     "server",
     "macros",
     "schemars",
@@ -54,9 +54,9 @@ rmcp = { version = "3.1.1", features = [
 # rmcp derives every tool's input schema through this. One requirement, matching
 # the estate's, so a tool schema means the same thing on both servers.
 schemars = "1"
-# Images ride in an MCP reply as base64. 0.22 is already in this tree through
+# Images ride in an MCP reply as base64. 0.23 is already in this tree through
 # rmcp; a second major would be a second copy of one encoder.
-base64 = "0.22"
+base64 = "0.23"
 
 # The saved-query store's home and its filenames. Both are already in this
 # tree — `dirs` through rust-embed's proc macro, `sha2` through kglite AND
@@ -68,7 +68,7 @@ base64 = "0.22"
 dirs = "6"
 sha2 = "0.11"
 # Saved views require one cross-process catalog transaction. fs2 0.4.3 is
-# already locked and supports the Rust 1.88 floor; std file-lock APIs do not.
+# already locked and supports the Rust 1.89 floor; std file-lock APIs do not.
 fs2 = "=0.4.3"
 
 [dev-dependencies]

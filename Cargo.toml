@@ -16,9 +16,10 @@ resolver = "2"
 # "Commits & releases".
 [workspace.package]
 version = "0.1.22"
-# kglite's own MSRV. This project embeds that engine, so its floor is ours;
-# a lower number here would be a claim no build ever tests.
-rust-version = "1.88"
+# 1.89 is the highest `rust-version` in the resolved tree (uuid 1.29, reached
+# through rmcp 3.8); kglite itself needs 1.88. A lower number here would be a
+# claim no build ever tests.
+rust-version = "1.89"
 edition = "2021"
 license = "MIT"
 authors = ["Kristian dF Kollsgård <kkollsg@gmail.com>"]

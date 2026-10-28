@@ -21,7 +21,7 @@
 //!   SIMD-backed on some targets and scalar on others; glam makes no
 //!   cross-target bit-identity promise.
 //! - `graph-explorer-layout` 0.7.0 declares `rust-version = 1.90`, above this
-//!   workspace's 1.88 MSRV (which is kglite's).
+//!   workspace's 1.89 MSRV.
 //!
 //! So: ~120 lines here, with the determinism discipline the P2 lattice
 //! established.

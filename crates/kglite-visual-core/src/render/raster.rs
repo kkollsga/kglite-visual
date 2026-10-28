@@ -5,8 +5,8 @@
 //! of the same request cannot disagree about anything. No JPEG, ever — it is
 //! the wrong codec for line art, and a graph is nothing but line art.
 //!
-//! **`resvg` 0.48, pure Rust, MIT/Apache-2.0, MSRV 1.85** (below this
-//! workspace's 1.88, which is kglite's). `tiny_skia` comes through resvg's own
+//! **`resvg` 0.49, pure Rust, MIT/Apache-2.0, MSRV 1.85** (below this
+//! workspace's 1.89). `tiny_skia` comes through resvg's own
 //! re-export rather than a second manifest entry: two independent version
 //! requirements on the same rasteriser is a place a `cargo update` can produce
 //! two copies of it, one of which the renderer does not use.
