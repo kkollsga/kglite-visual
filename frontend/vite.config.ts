@@ -1,8 +1,19 @@
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
+
+// The alias target below must exist, or the alias silently resolves nowhere.
+// Failing here names the cause instead of a rolldown "No such file" error.
+const GL_BENCH_ESM = fileURLToPath(
+  new URL('./node_modules/gl-bench/dist/gl-bench.module.js', import.meta.url),
+)
+if (!existsSync(GL_BENCH_ESM)) {
+  throw new Error(`vite.config: gl-bench ESM build missing at ${GL_BENCH_ESM}; see the alias comment`)
+}
 
 export default defineConfig({
   resolve: {
-    alias: {
+    alias: [
       // Upstream packaging bug, worked around here rather than upstream:
       // gl-bench 1.0.42 (a hard dependency of @cosmos.gl/graph, which does
       // `import GLBench from 'gl-bench'`) points its `browser` field at
@@ -14,10 +25,14 @@ export default defineConfig({
       // narrower than reordering resolve.mainFields globally, which would
       // change resolution for every other dependency too.
       //
+      // Exact match only (`/^gl-bench$/`): @cosmos.gl/graph 3.4.2+ also imports
+      // `gl-bench/dist/gl-bench.module.js` itself, which a string alias would
+      // prefix-match and rewrite into a doubled, nonexistent path.
+      //
       // Delete this the day gl-bench ships a correct `browser` build — and
       // check by removing it, not by reading a changelog.
-      'gl-bench': 'gl-bench/dist/gl-bench.module.js',
-    },
+      { find: /^gl-bench$/, replacement: GL_BENCH_ESM },
+    ],
   },
   // Relative, not '/'. The bundle is served three ways — the CLI's embedded
   // static handler, the Python wheel, and jupyter-server-proxy under a path
