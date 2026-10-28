@@ -244,10 +244,14 @@ jobs:
           retention-days: 7
 
   python:
-    name: Python wheel — pytest + packaged consumer
+    name: Python ${{ matrix.python }} wheel — pytest + packaged consumer
     needs: [frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13', '3.14', '3.15']
     steps:
       - uses: actions/checkout@v7
       - name: Download the production bundle
@@ -255,12 +259,14 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
-      # 3.10 is the abi3 floor the extension is built against. Testing on the
-      # floor is the point: a wheel that only works on the newest interpreter
-      # is a wheel whose `requires-python` lies.
+      # 3.12 is the abi3 floor the extension is built against and 3.15 the
+      # newest supported interpreter. Testing on the floor is the point: a
+      # wheel that only works on the newest interpreter is a wheel whose
+      # `requires-python` lies.
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

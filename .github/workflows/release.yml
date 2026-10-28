@@ -109,8 +109,8 @@ jobs:
           done
 
   # Windows + macOS build natively. macOS builds arm64 (native on the arm
-  # runner) and x86_64 (cross — Apple ships both SDKs). One abi3-py310 wheel
-  # per target serves every Python from 3.10 up, so there is no per-Python
+  # runner) and x86_64 (cross — Apple ships both SDKs). One abi3-py312 wheel
+  # per target serves every Python from 3.12 up, so there is no per-Python
   # matrix leg.
   #
   # Every leg builds the frontend FIRST. `frontend/dist` is gitignored build
@@ -147,7 +147,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.10'
+          python-version: '3.12'
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -272,7 +272,7 @@ jobs:
           args: --release -m crates/kglite-visual-py/Cargo.toml --out wheels
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.10'
+          python-version: '3.12'
       - name: Wheel inventory
         run: |
           set -euo pipefail
@@ -364,7 +364,7 @@ jobs:
       - uses: actions/setup-python@v7
         if: steps.cross-build.outcome == 'success'
         with:
-          python-version: '3.10'
+          python-version: '3.12'
       # Inventory only — an aarch64 wheel cannot be imported on an x86_64
       # runner. The inventory half is the platform-independent one, and it is
       # the half that catches the missing-frontend-bundle failure. It fails the
@@ -409,7 +409,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.10'
+          python-version: '3.12'
       - uses: actions/setup-node@v7
         with:
           node-version: '22'

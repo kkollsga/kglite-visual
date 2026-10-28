@@ -5,8 +5,8 @@
 [![License: MIT](https://img.shields.io/pypi/l/kglite-visual)](https://github.com/kkollsga/kglite-visual/blob/main/LICENSE)
 [![Docs](https://img.shields.io/readthedocs/kglite-visual)](https://kglite-visual.readthedocs.io)
 
-<!-- The pyversions badge reads `requires-python` (>=3.10). The extension is
-     abi3-py310, so one wheel per platform serves every CPython from 3.10 up
+<!-- The pyversions badge reads `requires-python` (>=3.12). The extension is
+     abi3-py312, so one wheel per platform serves every CPython from 3.12 up
      and there are deliberately no per-version classifiers to keep in step.
      The Docs badge stays red until the project is imported on readthedocs.org
      under the slug `kglite-visual`; .readthedocs.yaml already carries the

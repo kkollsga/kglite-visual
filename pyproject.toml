@@ -10,7 +10,7 @@ description = "Interactive WebGL visualization for .kgl knowledge graphs"
 # pointing at a missing file fails the build rather than degrading — the pair
 # lands together or not at all.
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -23,7 +23,7 @@ keywords = ["graph", "knowledge-graph", "visualization", "webgl", "kglite"]
 # what ships, so it moves when the matrix moves.
 #
 # Deliberately NO per-version `Programming Language :: Python :: 3.1x` lines.
-# The extension is abi3-py310, so every 3.10+ interpreter is supported by
+# The extension is abi3-py312, so every 3.12+ interpreter is supported by
 # construction and `requires-python` already says so exactly; an enumerated
 # list would need a commit per Python release and is a false claim the moment
 # it lags one.

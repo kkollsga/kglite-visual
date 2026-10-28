@@ -23,8 +23,8 @@ default = ["abi3"]
 # `cargo build`/`cargo test` leaves it off so the crate still links against a
 # real libpython instead of failing at link time.
 python-extension = ["pyo3/extension-module"]
-# One cdylib for every Python from 3.10 up.
-abi3 = ["pyo3/abi3-py310"]
+# One cdylib for every Python from 3.12 up.
+abi3 = ["pyo3/abi3-py312"]
 
 [dependencies]
 # 0.29 matches KGLite's wheel. Two extension modules that link different pyo3
