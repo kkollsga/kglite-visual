@@ -44,7 +44,7 @@ use kglite_visual_core::subset::SubsetRequest;
 use kglite_visual_core::{geometry_caveat, ExportFormat, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler};
@@ -1681,8 +1681,8 @@ impl ViewControl {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for ViewControl {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(
                 "kglite-visual",
                 env!("CARGO_PKG_VERSION"),
