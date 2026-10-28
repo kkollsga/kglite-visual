@@ -93,7 +93,7 @@ reads and writes the developer's own [saved queries](concepts/storage.md).
 
 ## Conventions
 
-The full engineering doctrine lives in `CLAUDE.md` at the repo root — build and
+The full engineering doctrine lives in `AGENTS.md` at the repo root — build and
 test policy, commit and release rules, performance protocol, the code-health
 bar. Two rules that shape almost every diff:
 

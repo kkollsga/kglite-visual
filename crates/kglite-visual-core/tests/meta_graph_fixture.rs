@@ -132,7 +132,7 @@ fn capability_badges_survive_the_kgl_round_trip() {
 
 #[test]
 fn positions_match_the_committed_baseline() {
-    // The baseline is an exact gate (CLAUDE.md → "Gate honesty"). A red diff
+    // The baseline is an exact gate (AGENTS.md → "Gate honesty"). A red diff
     // here after a deliberate layout change is regenerated *with a reason*,
     // in the same commit; it is never regenerated to silence a diff.
     let session = open_fixture();

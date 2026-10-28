@@ -88,8 +88,8 @@ DOCS_VENV_STAMP = $(DOCS_VENV)/.kglv-docs-tooling
 DOCS_OUT = target/docs
 
 .PHONY: help gate lint self-test clean-build prune \
-        check-dev-docs check-skill-mirrors check-bans check-licenses check-build-dirs \
-        check-generated-ts check-protocol-baseline check-bundle sync-agents \
+        check-dev-docs check-skill-layout check-bans check-licenses check-build-dirs \
+        check-generated-ts check-protocol-baseline check-bundle \
         rust-fmt rust-clippy rust-test cli-build fixture e2e \
         frontend-install frontend-typecheck frontend-build frontend-audit \
         py-venv py-venv-refresh py-develop pytest wheel check-packaged-consumer \
@@ -112,9 +112,9 @@ help:  ## List the targets
 # every cargo step downstream of it compiles against whatever bundle is on
 # disk. Building the bundle, checking it is newer than its sources, and only
 # then compiling the binary is the order that makes the stale-bundle trap
-# (CLAUDE.md → "Two toolchains, one gate") unreachable instead of merely
+# (AGENTS.md → "Two toolchains, one gate") unreachable instead of merely
 # documented.
-gate: check-dev-docs check-skill-mirrors check-bans check-build-dirs \
+gate: check-dev-docs check-skill-layout check-bans check-build-dirs \
       check-licenses frontend-typecheck frontend-build check-bundle \
       rust-fmt rust-clippy rust-test check-generated-ts check-protocol-baseline \
       check-render-baseline check-docs-sample \
@@ -122,7 +122,7 @@ gate: check-dev-docs check-skill-mirrors check-bans check-build-dirs \
 	@echo ""
 	@echo "gate: 19 checks ran, 0 absent."
 
-lint: check-dev-docs check-skill-mirrors check-bans check-licenses rust-fmt rust-clippy frontend-typecheck  ## Static checks only — no test execution
+lint: check-dev-docs check-skill-layout check-bans check-licenses rust-fmt rust-clippy frontend-typecheck  ## Static checks only — no test execution
 
 # The R4 bound. Reports, never deletes: deciding whether something is
 # reproducible, and which tier it belongs in, is a judgement the script must
@@ -130,10 +130,11 @@ lint: check-dev-docs check-skill-mirrors check-bans check-licenses rust-fmt rust
 check-dev-docs:  ## FAIL if dev-docs/ exceeds DEV_DOCS_MAX_MB; warn on overdue tiers
 	@$(PYTHON) scripts/check_dev_docs.py --max-mb $(DEV_DOCS_MAX_MB)
 
-# The R7 mirror. Two harness adapters that disagree do not merely lag — the
-# stale one teaches a procedure the live one warns against.
-check-skill-mirrors:  ## Assert .agents/ is an unmodified adapter of the authority
-	@$(PYTHON) scripts/check_skill_mirrors.py
+# The R7 layout: one real skills folder, with .claude/skills linked to it. A
+# second real tree is what drifts and teaches a procedure the live one warns
+# against.
+check-skill-layout:  ## Assert .agents/skills is real and .claude/skills links to it
+	@$(PYTHON) scripts/check_skill_layout.py
 
 # Two bans whose violation is silent: a CC-BY-NC renderer that works perfectly
 # while making the repo unshippable, and a second global allocator that
@@ -253,7 +254,7 @@ check-bundle:  ## FAIL if frontend/dist is older than frontend/src
 # check-generated-ts: `cargo test` rewrites it, and this asserts nothing moved.
 # A red here after a deliberate protocol change is regenerated in the same
 # commit, with the version bumped and the reason stated — never to silence a
-# diff nobody can explain (CLAUDE.md → "Gate honesty").
+# diff nobody can explain (AGENTS.md → "Gate honesty").
 check-protocol-baseline:  ## FAIL if the committed protocol framing baseline moved
 	@$(SAVE_GENERATED_MTIMES)
 	@$(CARGO) test -p kglite-visual-core --quiet
@@ -282,7 +283,7 @@ check-protocol-baseline:  ## FAIL if the committed protocol framing baseline mov
 # a moved circle. Same shape otherwise — `cargo test` regenerates, this asserts
 # nothing moved — and the same rule applies: a red here after a deliberate
 # encoding, layout or emitter change is regenerated in the same commit with the
-# reason stated, never to silence a diff nobody can explain (CLAUDE.md → "Gate
+# reason stated, never to silence a diff nobody can explain (AGENTS.md → "Gate
 # honesty").
 check-render-baseline:  ## FAIL if the committed golden SVG renders moved
 	@$(SAVE_GENERATED_MTIMES)
@@ -448,17 +449,11 @@ frontend-audit:  ## Report production-dependency advisories (never fails the gat
 	@cd frontend && $(NPM) audit --omit=dev || \
 	  echo "frontend-audit: WARN advisories or no network — see above; CI owns the failing version"
 
-# Regenerate, never merge. If the adapter diverged because someone edited it,
-# that edit is LOST here — classify the divergence and merge any improvement
-# into the authority FIRST (doctrine R7 + R14).
-sync-agents:  ## Regenerate .agents/ + AGENTS.md from the CLAUDE.md authority
-	@$(PYTHON) scripts/check_skill_mirrors.py --sync
-
 # A verification that has never been seen failing is not yet a verification
 # (doctrine R1). Every checker carries a self-test; run it after touching one.
 self-test: wheel  ## Prove the gate's checks can actually fail
 	@$(PYTHON) scripts/check_dev_docs.py --self-test
-	@$(PYTHON) scripts/check_skill_mirrors.py --self-test
+	@$(PYTHON) scripts/check_skill_layout.py --self-test
 	@$(PYTHON) scripts/check_bans.py --self-test
 	@$(PYTHON) scripts/check_licenses.py --self-test
 	@$(PYTHON) scripts/check_bundle.py --self-test

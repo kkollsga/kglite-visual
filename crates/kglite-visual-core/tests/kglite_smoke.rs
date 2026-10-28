@@ -1,6 +1,6 @@
 //! Proves the pinned kglite dependency is more than a manifest line.
 //!
-//! "It compiles" is a weak test (CLAUDE.md → "A reported status is not the
+//! "It compiles" is a weak test (AGENTS.md → "A reported status is not the
 //! result"): a dependency floor can compile and still misbehave, and this one
 //! crosses a data boundary — the `.kgl` file. So the test writes a real graph
 //! through the engine, reads it back through *our* loader, and checks the

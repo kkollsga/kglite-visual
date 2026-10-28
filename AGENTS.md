@@ -1,4 +1,4 @@
-# kglite-visual — Claude Code Conventions
+# kglite-visual — Agent Conventions
 
 Interactive, high-performance visualization for `.kgl` knowledge-graph files
 produced by [KGLite](https://github.com/kkollsga/kglite) (sibling repo, same
@@ -54,14 +54,10 @@ The rules cited by ID (`R4`, `R11`, `R16`, …) are the estate's numbered
 invariants in `../doctrine/rules/RULES.md`. Cite them; don't paraphrase them
 into something weaker.
 
-**Authority:** `CLAUDE.md` is the authority this repo's agent instructions are
-regenerated from, and `.claude/skills/` is the authority for `.agents/skills/`;
-`AGENTS.md` and `.agents/` are generated adapters. Edit the authority and
-regenerate in the same action (`make sync-agents`) — never edit an adapter.
-(This line is exempt from the naming substitution — it names the authority
-literally in every copy, per doctrine `R7`/`R14`. A substituted declaration
-inverts itself and tells the adapter's reader to edit the adapter, which is
-what two estate repos did on the day that procedure landed.)
+**Authority:** `AGENTS.md` is this repo's agent instructions; there is no
+`CLAUDE.md` (Claude Code loads `AGENTS.md` in its place). `.agents/skills/`
+holds the skills; `.claude/skills` is a symlink to it so Claude Code finds them.
+`make check-skill-layout` asserts that layout.
 
 ## Working style
 
@@ -168,7 +164,7 @@ make gate           # the local pre-push gate. Runs what exists; reports the
                     # rest as ABSENT — never as passing.
 make lint           # static checks only: bans, fmt, clippy, tsc
 make self-test      # prove every checker in the gate can go red (R1)
-make sync-agents    # regenerate the .agents/ adapter from the authority
+make check-skill-layout  # AGENTS.md + .agents/skills real, .claude/skills linked
 make clean-build    # delete target/, node_modules/, frontend/dist/
 make e2e            # browser end-to-end smoke (Playwright + SwiftShader)
 make fixture        # regenerate the committed .kgl fixture; verifies byte-stability
@@ -189,7 +185,7 @@ cd frontend && npm ci && npm run typecheck && npm run build
 ```
 
 `make gate` runs eighteen real checks: the `dev-docs/` size bound (`R4`), the
-instruction-mirror check (`R7`), the two structural bans (`@cosmograph/*` and
+skill-layout check (`R7`), the two structural bans (`@cosmograph/*` and
 `#[global_allocator]`), the bundled-dependency licence check, the build-directory report, the frontend typecheck,
 the frontend **production** build, the embedded-bundle freshness check,
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
@@ -219,8 +215,8 @@ job — `sphinx-build -W` — joined in the docs program and sits in the
 a list of check names, because an allowlist is how a red job ships a release
 by not being on it. The two gate checks with no CI job are local-only *by
 construction*: `check-dev-docs` bounds a gitignored directory that never
-reaches a checkout, and `check-skill-mirrors` compares against an untracked
-generated adapter. CI owns the **failing** half of `npm audit --omit=dev`.
+reaches a checkout, and `check-skill-layout` reads the machine-local skills
+folders. CI owns the **failing** half of `npm audit --omit=dev`.
 The concurrency group cancels a superseded `pull_request` run and never a
 push to `main`, where the run *is* the record of whether that commit was
 good. `release.yml` is the maturin matrix: native windows/macOS,
@@ -564,8 +560,8 @@ inbox. The most common target here is upstream **KGLite**. Layout map:
 
 ## Skill mandates
 
-The procedures live in `.claude/skills/` (the authority) and its
-`.agents/skills/` mirror. Each is self-contained; invoke it rather than
+The procedures live in `.agents/skills/` (`.claude/skills` is a symlink to
+it). Each is self-contained; invoke it rather than
 improvising the procedure.
 
 - **Large feature / non-trivial refactor →** use **`phased-plan`**
@@ -1133,7 +1129,7 @@ The estate's rules live in sibling `doctrine`. Both planning and release use
 `../doctrine/learn-from-us.md` → **Doctrine sync procedure**, or reuse completed
 evidence from the same session. Compare numeric semver tuples; a missing marker
 requires an initial audit. Merge versioned corrections into this authority,
-execute local sweeps, regenerate and verify adapters, then atomically advance
+execute local sweeps, verify the layout, then atomically advance
 `dev-docs/.doctrine-synced` through contiguous fully completed versions only.
 Pending permission, owner notes or planned fixes remain pending. Versioned
 source corrections apply even when reference snapshots originated in KGLite.
@@ -1144,11 +1140,11 @@ an adaptation **names the oracle version it read**. Every divergence found is
 exactly one of two things, and you say which: a **local improvement** (a
 candidate to upstream at the next snapshot) or **staleness** (fixed *from* the
 oracle). Then act on the **authority**, not on whichever copy you happen to
-have open — the adapter is generated, never edited. Never adapt from a local
+have open. Never adapt from a local
 copy you have not compared against the oracle; that is how stale text
 propagates.
 
 This repo was adopted from **doctrine 0.1.8 on 2026-08-29**. It tracks its
-durable doctrine layer (`CLAUDE.md`, `Makefile`, `scripts/`) while both skill
-trees stay machine-local. The shared durable skill sources live in doctrine's
+durable doctrine layer (`AGENTS.md`, `Makefile`, `scripts/`) while the skills
+folder stays machine-local. The shared durable skill sources live in doctrine's
 `reference/skills/`; project tailoring stays in the local authority tree.

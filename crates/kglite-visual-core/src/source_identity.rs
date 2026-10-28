@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn every_prose_kglite_declaration_names_the_pinned_engine() {
-        // R16: the floor's declaration sites are enumerated in CLAUDE.md, and an
+        // R16: the floor's declaration sites are enumerated in AGENTS.md, and an
         // enumeration nothing executes is how four of them drifted unlisted for
         // four releases — KGLite's ecosystem notifier pattern-matches two, and
         // nothing at all held the notebook's own install line or its

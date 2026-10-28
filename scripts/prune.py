@@ -20,7 +20,7 @@ The split that keeps this safe:
   rescued out of a disposable one. This only enforces the lifetime of what is
   already there, and it never invents a tier for an unclassified path: a file
   outside a listed disposable tier is left alone, because an age-only sweep
-  destroys whatever was placed in the wrong tier (CLAUDE.md → "Dev-environment
+  destroys whatever was placed in the wrong tier (AGENTS.md → "Dev-environment
   cleanliness").
 * **It prints every deletion.** A purge whose output is a count is a purge you
   cannot audit after the fact.

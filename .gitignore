@@ -44,13 +44,11 @@ __pycache__/
 # exact bytes.
 !/crates/kglite-visual-core/tests/fixtures/*.kgl
 
-# Codex conventions and skills are generated adapters of the CLAUDE.md plus
-# machine-local .claude/skills/ authority (see the Authority line in CLAUDE.md).
-# Regenerate them with `make sync-agents`; never hand-edit or stage them.
+# Skills are workstation-local: .agents/skills is the real folder and
+# .claude/skills a symlink to it (see the Authority line in AGENTS.md).
 /.agents/
-/AGENTS.md
 # Claude Code machine-local state (skills, settings, worktree bookkeeping).
-/.claude/skills/
+/.claude/skills
 /.claude/settings.local.json
 /.claude/worktrees/
 
@@ -85,7 +83,7 @@ __pycache__/
 crates/**/dev-docs/
 
 # Agent worktrees live in ../kglite-visual-worktrees/ — a SIBLING directory of
-# this repo, so nothing here needs to ignore them. See CLAUDE.md
+# this repo, so nothing here needs to ignore them. See AGENTS.md
 # "Agent worktrees".
 
 # macOS

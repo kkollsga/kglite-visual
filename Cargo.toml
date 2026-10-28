@@ -12,7 +12,7 @@ resolver = "2"
 # `[workspace.package]` does NOT reach any of them and `cargo publish` demands
 # every one. (The count was 3 until P5's lib-link gave the py crate a second
 # internal requirement; this comment said "1 of 3" until P6 recounted.) The
-# full enumeration, and why counting beats assuming, is in CLAUDE.md →
+# full enumeration, and why counting beats assuming, is in AGENTS.md →
 # "Commits & releases".
 [workspace.package]
 version = "0.1.22"

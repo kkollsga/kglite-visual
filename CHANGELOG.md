@@ -6,7 +6,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 This file records what a **user** can see change: the viewer, the wheel and the
 CLI. Internal refactors, CI plumbing, test-only work and formatting do not
-appear here (CLAUDE.md → "Commits & releases"). `/release` promotes
+appear here (AGENTS.md → "Commits & releases"). `/release` promotes
 `[Unreleased]` to a version section; nothing else edits the promoted sections.
 
 ## [Unreleased]

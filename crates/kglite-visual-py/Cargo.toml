@@ -41,7 +41,7 @@ abi3 = ["pyo3/abi3-py312"]
 # The lockfile is back at 0.29.2, which is what ships.
 pyo3 = { version = "0.30" }
 
-# VERSION SITE 3 of 4. See CLAUDE.md → "Commits & releases".
+# VERSION SITE 3 of 4. See AGENTS.md → "Commits & releases".
 kglite-visual-core = { version = "0.1.22", path = "../kglite-visual-core" }
 
 # VERSION SITE 4 of 4. The wheel links the CLI's library half rather than

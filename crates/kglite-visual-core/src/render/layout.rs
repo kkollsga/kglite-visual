@@ -2658,7 +2658,7 @@ mod tests {
     /// **Why this exists.** The radial path is the one an ego or expansion
     /// render takes, `expand::effective_bound` lets 5 000 nodes through, and
     /// round 1 argued from the algorithm's shape that this was cheap. An
-    /// inference is not a measurement (CLAUDE.md → "Posted technical claims"),
+    /// inference is not a measurement (AGENTS.md → "Posted technical claims"),
     /// and the shape argument is not obviously safe: the sub-ring search is
     /// `O(MAX_SUBRINGS)` per hop, but each ring sorts its members and hop 2's
     /// comparator reads a parent's angle, so the constant is not the one a

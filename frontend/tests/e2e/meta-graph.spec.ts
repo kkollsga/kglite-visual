@@ -24,7 +24,7 @@ const EXPECTED = {
   // FNV-1a over the server's positions buffer. This is the D2 determinism
   // assert: it fails if the layout, the slot order or the type ordering moves.
   // A red here after a deliberate change is regenerated with a reason, in the
-  // same commit — never to silence a diff (CLAUDE.md → "Gate honesty").
+  // same commit — never to silence a diff (AGENTS.md → "Gate honesty").
   positionsHash: 'ab2ea15b',
 }
 

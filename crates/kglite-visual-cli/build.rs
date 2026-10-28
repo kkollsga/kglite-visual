@@ -7,7 +7,7 @@
 //! **Rebuild when the bundle changes.** Without the `rerun-if-changed` below,
 //! cargo has no idea `frontend/dist` is an input: rebuilding the frontend
 //! leaves a binary carrying last week's chunks, and a stale bundle inside a
-//! fresh binary reads exactly like a backend bug (CLAUDE.md → "Two toolchains,
+//! fresh binary reads exactly like a backend bug (AGENTS.md → "Two toolchains,
 //! one gate"). This covers the cargo half; `make check-bundle` covers the half
 //! cargo cannot see, which is a bundle older than its own sources.
 

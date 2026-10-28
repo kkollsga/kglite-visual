@@ -73,7 +73,7 @@ def check_npm_ban(frontend: Path, root: Path) -> list[str]:
     Any occurrence anywhere in the file counts, prose fields included — a
     ``description`` naming the banned scope trips this, as it did on the first
     run. That is the correct side to err on for a licence guard, so the ban's
-    *rationale* lives in this file and in CLAUDE.md, never inside the manifests
+    *rationale* lives in this file and in AGENTS.md, never inside the manifests
     it polices.
     """
     problems: list[str] = []

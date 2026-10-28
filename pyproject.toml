@@ -44,7 +44,7 @@ classifiers = [
 # assets are all inside the compiled extension.
 dependencies = []
 # NOT a version site. maturin reads the version from the Rust crate, so this
-# file has nothing to bump — the enumeration in CLAUDE.md counts four sites,
+# file has nothing to bump — the enumeration in AGENTS.md counts four sites,
 # and this deliberately is not one of them. Neither is anything added in P6:
 # README.md carries an unpinned install line, CHANGELOG.md's top section is
 # `[Unreleased]`, and release.yml *reads* the number out of Cargo.toml

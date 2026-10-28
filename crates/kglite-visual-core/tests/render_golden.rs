@@ -1,7 +1,7 @@
 //! The render's exact baselines, regenerated here and diffed by the gate.
 //!
 //! **This is an exact baseline, and it fails the moment "make it pass" is
-//! cheaper than "explain the diff"** (CLAUDE.md → "Gate honesty"). Every
+//! cheaper than "explain the diff"** (AGENTS.md → "Gate honesty"). Every
 //! deliberate change to the visual encoding, the layout or the emitter moves
 //! these files; regenerate in the same commit and say why. Regenerating to
 //! silence a diff nobody can explain is the failure the whole mechanism exists

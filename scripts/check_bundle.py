@@ -2,12 +2,12 @@
 """Guard the two-toolchain seam: the frontend bundle embedded in the binary.
 
 This project builds a TypeScript bundle with one toolchain and bakes it into a
-Rust binary with another. The trap that follows is stated in CLAUDE.md: *a
+Rust binary with another. The trap that follows is stated in AGENTS.md: *a
 stale frontend bundle inside a fresh binary looks exactly like a backend bug*.
 Nothing in either toolchain notices — `cargo build` is happy with whatever
 bytes were in `frontend/dist`, and `vite build` has no idea a binary exists.
 
-Two checks, and the second is the one CLAUDE.md's newest-of-profile rule is
+Two checks, and the second is the one AGENTS.md's newest-of-profile rule is
 about:
 
 ``--freshness``

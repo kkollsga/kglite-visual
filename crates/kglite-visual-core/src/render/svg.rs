@@ -7,7 +7,7 @@
 //! scales, which is the reason SVG is the native format and PNG the derived one.
 //!
 //! **Every number is emitted at fixed precision.** The golden baseline is an
-//! exact one (CLAUDE.md → "Gate honesty"), and a baseline that carried
+//! exact one (AGENTS.md → "Gate honesty"), and a baseline that carried
 //! `f64::to_string`'s full 17 significant digits would be pinning the last bit
 //! of every accumulated sum — including the one place this pipeline touches
 //! libm, `ln_1p` in the size ramp, which the IEEE standard does not require to

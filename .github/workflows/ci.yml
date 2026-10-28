@@ -39,9 +39,9 @@ jobs:
   #   check-dev-docs      — bounds `dev-docs/`, which is gitignored and never
   #                         reaches a checkout. A CI copy would scan an empty
   #                         directory and pass vacuously (R1).
-  #   check-skill-mirrors — compares the two machine-local skill trees.
-  #                         Neither tree reaches a checkout, so CI has nothing
-  #                         to compare; the check refuses an empty authority.
+  #   check-skill-layout — reads the machine-local skills folders.
+  #                         Neither reaches a checkout, so a CI copy would
+  #                         have nothing to check.
   #
   # Both are local-only by construction, not by omission. If either ever
   # becomes checkable in CI, it gets a job here in the same change.
@@ -102,7 +102,7 @@ jobs:
       # warns and moves on because `npm audit` queries the registry and goes
       # red on a plane — a gate that fails for reasons unrelated to the diff is
       # a gate people bypass. CI always has a network, so CI owns the version
-      # that blocks (CLAUDE.md → "Build & test").
+      # that blocks (AGENTS.md → "Build & test").
       - name: Production-dependency advisories (blocking)
         working-directory: frontend
         run: npm audit --omit=dev
@@ -173,7 +173,7 @@ jobs:
       # argument, not evidence — the goldens were generated on macOS/aarch64 and
       # have never been diffed against a Linux/x86_64 build. If this step is the
       # one that goes red on the first CI run, the finding is real and the fix is
-      # a coarser emit, never a regenerated baseline (CLAUDE.md → "Gate honesty").
+      # a coarser emit, never a regenerated baseline (AGENTS.md → "Gate honesty").
       - name: Rendered image baseline
         if: matrix.os == 'ubuntu-latest'
         run: make check-render-baseline

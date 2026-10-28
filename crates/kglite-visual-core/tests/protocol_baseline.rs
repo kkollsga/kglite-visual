@@ -42,7 +42,7 @@
 //! snapshots never count as compactions. Existing frame codes stay frozen.
 //!
 //! **Both are exact baselines, so both fail the moment "make it pass" is
-//! cheaper than "explain the diff"** (CLAUDE.md → "Gate honesty"). A red
+//! cheaper than "explain the diff"** (AGENTS.md → "Gate honesty"). A red
 //! baseline after a deliberate protocol change is a conscious decision:
 //! regenerate in the same commit, bump `PROTOCOL_VERSION`, and say why.
 
