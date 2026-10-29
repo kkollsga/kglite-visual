@@ -1090,6 +1090,13 @@ the compact layout. The nine declarations above were re-greped and confirmed
 complete; the count stays at nine. The same release made the engine wheel
 Python 3.12+, so this project's floor and abi3 target moved to 3.12 with it.
 
+The floor moved to `=0.21.4` on 2026-10-29. Nothing needed a code edit: the
+viewer does not depend on `kglite-cli` (so the Rust 1.95 floor does not reach
+it) or `mcp-methods`, and sets no `with_identity` server name. The fixtures and
+`team.kgl` were regenerated with the new engine version only. The nine
+declarations above were re-greped and confirmed complete; the count stays at
+nine.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves
