@@ -369,11 +369,6 @@ pub(crate) fn expand_iter(
     // one, and holding it would be the unbounded allocation.
     let mut links_refused: usize = 0;
 
-    // The arena guard the disk backend needs for materialised node reads. A
-    // no-op on memory and mapped graphs; leaving it out would grow the query
-    // arena for the process lifetime on a disk-backed one.
-    let _guard = graph.begin_read_pass();
-
     let admit = |idx: NodeIndex,
                  nodes: &mut Vec<NodeIndex>,
                  seen: &mut HashSet<NodeIndex>,

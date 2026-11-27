@@ -390,9 +390,6 @@ pub struct NodeDetail {
 
 /// Read one node's properties.
 pub fn node_detail(graph: &DirGraph, slot: u32, node_id: u32) -> Result<NodeDetail, CoreError> {
-    // The arena guard the disk backend needs for materialised reads; a no-op
-    // on memory and mapped graphs.
-    let _guard = graph.begin_read_pass();
     let view = graph
         .node_view(NodeIndex::new(node_id as usize))
         .ok_or_else(|| CoreError::Request(format!("node {node_id} is not in this graph")))?;

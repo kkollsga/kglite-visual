@@ -35,7 +35,6 @@ impl Session {
         validate_bookmark(bookmark)?;
         let deadline = self.config().deadline();
         self.verify_bookmark_source(&bookmark.source, deadline)?;
-        let _guard = self.graph().begin_read_pass();
         let nodes = bookmark_members::resolve_members(
             self.graph(),
             &bookmark.members,

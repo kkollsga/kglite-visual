@@ -11,6 +11,19 @@ appear here (AGENTS.md → "Commits & releases"). `/release` promotes
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-11-27
+
+### Changed
+
+- **The engine is `kglite` 0.21.8**, exactly pinned (was 0.21.4). The viewer
+  only reads graphs, so no behaviour changes. The committed `.kgl` fixtures and
+  the downloadable `team.kgl` sample are regenerated and record the new engine
+  version.
+- **Dependencies are at their latest releases**: `rmcp` 3.10, plus the patch
+  and minor updates within declared ranges, and `@cosmos.gl/graph` 3.6.1, `vite`
+  8.4 and two CodeMirror packages on the frontend. `@codemirror/view` stays at
+  6.43.15.
+
 ## [0.1.23] - 2026-10-29
 
 ### Breaking

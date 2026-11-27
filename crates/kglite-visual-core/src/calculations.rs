@@ -210,10 +210,7 @@ impl crate::Session {
             before.revision,
         )?;
         let deadline = self.config().deadline();
-        let input = {
-            let _pass = self.graph().begin_read_pass();
-            capture_input(self.graph(), &before.view, &before.subset, deadline)?
-        };
+        let input = { capture_input(self.graph(), &before.view, &before.subset, deadline)? };
         let (meta, fields) = run(
             &input,
             request.kind,

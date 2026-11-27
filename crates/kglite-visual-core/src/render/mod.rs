@@ -1156,11 +1156,6 @@ fn build_scene(session: &Session, request: &RenderRequest) -> Result<Scene, Core
 /// seeded layout, never from the client. See
 /// [`crate::session::GEOMETRY_CAVEAT`].
 fn live_scene(session: &Session) -> Scene {
-    // The arena guard the disk backend needs for materialised property reads,
-    // held once across the whole scene rather than per node: the geo reader
-    // below asks every instance for two floats, and one guard per node would
-    // be one arena round trip per node. A no-op on memory and mapped graphs.
-    let _guard = session.graph().begin_read_pass();
     let view = session.view_read();
     let meta_by_name: std::collections::HashMap<&str, &crate::meta_graph::MetaTypeNode> = session
         .meta_graph()
@@ -1473,8 +1468,6 @@ fn meta_scene(meta: &MetaGraphResponse, session: &Session, canvas_names: usize) 
 /// have this choice — it has one continuous view a user navigates — and an
 /// image is a snapshot of one question.
 fn slice_scene(session: &Session, slice: &GraphSlice, seed_type: Option<&str>) -> Scene {
-    // One guard for the whole scene — same argument as `live_scene`.
-    let _guard = session.graph().begin_read_pass();
     let index_of: std::collections::HashMap<u32, usize> = slice
         .meta
         .nodes

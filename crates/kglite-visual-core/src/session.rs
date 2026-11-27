@@ -400,7 +400,6 @@ impl Session {
 
     fn load_nodes_uncommitted(&self, request: &LoadNodesRequest) -> Result<GraphSlice, CoreError> {
         self.check_handles(&request.handles)?;
-        let _guard = self.graph.begin_read_pass();
         let mut nodes = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for handle in &request.handles {
@@ -434,7 +433,6 @@ impl Session {
                 "at most 20000 relation handles are allowed".into(),
             ));
         }
-        let _guard = self.graph.begin_read_pass();
         let mut nodes = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for handle in &request.nodes {
@@ -859,7 +857,6 @@ impl Session {
         bound: BoundInfo,
         links_refused: usize,
     ) -> Result<GraphSlice, CoreError> {
-        let _guard = self.graph.begin_read_pass();
         let mut live = self.write();
         self.check_admission(&live, nodes, edges)?;
         let mut view = live.view.clone();
@@ -1217,7 +1214,6 @@ impl Session {
     /// to everyone on every connect would re-upload the whole space to clients
     /// that already hold it.
     pub fn sync_slice(&self) -> GraphSlice {
-        let _guard = self.graph.begin_read_pass();
         let view = self.read();
         let mut nodes: Vec<SliceNode> = Vec::new();
         let mut tombstones: Vec<u32> = Vec::new();

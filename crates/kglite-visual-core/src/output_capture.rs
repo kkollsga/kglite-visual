@@ -31,7 +31,6 @@ impl Session {
             })));
         }
         let node_ids = captured_nodes(&state, request.scope)?;
-        let _guard = self.graph().begin_read_pass();
         let edge_ids = captured_edges(self.graph(), &state, &node_ids, request.scope, deadline)?;
         let mut budget = PropertyBudget::new(deadline);
         let mut graph = DirGraph::new();

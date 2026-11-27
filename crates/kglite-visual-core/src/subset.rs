@@ -274,7 +274,6 @@ pub(crate) fn evaluate(
     deadline: Option<Instant>,
 ) -> Result<SubsetSnapshot, CoreError> {
     validate(filters)?;
-    let _guard = graph.begin_read_pass();
     let nodes: Vec<_> = view
         .live_entries()
         .filter_map(|(slot, entry)| match entry {

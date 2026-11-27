@@ -26,7 +26,6 @@ impl Session {
                 ));
             }
             let state = self.state_read().clone();
-            let _guard = self.graph().begin_read_pass();
             let mut keys = std::collections::HashSet::new();
             let members: std::collections::BTreeSet<_> = state
                 .view
@@ -96,7 +95,6 @@ impl Session {
             captured.selected = selected.clone();
         }
         let deadline = self.config().deadline();
-        let _guard = self.graph().begin_read_pass();
         let durable = self
             .source_identity()
             .ok_or_else(|| refusal("in-memory graph has no verified file provenance"))

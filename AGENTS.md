@@ -1097,6 +1097,17 @@ it) or `mcp-methods`, and sets no `with_identity` server name. The fixtures and
 declarations above were re-greped and confirmed complete; the count stays at
 nine.
 
+The floor moved to `=0.21.8` on 2026-11-27, carrying 0.21.5-0.21.7. 0.21.8
+made the node and edge weight accessors return a `RecordRef` and removed
+`DirGraph::begin_read_pass`; the viewer's 20 `begin_read_pass()` guards (and the
+comments explaining them) were deleted, since disk reads no longer need an
+arena guard, and nothing replaced them. `NodeView` was already passed by
+reference. The fixtures and `team.kgl` were regenerated with the new engine
+version only. The nine declarations above were re-greped and confirmed complete;
+the count stays at nine. `@codemirror/view` stays at 6.43.15: 6.44.2 makes
+`workspace.spec.ts` "destinations preserve ... draft" read an extra trailing
+empty `.cm-line` from the query editor after a destination round trip.
+
 A *declaration* states a requirement that holds now — a manifest pin, a
 documented floor, a CI install pin, a copy-pasteable install snippet, the
 version inside an install-hint error message — and **every declaration moves

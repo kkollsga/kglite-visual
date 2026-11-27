@@ -213,7 +213,6 @@ pub fn export_nodes(
 }
 
 fn validate_d3_topology_keys(graph: &DirGraph, nodes: &[NodeIndex]) -> Result<(), CoreError> {
-    let _guard = graph.begin_read_pass();
     let selected: std::collections::HashSet<_> = nodes.iter().copied().collect();
     for &node in nodes {
         for edge in graph

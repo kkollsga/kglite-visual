@@ -16,14 +16,14 @@ path = "src/main.rs"
 # VERSION SITE 2 of 4. `[workspace.package] version` does not reach this
 # requirement string, and `cargo publish` demands it — the exact omission that
 # broke a KGLite release. See AGENTS.md → "Commits & releases".
-kglite-visual-core = { version = "0.1.23", path = "../kglite-visual-core" }
+kglite-visual-core = { version = "0.1.24", path = "../kglite-visual-core" }
 
-clap = { version = "4.6.6", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
 axum = { version = "0.8", features = ["ws"] }
 # `sync` and `time` for the broadcast bus and rmcp's session bookkeeping; rmcp
 # spawns onto whatever runtime it finds, so the multi-thread flavour is the
 # server's, not its.
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 rust-embed = { version = "8", features = ["debug-embed", "interpolate-folder-path"] }
 mime_guess = "2.0.5"
 webbrowser = "1.2.4"
@@ -45,7 +45,7 @@ futures-util = "0.3.34"
 #
 # `transport-io` is deliberately absent: there is no stdio mode here. This MCP
 # server exists to steer a RUNNING view, and a stdio process has no view.
-rmcp = { version = "3.8.0", features = [
+rmcp = { version = "3.10.0", features = [
     "server",
     "macros",
     "schemars",
@@ -56,7 +56,7 @@ rmcp = { version = "3.8.0", features = [
 schemars = "1"
 # Images ride in an MCP reply as base64. 0.23 is already in this tree through
 # rmcp; a second major would be a second copy of one encoder.
-base64 = "0.23"
+base64 = "0.23.1"
 
 # The saved-query store's home and its filenames. Both are already in this
 # tree — `dirs` through rust-embed's proc macro, `sha2` through kglite AND

@@ -440,7 +440,6 @@ impl crate::Session {
             next_offset: None,
             missing_semantics: "missing means absent in this snapshot; storage may have erased source null/absence distinctions".into(),
         };
-        let _guard = self.graph().begin_read_pass();
         let mut bytes = 16 * 1024;
         for (handle, (slot, visible)) in request.handles.iter().skip(offset).zip(slots) {
             let row = RecordRow {

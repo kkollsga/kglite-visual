@@ -86,7 +86,6 @@ impl Session {
                 state.subset_revision.to_string(),
             )
         };
-        let _guard = self.graph().begin_read_pass();
         let (cell, page) = self.detail_value(request)?;
         let response = FieldDetailResponse {
             stamp,

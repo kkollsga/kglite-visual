@@ -86,7 +86,6 @@ pub(crate) fn compute(
     if state.appearance.color_field.is_none() && state.appearance.size_field.is_none() {
         return Ok(mapping);
     }
-    let _guard = graph.begin_read_pass();
     let ids: Vec<u32> = state
         .view
         .live_entries()
